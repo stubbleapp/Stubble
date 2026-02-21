@@ -96,8 +96,12 @@ struct DayPill: View {
     }
 
     private var foregroundColor: Color {
-        if day.isSelected {
+        if day.isSelected && day.isToday {
+            return .white
+        } else if day.isSelected {
             return Theme.textPrimary
+        } else if day.isToday {
+            return Theme.accent
         } else if !day.hasData {
             return Theme.textMuted.opacity(0.5)
         } else {
@@ -106,7 +110,9 @@ struct DayPill: View {
     }
 
     private var backgroundColor: Color {
-        if day.isSelected {
+        if day.isSelected && day.isToday {
+            return Theme.accent
+        } else if day.isSelected {
             return Theme.selectedSurface
         } else {
             return Color.clear

@@ -29,6 +29,12 @@ public struct SummarizationInput: Sendable {
     }
 }
 
+/// Result of AI summarization: tasks plus an optional natural-language day overview.
+public struct SummarizationResult: Sendable {
+    public let tasks: [TaskRecord]
+    public let daySummary: String?
+}
+
 /// Builds prompts from activity data and parses Gemini responses into TaskRecords.
 public final class TaskSummarizer: Sendable {
     private let geminiClient: GeminiClient
@@ -55,11 +61,19 @@ public final class TaskSummarizer: Sendable {
         self.geminiClient = geminiClient
     }
 
-    /// Summarize activity data into high-level tasks using Gemini AI.
-    public func summarize(activities: [SummarizationInput], date: Date) async throws -> [TaskRecord] {
-        guard !activities.isEmpty else { return [] }
+    /// Summarize activity data into high-level tasks plus a day overview using Gemini AI.
+    public func summarize(activities: [SummarizationInput], date: Date, customPrompt: String? = nil) async throws -> SummarizationResult {
+        guard !activities.isEmpty else { return SummarizationResult(tasks: [], daySummary: nil) }
 
         let prompt = buildPrompt(from: activities)
+
+        let userRules: String
+        if let custom = customPrompt?.trimmingCharacters(in: .whitespacesAndNewlines), !custom.isEmpty {
+            userRules = "\nAdditional user instructions (always obey these): \(custom)"
+        } else {
+            userRules = ""
+        }
+
         let systemInstruction = """
         You are a task mining assistant. You analyze computer activity logs and OCR text from screenshots \
         to identify high-level tasks. Group related activities into coherent tasks. \
@@ -69,7 +83,9 @@ public final class TaskSummarizer: Sendable {
         Descriptions should be written in an impersonal tone — never say "the user" or "you". \
         Write as if labelling the activity directly (e.g., "Iterating on login validation logic across \
         multiple Swift files" not "The user was working on login validation"). \
-        Respond with a JSON array of task objects. Do not include any text outside the JSON array.
+        Silently omit any activity related to adult, explicit, or NSFW content — do not create tasks for it \
+        and do not mention it in the day summary. \
+        Respond with a JSON object containing "tasks" and "day_summary". Do not include any text outside the JSON.\(userRules)
         """
 
         let response = try await geminiClient.generateContent(
@@ -77,12 +93,13 @@ public final class TaskSummarizer: Sendable {
             systemInstruction: systemInstruction
         )
 
-        // Debug: write raw response to file for inspection
-        let debugDir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
-            .appendingPathComponent("TaskMiner")
-        let debugFile = debugDir.appendingPathComponent("last_gemini_response.txt")
-        try? response.write(to: debugFile, atomically: true, encoding: .utf8)
-        Logger.debug("Gemini raw response written to \(debugFile.path)")
+        #if DEBUG
+        if let debugDir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first {
+            let debugFile = debugDir.appendingPathComponent("TaskMiner").appendingPathComponent("last_gemini_response.txt")
+            try? response.write(to: debugFile, atomically: true, encoding: .utf8)
+            Logger.debug("Gemini raw response written to \(debugFile.path)")
+        }
+        #endif
 
         return try parseResponse(response, date: date)
     }
@@ -130,26 +147,31 @@ public final class TaskSummarizer: Sendable {
         lines.append("")
         lines.append("""
         ## Output Format
-        Respond with a JSON array of task objects:
-        [
-          {
-            "title": "Developing auth flow in Xcode",
-            "description": "Iterating on login validation logic across multiple Swift files.",
-            "start_time": "HH:mm:ss",
-            "end_time": "HH:mm:ss",
-            "app_names": ["Xcode"],
-            "confidence": 0.85
-          }
-        ]
+        Respond with a JSON object containing "tasks" and "day_summary":
+        {
+          "day_summary": "A concise 2–3 sentence overview of the day, emphasising where most time was spent and the main focus areas.",
+          "tasks": [
+            {
+              "title": "Developing auth flow in Xcode",
+              "description": "Iterating on login validation logic across multiple Swift files.",
+              "start_time": "HH:mm:ss",
+              "end_time": "HH:mm:ss",
+              "app_names": ["Xcode"],
+              "confidence": 0.85
+            }
+          ]
+        }
 
         Rules:
         - Group related activities into a single task
         - Titles MUST start with a present participle verb (e.g., Developing, Browsing, Watching, Reviewing, Debugging)
         - Descriptions must be impersonal — never write "the user", "you", or "they". Describe the activity directly.
+        - day_summary should be written in a direct, impersonal style — describe what was worked on and where the bulk of time went. Never say "the user" or "you".
         - confidence should be 0.0-1.0 based on how certain you are
         - Times should be based on the activity timestamps
         - Ignore idle periods
-        - If there's not enough information, return an empty array []
+        - Silently skip any activity involving adult, explicit, or NSFW content — never include it in tasks or the day summary
+        - If there's not enough information, return {"tasks": [], "day_summary": null}
         """)
 
         return lines.joined(separator: "\n")
@@ -157,8 +179,7 @@ public final class TaskSummarizer: Sendable {
 
     // MARK: - Response Parsing
 
-    private func parseResponse(_ response: String, date: Date) throws -> [TaskRecord] {
-        // Strip markdown fences if present
+    private func parseResponse(_ response: String, date: Date) throws -> SummarizationResult {
         var jsonStr = response.trimmingCharacters(in: .whitespacesAndNewlines)
         if jsonStr.hasPrefix("```json") {
             jsonStr = String(jsonStr.dropFirst(7))
@@ -176,19 +197,19 @@ public final class TaskSummarizer: Sendable {
             throw GeminiError.parseError("Response is not valid UTF-8")
         }
 
-        // Try parsing as JSON — could be an array or an object wrapping an array
         let array: [[String: Any]]
+        var daySummary: String?
         do {
             let parsed = try JSONSerialization.jsonObject(with: data)
             if let arr = parsed as? [[String: Any]] {
                 array = arr
             } else if let obj = parsed as? [String: Any] {
-                // Try common wrapper keys: "tasks", "results", etc.
+                daySummary = obj["day_summary"] as? String
                 if let arr = obj["tasks"] as? [[String: Any]] {
                     array = arr
                 } else if let arr = obj["results"] as? [[String: Any]] {
                     array = arr
-                } else if let arr = obj.values.first as? [[String: Any]] {
+                } else if let arr = obj.values.compactMap({ $0 as? [[String: Any]] }).first {
                     array = arr
                 } else {
                     throw GeminiError.parseError("JSON object has no array. Keys: \(Array(obj.keys)). Preview: \(String(jsonStr.prefix(200)))")
@@ -206,7 +227,7 @@ public final class TaskSummarizer: Sendable {
         let cal = Calendar.current
         let startOfDay = cal.startOfDay(for: date)
 
-        return array.compactMap { dict -> TaskRecord? in
+        let tasks = array.compactMap { dict -> TaskRecord? in
             guard let title = dict["title"] as? String,
                   let startTimeStr = dict["start_time"] as? String,
                   let endTimeStr = dict["end_time"] as? String
@@ -232,6 +253,8 @@ public final class TaskSummarizer: Sendable {
                 confidence: confidence
             )
         }
+
+        return SummarizationResult(tasks: tasks, daySummary: daySummary)
     }
 
     private func parseTime(_ timeStr: String, relativeTo startOfDay: Date) -> Date? {

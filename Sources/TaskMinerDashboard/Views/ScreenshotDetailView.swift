@@ -6,8 +6,10 @@ struct ScreenshotDetailView: View {
     let screenshotDir: URL
     let dbReader: DatabaseReader?
     let tasks: [TaskRecord]
+    @Environment(DashboardViewModel.self) var viewModel
     @Environment(\.dismiss) var dismiss
     @State private var linkedActivity: ActivityRecord?
+    @State private var showDeleteConfirmation = false
 
     /// The AI-generated task whose time range contains this screenshot's timestamp.
     private var matchingTask: TaskRecord? {
@@ -28,6 +30,17 @@ struct ScreenshotDetailView: View {
                     .font(.headline)
                     .foregroundStyle(Theme.textPrimary)
                 Spacer()
+
+                Button {
+                    showDeleteConfirmation = true
+                } label: {
+                    Image(systemName: "trash")
+                        .font(.system(size: 13))
+                        .foregroundStyle(Theme.statusError)
+                }
+                .buttonStyle(.borderless)
+                .help("Delete this screenshot")
+
                 Button("Close") { dismiss() }
                     .keyboardShortcut(.escape)
             }
@@ -182,6 +195,17 @@ struct ScreenshotDetailView: View {
             if let activityId = screenshot.activityId {
                 linkedActivity = dbReader?.activity(byId: activityId)
             }
+        }
+        .alert("Delete Screenshot?", isPresented: $showDeleteConfirmation) {
+            Button("Delete", role: .destructive) {
+                if let id = screenshot.id {
+                    viewModel.deleteScreenshots(ids: [id])
+                }
+                dismiss()
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("The screenshot file will be permanently removed from disk. This cannot be undone.")
         }
     }
 

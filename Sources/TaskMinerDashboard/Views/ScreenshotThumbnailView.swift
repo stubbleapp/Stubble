@@ -4,6 +4,7 @@ import TaskMinerShared
 struct ScreenshotThumbnailView: View {
     let screenshot: ScreenshotRecord
     let screenshotDir: URL
+    var isSelected: Bool = false
 
     @State private var thumbnail: NSImage?
 
@@ -43,6 +44,19 @@ struct ScreenshotThumbnailView: View {
             }
             .frame(height: 160)
             .clipShape(RoundedRectangle(cornerRadius: 6))
+            .overlay(
+                RoundedRectangle(cornerRadius: 6)
+                    .stroke(isSelected ? Theme.accent : Color.clear, lineWidth: 2.5)
+            )
+            .overlay(alignment: .topLeading) {
+                if isSelected {
+                    Image(systemName: "checkmark.circle.fill")
+                        .font(.system(size: 18))
+                        .foregroundStyle(Theme.accent)
+                        .background(Circle().fill(Color.white).padding(2))
+                        .padding(6)
+                }
+            }
             .shadow(color: .black.opacity(0.1), radius: 2, y: 1)
 
             HStack {

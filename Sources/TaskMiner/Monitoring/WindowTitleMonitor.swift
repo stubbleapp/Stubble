@@ -54,12 +54,13 @@ class WindowTitleMonitor {
         let err1 = AXUIElementCopyAttributeValue(
             appElement, kAXFocusedWindowAttribute as CFString, &focusedWindow
         )
-        guard err1 == .success else { return nil }
+        guard err1 == .success, let ref = focusedWindow else { return nil }
+        guard CFGetTypeID(ref) == AXUIElementGetTypeID() else { return nil }
+        let windowElement = ref as! AXUIElement
 
         var titleValue: CFTypeRef?
-        // swiftlint:disable:next force_cast
         let err2 = AXUIElementCopyAttributeValue(
-            focusedWindow as! AXUIElement, kAXTitleAttribute as CFString, &titleValue
+            windowElement, kAXTitleAttribute as CFString, &titleValue
         )
         guard err2 == .success, let title = titleValue as? String else { return nil }
         return title

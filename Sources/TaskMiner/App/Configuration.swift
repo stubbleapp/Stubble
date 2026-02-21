@@ -11,10 +11,12 @@ struct Configuration {
     let databasePath: URL
     let screenshotDirectory: URL
 
-    init() {
-        let appSupport = FileManager.default.urls(
+    init() throws {
+        guard let appSupport = FileManager.default.urls(
             for: .applicationSupportDirectory, in: .userDomainMask
-        ).first!
+        ).first else {
+            throw ConfigurationError.applicationSupportUnavailable
+        }
         let base = appSupport.appendingPathComponent("TaskMiner")
         self.dataDirectory = base
         self.databasePath = base.appendingPathComponent("taskminer.db")

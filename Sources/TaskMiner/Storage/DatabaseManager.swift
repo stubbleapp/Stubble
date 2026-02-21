@@ -20,6 +20,7 @@ class DatabaseManager {
             throw DatabaseError.openFailed(msg)
         }
         self.db = dbPointer
+        sqlite3_busy_timeout(dbPointer, 5000)
         try execute("PRAGMA journal_mode=WAL")
         try execute("PRAGMA foreign_keys=ON")
         try createSchema()
@@ -105,15 +106,14 @@ class DatabaseManager {
     // MARK: - Activity CRUD
 
     @discardableResult
-    func insertActivity(_ record: ActivityRecord) -> Int64 {
+    func insertActivity(_ record: ActivityRecord) throws -> Int64 {
         let sql = """
         INSERT INTO activities (timestamp, end_time, app_name, bundle_id, window_title, duration, is_idle)
         VALUES (?, ?, ?, ?, ?, ?, ?)
         """
         var stmt: OpaquePointer?
         guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
-            Logger.error("Failed to prepare insertActivity: \(lastError)")
-            return -1
+            throw DatabaseError.executionFailed(lastError)
         }
         defer { sqlite3_finalize(stmt) }
 
@@ -150,19 +150,17 @@ class DatabaseManager {
         sqlite3_bind_int(stmt, 7, record.isIdle ? 1 : 0)
 
         guard sqlite3_step(stmt) == SQLITE_DONE else {
-            Logger.error("Failed to insert activity: \(lastError)")
-            return -1
+            throw DatabaseError.executionFailed(lastError)
         }
 
         return sqlite3_last_insert_rowid(db)
     }
 
-    func finalizeActivity(id: Int64, endTime: Date, duration: TimeInterval) {
+    func finalizeActivity(id: Int64, endTime: Date, duration: TimeInterval) throws {
         let sql = "UPDATE activities SET end_time = ?, duration = ? WHERE id = ?"
         var stmt: OpaquePointer?
         guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
-            Logger.error("Failed to prepare finalizeActivity: \(lastError)")
-            return
+            throw DatabaseError.executionFailed(lastError)
         }
         defer { sqlite3_finalize(stmt) }
 
@@ -171,33 +169,36 @@ class DatabaseManager {
         sqlite3_bind_double(stmt, 2, duration)
         sqlite3_bind_int64(stmt, 3, id)
 
-        if sqlite3_step(stmt) != SQLITE_DONE {
-            Logger.error("Failed to finalize activity \(id): \(lastError)")
+        guard sqlite3_step(stmt) == SQLITE_DONE else {
+            throw DatabaseError.executionFailed(lastError)
         }
     }
 
-    func updateWindowTitle(id: Int64, title: String) {
+    func updateWindowTitle(id: Int64, title: String) throws {
         let sql = "UPDATE activities SET window_title = ? WHERE id = ?"
         var stmt: OpaquePointer?
-        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return }
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
+            throw DatabaseError.executionFailed(lastError)
+        }
         defer { sqlite3_finalize(stmt) }
 
         sqlite3_bind_text(stmt, 1, (title as NSString).utf8String, -1, nil)
         sqlite3_bind_int64(stmt, 2, id)
-        sqlite3_step(stmt)
+        guard sqlite3_step(stmt) == SQLITE_DONE else {
+            throw DatabaseError.executionFailed(lastError)
+        }
     }
 
     // MARK: - Screenshot CRUD
 
-    func insertScreenshot(_ record: ScreenshotRecord) {
+    func insertScreenshot(_ record: ScreenshotRecord) throws {
         let sql = """
         INSERT INTO screenshots (timestamp, file_path, file_size, activity_id, trigger_type, ocr_text)
         VALUES (?, ?, ?, ?, ?, ?)
         """
         var stmt: OpaquePointer?
         guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
-            Logger.error("Failed to prepare insertScreenshot: \(lastError)")
-            return
+            throw DatabaseError.executionFailed(lastError)
         }
         defer { sqlite3_finalize(stmt) }
 
@@ -225,23 +226,22 @@ class DatabaseManager {
             sqlite3_bind_null(stmt, 6)
         }
 
-        if sqlite3_step(stmt) != SQLITE_DONE {
-            Logger.error("Failed to insert screenshot: \(lastError)")
+        guard sqlite3_step(stmt) == SQLITE_DONE else {
+            throw DatabaseError.executionFailed(lastError)
         }
     }
 
     // MARK: - Task CRUD
 
     @discardableResult
-    func insertTask(_ task: TaskRecord) -> Int64 {
+    func insertTask(_ task: TaskRecord) throws -> Int64 {
         let sql = """
         INSERT INTO tasks (date, start_time, end_time, title, description, app_names, confidence)
         VALUES (?, ?, ?, ?, ?, ?, ?)
         """
         var stmt: OpaquePointer?
         guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
-            Logger.error("Failed to prepare insertTask: \(lastError)")
-            return -1
+            throw DatabaseError.executionFailed(lastError)
         }
         defer { sqlite3_finalize(stmt) }
 
@@ -254,8 +254,7 @@ class DatabaseManager {
         sqlite3_bind_double(stmt, 7, task.confidence)
 
         guard sqlite3_step(stmt) == SQLITE_DONE else {
-            Logger.error("Failed to insert task: \(lastError)")
-            return -1
+            throw DatabaseError.executionFailed(lastError)
         }
         return sqlite3_last_insert_rowid(db)
     }

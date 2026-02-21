@@ -161,7 +161,12 @@ class AppDelegate {
             isIdle: false
         )
         currentActivity = record
-        currentActivityId = db.insertActivity(record)
+        do {
+            currentActivityId = try db.insertActivity(record)
+        } catch {
+            Logger.error("Failed to insert activity: \(error.localizedDescription)")
+            currentActivityId = nil
+        }
 
         Logger.debug("New activity: \(current.appName) — \(newTitle)")
 
@@ -264,7 +269,12 @@ class AppDelegate {
         }
 
         currentActivity = record
-        currentActivityId = db.insertActivity(record)
+        do {
+            currentActivityId = try db.insertActivity(record)
+        } catch {
+            Logger.error("Failed to insert activity: \(error.localizedDescription)")
+            currentActivityId = nil
+        }
 
         if !isIdle {
             Logger.info("Activity: \(appName) — \(record.windowTitle ?? "(no title)")")
@@ -276,7 +286,11 @@ class AppDelegate {
 
         let now = Date()
         let duration = now.timeIntervalSince(activity.timestamp)
-        db.finalizeActivity(id: id, endTime: now, duration: duration)
+        do {
+            try db.finalizeActivity(id: id, endTime: now, duration: duration)
+        } catch {
+            Logger.error("Failed to finalize activity \(id): \(error.localizedDescription)")
+        }
 
         Logger.debug("Finalized activity \(id): \(activity.appName) (\(Int(duration))s)")
 
@@ -287,19 +301,20 @@ class AppDelegate {
     // MARK: - Screenshots
 
     private func takeScreenshot(trigger: ScreenshotTrigger) {
+        Logger.debug("takeScreenshot(trigger: \(trigger.rawValue))")
         let now = Date()
         let path = screenshotStorage.generatePath(for: now)
 
-        // Capture to CGImage first (needed for both save and OCR)
         guard let image = screenshotCapture.captureFullScreen() else {
-            Logger.error("Screenshot capture failed")
+            Logger.error("Screenshot capture failed (check Screen Recording permission)")
             return
         }
 
-        // Save as JPEG
-        guard screenshotCapture.saveAsJPEG(image: image, to: path) else { return }
+        guard screenshotCapture.saveAsJPEG(image: image, to: path) else {
+            Logger.error("Screenshot save failed to \(path.path)")
+            return
+        }
 
-        // Run OCR on the captured image (~150ms, synchronous)
         let ocrText = ocrEngine.recognizeText(in: image)
         if let text = ocrText {
             Logger.debug("OCR extracted \(text.count) chars from screenshot")
@@ -313,7 +328,12 @@ class AppDelegate {
             trigger: trigger,
             ocrText: ocrText
         )
-        db.insertScreenshot(record)
+        do {
+            try db.insertScreenshot(record)
+            Logger.debug("Screenshot recorded (trigger: \(trigger.rawValue))")
+        } catch {
+            Logger.error("Failed to insert screenshot: \(error.localizedDescription)")
+        }
         lastScreenshotTime = now
     }
 
@@ -344,17 +364,24 @@ class AppDelegate {
         let db = self.db
         Task {
             do {
-                let tasks = try await summarizer.summarize(
+                let result = try await summarizer.summarize(
                     activities: activityData,
                     date: endTime
                 )
-                guard !tasks.isEmpty else { return }
-                // DB writes on main; AppDelegate and DatabaseManager run on main run loop.
+                guard !result.tasks.isEmpty else { return }
                 await MainActor.run {
-                    for task in tasks {
-                        db.insertTask(task)
+                    var inserted = 0
+                    for task in result.tasks {
+                        do {
+                            _ = try db.insertTask(task)
+                            inserted += 1
+                        } catch {
+                            Logger.error("Failed to insert task: \(error.localizedDescription)")
+                        }
                     }
-                    Logger.info("AI generated \(tasks.count) task(s)")
+                    if inserted > 0 {
+                        Logger.info("AI generated \(inserted) task(s)")
+                    }
                 }
             } catch {
                 await MainActor.run {

@@ -6,6 +6,12 @@ struct TaskCardView: View {
     let isFirst: Bool
     let isLast: Bool
     @State private var isExpanded = false
+    @State private var isEditing = false
+    @State private var editTitle = ""
+    @State private var editDescription = ""
+    @State private var showDeleteConfirmation = false
+    @FocusState private var titleFocused: Bool
+    @FocusState private var descriptionFocused: Bool
     @Environment(DashboardViewModel.self) var viewModel
 
     private static let timeFmt: DateFormatter = {
@@ -27,15 +33,31 @@ struct TaskCardView: View {
                         .font(.system(size: 11, weight: .medium).monospacedDigit())
                         .foregroundStyle(Theme.textMuted)
 
-                    Text(task.title)
-                        .font(.system(size: 14, weight: .regular))
-                        .foregroundStyle(Theme.textPrimary)
-                        .lineLimit(isExpanded ? nil : 1)
+                    if isEditing {
+                        TextField("Task title", text: $editTitle, axis: .vertical)
+                            .font(.system(size: 14, weight: .regular))
+                            .foregroundStyle(Theme.textPrimary)
+                            .focused($titleFocused)
+                            .textFieldStyle(.plain)
+                    } else {
+                        Text(task.title)
+                            .font(.system(size: 14, weight: .regular))
+                            .foregroundStyle(Theme.textPrimary)
+                            .lineLimit(isExpanded ? nil : 1)
+                    }
                 }
 
-                // Expanded
-                if isExpanded {
-                    if !task.description.isEmpty {
+                // Expanded or editing
+                if isExpanded || isEditing {
+                    if isEditing {
+                        TextField("Description", text: $editDescription, axis: .vertical)
+                            .font(.system(size: 12))
+                            .foregroundStyle(Theme.textSecondary)
+                            .focused($descriptionFocused)
+                            .textFieldStyle(.plain)
+                            .lineLimit(1...8)
+                            .padding(.top, 1)
+                    } else if !task.description.isEmpty {
                         Text(task.description)
                             .font(.system(size: 12))
                             .foregroundStyle(Theme.textSecondary)
@@ -66,6 +88,22 @@ struct TaskCardView: View {
                         }
                         .padding(.top, 2)
                     }
+
+                    // Delete action
+                    HStack(spacing: 8) {
+                        Spacer()
+
+                        Button {
+                            showDeleteConfirmation = true
+                        } label: {
+                            Image(systemName: "trash")
+                                .font(.system(size: 11))
+                                .foregroundStyle(Theme.statusError.opacity(0.7))
+                        }
+                        .buttonStyle(.borderless)
+                        .help("Delete task")
+                    }
+                    .padding(.top, 4)
                 }
             }
             .padding(.vertical, 10)
@@ -73,7 +111,7 @@ struct TaskCardView: View {
             Spacer(minLength: 4)
 
             // Collapsed: app icons
-            if !isExpanded && !task.appNamesList.isEmpty {
+            if !isExpanded && !isEditing && !task.appNamesList.isEmpty {
                 AppIconStackView(
                     appNames: task.appNamesList,
                     bundleIdResolver: { viewModel.bundleId(forAppName: $0) }
@@ -81,18 +119,100 @@ struct TaskCardView: View {
                 .padding(.top, 12)
             }
 
-            // Chevron
-            Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
-                .font(.system(size: 9, weight: .semibold))
-                .foregroundStyle(Theme.textQuaternary)
-                .padding(.top, 14)
+            // Chevron (hide during editing)
+            if !isEditing {
+                Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundStyle(Theme.textQuaternary)
+                    .padding(.top, 14)
+            }
         }
         .padding(.trailing, 4)
-        .contentShape(Rectangle())
-        .onTapGesture {
-            withAnimation(.easeInOut(duration: 0.2)) {
-                isExpanded.toggle()
+        .background {
+            // Invisible tap target for expand/collapse — only active when NOT editing.
+            // Using .background instead of .onTapGesture so it doesn't steal
+            // focus from TextFields during editing.
+            if !isEditing {
+                Rectangle()
+                    .fill(Color.clear)
+                    .contentShape(Rectangle())
+                    .onTapGesture {
+                        withAnimation(.easeInOut(duration: 0.2)) {
+                            isExpanded.toggle()
+                        }
+                    }
+                    .simultaneousGesture(
+                        TapGesture(count: 2).onEnded {
+                            startEditing()
+                        }
+                    )
             }
+        }
+        .contextMenu {
+            Button {
+                startEditing()
+            } label: {
+                Label("Edit Task", systemImage: "pencil")
+            }
+
+            Divider()
+
+            Button(role: .destructive) {
+                showDeleteConfirmation = true
+            } label: {
+                Label("Delete Task", systemImage: "trash")
+            }
+        }
+        .onChange(of: titleFocused) { _, focused in
+            if !focused && !descriptionFocused && isEditing {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+                    if !titleFocused && !descriptionFocused && isEditing {
+                        commitEdit()
+                    }
+                }
+            }
+        }
+        .onChange(of: descriptionFocused) { _, focused in
+            if !focused && !titleFocused && isEditing {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+                    if !titleFocused && !descriptionFocused && isEditing {
+                        commitEdit()
+                    }
+                }
+            }
+        }
+        .alert("Delete Task?", isPresented: $showDeleteConfirmation) {
+            Button("Delete", role: .destructive) {
+                guard let id = task.id else { return }
+                viewModel.deleteTask(id: id)
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("This will permanently remove \"\(task.title)\". This cannot be undone.")
+        }
+    }
+
+    // MARK: - Inline editing helpers
+
+    private func startEditing() {
+        editTitle = task.title
+        editDescription = task.description
+        withAnimation(.easeInOut(duration: 0.2)) {
+            isEditing = true
+            isExpanded = true
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+            titleFocused = true
+        }
+    }
+
+    private func commitEdit() {
+        let trimmedTitle = editTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !trimmedTitle.isEmpty, let id = task.id {
+            viewModel.updateTask(id: id, title: trimmedTitle, description: editDescription)
+        }
+        withAnimation(.easeInOut(duration: 0.2)) {
+            isEditing = false
         }
     }
 

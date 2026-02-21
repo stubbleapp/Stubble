@@ -4,8 +4,15 @@ import TaskMinerShared
 
 // MARK: - Configuration
 
-var config = Configuration()
-config.parseArguments()
+var config: Configuration
+do {
+    var c = try Configuration()
+    c.parseArguments()
+    config = c
+} catch {
+    Logger.error("Configuration failed: \(error.localizedDescription)")
+    exit(1)
+}
 
 // MARK: - Create directories
 

@@ -1,10 +1,18 @@
 import Foundation
 import SQLite3
 
-public enum DatabaseError: Error {
+public enum DatabaseError: Error, LocalizedError {
     case openFailed(String)
     case executionFailed(String)
     case migrationFailed(String)
+
+    public var errorDescription: String? {
+        switch self {
+        case .openFailed(let msg): return "Database open failed: \(msg)"
+        case .executionFailed(let msg): return "Database error: \(msg)"
+        case .migrationFailed(let msg): return "Migration failed: \(msg)"
+        }
+    }
 }
 
 public class DatabaseReader {

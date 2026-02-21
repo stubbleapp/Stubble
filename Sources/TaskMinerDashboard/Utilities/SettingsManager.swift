@@ -15,7 +15,7 @@ final class SettingsManager {
     // MARK: - Settings Model (non-secret settings only; key is in Keychain)
 
     struct Settings: Codable {
-        // Add other non-secret settings here; geminiApiKey lives in Keychain
+        var customPrompt: String?
     }
 
     // MARK: - Read / Write (for future file-based settings)
@@ -43,5 +43,16 @@ final class SettingsManager {
     var geminiApiKey: String? {
         get { GeminiKeychain.get() }
         set { GeminiKeychain.set(newValue) }
+    }
+
+    // MARK: - Custom prompt
+
+    var customPrompt: String? {
+        get { load().customPrompt }
+        set {
+            var settings = load()
+            settings.customPrompt = newValue
+            save(settings)
+        }
     }
 }

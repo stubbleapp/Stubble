@@ -46,7 +46,7 @@ public final class GeminiClient: Sendable {
 
         let contents: [[String: Any]] = [
             [
-                "role": "user",
+                "role": "user",ç
                 "parts": [["text": prompt]]
             ]
         ]

@@ -7,6 +7,7 @@ struct SettingsView: View {
     @State private var apiKey: String = ""
     @State private var showKey = false
     @State private var saved = false
+    @State private var customPrompt: String = ""
 
     var body: some View {
         VStack(spacing: 0) {
@@ -21,7 +22,7 @@ struct SettingsView: View {
                         .font(.system(size: 12, weight: .medium))
                         .foregroundStyle(Theme.textSecondary)
                         .frame(width: 24, height: 24)
-                        .background(Theme.surfaceElevated)
+                        .background(.ultraThinMaterial)
                         .clipShape(Circle())
                 }
                 .buttonStyle(.plain)
@@ -34,67 +35,66 @@ struct SettingsView: View {
 
             ScrollView {
                 VStack(alignment: .leading, spacing: 24) {
-                    // AI Configuration
-                    VStack(alignment: .leading, spacing: 12) {
-                        HStack(spacing: 6) {
-                            Image(systemName: "sparkles")
-                                .font(.subheadline)
-                                .foregroundStyle(Theme.accent)
-                            Text("AI Configuration")
-                                .font(.subheadline.weight(.semibold))
-                                .foregroundStyle(Theme.textPrimary)
-                        }
+                    // API Key
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Gemini API Key")
+                            .font(.subheadline.weight(.medium))
+                            .foregroundStyle(Theme.textPrimary)
 
-                        VStack(alignment: .leading, spacing: 8) {
-                            Text("Gemini API Key")
-                                .font(.caption)
-                                .foregroundStyle(Theme.textSecondary)
-
-                            HStack(spacing: 8) {
-                                Group {
-                                    if showKey {
-                                        TextField("Enter your Gemini API key", text: $apiKey)
-                                    } else {
-                                        SecureField("Enter your Gemini API key", text: $apiKey)
-                                    }
+                        HStack(spacing: 8) {
+                            Group {
+                                if showKey {
+                                    TextField("Enter your Gemini API key", text: $apiKey)
+                                } else {
+                                    SecureField("Enter your Gemini API key", text: $apiKey)
                                 }
-                                .textFieldStyle(.plain)
-                                .font(.system(size: 13, design: .monospaced))
-                                .padding(8)
-                                .background(Theme.primaryBackground)
-                                .cornerRadius(6)
-                                .overlay(
-                                    RoundedRectangle(cornerRadius: 6)
-                                        .stroke(Theme.cardBorder, lineWidth: 1)
-                                )
-
-                                Button {
-                                    showKey.toggle()
-                                } label: {
-                                    Image(systemName: showKey ? "eye.slash" : "eye")
-                                        .font(.system(size: 12))
-                                        .foregroundStyle(Theme.textMuted)
-                                        .frame(width: 28, height: 28)
-                                }
-                                .buttonStyle(.plain)
                             }
+                            .textFieldStyle(.plain)
+                            .font(.system(size: 13, design: .monospaced))
+                            .padding(8)
+                            .background(.ultraThinMaterial)
+                            .cornerRadius(6)
 
-                            Text("Used for AI-powered task summarization. Get a key from Google AI Studio.")
-                                .font(.caption2)
-                                .foregroundStyle(Theme.textMuted)
+                            Button {
+                                showKey.toggle()
+                            } label: {
+                                Image(systemName: showKey ? "eye.slash" : "eye")
+                                    .font(.system(size: 12))
+                                    .foregroundStyle(Theme.textMuted)
+                                    .frame(width: 28, height: 28)
+                                    .background(.ultraThinMaterial)
+                                    .clipShape(Circle())
+                            }
+                            .buttonStyle(.plain)
                         }
-                        .padding(12)
-                        .background(Theme.cardBackground)
-                        .cornerRadius(8)
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 8)
-                                .stroke(Theme.cardBorder, lineWidth: 0.5)
-                        )
+
+                        Text("Get a key from Google AI Studio.")
+                            .font(.caption2)
+                            .foregroundStyle(Theme.textMuted)
                     }
 
-                    // Status + actions
+                    // Custom Prompt
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Custom Instructions")
+                            .font(.subheadline.weight(.medium))
+                            .foregroundStyle(Theme.textPrimary)
+
+                        TextEditor(text: $customPrompt)
+                            .font(.system(size: 12))
+                            .scrollContentBackground(.hidden)
+                            .frame(minHeight: 80, maxHeight: 140)
+                            .padding(8)
+                            .background(.ultraThinMaterial)
+                            .cornerRadius(6)
+
+                        Text("e.g. Ignore all YouTube and social media activity. Focus only on coding and design work.")
+                            .font(.caption2)
+                            .foregroundStyle(Theme.textMuted)
+                            .italic()
+                    }
+
+                    // Status + Save
                     HStack(spacing: 12) {
-                        // Status indicator
                         HStack(spacing: 6) {
                             Circle()
                                 .fill(viewModel.hasGeminiKey ? Theme.statusActive : Theme.textQuaternary)
@@ -107,7 +107,7 @@ struct SettingsView: View {
                         Spacer()
 
                         if !apiKey.isEmpty {
-                            Button("Clear") {
+                            Button("Clear Key") {
                                 apiKey = ""
                                 viewModel.updateGeminiKey(nil)
                                 saved = true
@@ -120,6 +120,8 @@ struct SettingsView: View {
 
                         Button {
                             viewModel.updateGeminiKey(apiKey)
+                            let trimmed = customPrompt.trimmingCharacters(in: .whitespacesAndNewlines)
+                            SettingsManager.shared.customPrompt = trimmed.isEmpty ? nil : trimmed
                             saved = true
                             hideSavedAfterDelay()
                         } label: {
@@ -144,12 +146,12 @@ struct SettingsView: View {
                 .padding()
             }
         }
-        .frame(width: 480, height: 280)
-        .background(Theme.secondaryBackground)
+        .frame(width: 480, height: 380)
+        .background(.ultraThinMaterial)
         .onAppear {
-            let stored = GeminiKeychain.get() ?? ""
-            apiKey = stored
-            showKey = !stored.isEmpty
+            apiKey = GeminiKeychain.get() ?? ""
+            showKey = !apiKey.isEmpty
+            customPrompt = SettingsManager.shared.customPrompt ?? ""
         }
     }
 

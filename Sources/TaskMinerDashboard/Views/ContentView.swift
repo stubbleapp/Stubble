@@ -47,6 +47,26 @@ struct ContentView: View {
             ToolbarItem(placement: .primaryAction) {
                 HStack(spacing: ToolbarLayout.trailingGroupSpacing) {
                     Button {
+                        viewModel.exportTasksCSV()
+                    } label: {
+                        Image(systemName: "square.and.arrow.up")
+                            .font(.system(size: 13, weight: .medium))
+                            .foregroundStyle(Theme.textSecondary)
+                            .frame(
+                                width: ToolbarLayout.iconButtonSize,
+                                height: ToolbarLayout.iconButtonSize
+                            )
+                            .contentShape(Rectangle())
+                            .background(Theme.selectedSurface)
+                            .clipShape(Circle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Export Tasks")
+                    .help("Export tasks as CSV")
+                    .disabled(viewModel.tasks.isEmpty)
+                    .opacity(viewModel.tasks.isEmpty ? 0.4 : 1)
+
+                    Button {
                         showSettings = true
                     } label: {
                         Image(systemName: "gearshape")

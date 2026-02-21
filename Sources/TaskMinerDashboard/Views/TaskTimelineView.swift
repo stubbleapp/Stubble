@@ -96,18 +96,20 @@ struct TaskTimelineView: View {
                         .font(.title3.weight(.medium))
                         .foregroundStyle(Theme.textSecondary)
 
-                    if viewModel.hasGeminiKey {
-                        Button(action: { viewModel.generateSummary() }) {
-                            Label("Generate Summary", systemImage: "sparkles")
-                                .font(.system(size: 13, weight: .medium))
+                    if viewModel.isToday {
+                        if viewModel.hasGeminiKey {
+                            Button(action: { viewModel.generateSummary() }) {
+                                Label("Generate Summary", systemImage: "sparkles")
+                                    .font(.system(size: 13, weight: .medium))
+                            }
+                            .buttonStyle(.borderless)
+                            .foregroundStyle(Theme.accent)
+                            .padding(.top, 4)
+                        } else {
+                            Text("Set GEMINI_API_KEY to enable")
+                                .font(.caption)
+                                .foregroundStyle(Theme.textMuted)
                         }
-                        .buttonStyle(.borderless)
-                        .foregroundStyle(Theme.accent)
-                        .padding(.top, 4)
-                    } else {
-                        Text("Set GEMINI_API_KEY to enable")
-                            .font(.caption)
-                            .foregroundStyle(Theme.textMuted)
                     }
                 }
                 Spacer()
@@ -144,7 +146,7 @@ struct TaskTimelineView: View {
                     // Day summary card
                     DaySummaryCardView(
                         tasks: viewModel.tasks,
-                        activeSeconds: viewModel.activeSeconds
+                        aiSummary: viewModel.daySummaryText
                     )
                     .padding(.horizontal, 20)
                     .padding(.top, 16)
@@ -173,26 +175,16 @@ struct TaskTimelineView: View {
                     .animation(.easeInOut(duration: 0.2), value: viewModel.isGeneratingSummary)
                     .padding(.horizontal, 20)
 
-                    // Bottom refresh button
-                    if viewModel.hasGeminiKey {
+                    // Bottom refresh button (today only)
+                    if viewModel.isToday && viewModel.hasGeminiKey {
                         Button(action: { viewModel.generateSummary() }) {
-                            HStack(spacing: 6) {
-                                if viewModel.isGeneratingSummary {
-                                    ProgressView()
-                                        .scaleEffect(0.5)
-                                        .frame(width: 14, height: 14)
-                                } else {
-                                    Image(systemName: "arrow.clockwise")
-                                        .font(.system(size: 11, weight: .medium))
-                                }
-                                Text("Regenerate")
-                                    .font(.system(size: 12, weight: .medium))
-                            }
-                            .foregroundStyle(Theme.accent)
-                            .padding(.vertical, 8)
-                            .padding(.horizontal, 20)
-                            .background(Theme.accent.opacity(0.08))
-                            .cornerRadius(8)
+                            Image(systemName: "arrow.clockwise")
+                                .font(.system(size: 14, weight: .medium))
+                                .foregroundStyle(Theme.accent)
+                                .symbolEffect(.bounce, value: viewModel.isGeneratingSummary)
+                                .frame(width: 32, height: 32)
+                                .background(Theme.accent.opacity(0.08))
+                                .clipShape(Circle())
                         }
                         .buttonStyle(.plain)
                         .disabled(viewModel.isGeneratingSummary)

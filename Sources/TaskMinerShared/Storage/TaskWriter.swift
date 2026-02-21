@@ -36,15 +36,14 @@ public class TaskWriter {
 
     /// Insert a single task record into the database.
     @discardableResult
-    public func insertTask(_ task: TaskRecord) -> Int64 {
+    public func insertTask(_ task: TaskRecord) throws -> Int64 {
         let sql = """
         INSERT INTO tasks (date, start_time, end_time, title, description, app_names, confidence)
         VALUES (?, ?, ?, ?, ?, ?, ?)
         """
         var stmt: OpaquePointer?
         guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
-            Logger.error("TaskWriter: Failed to prepare insertTask: \(lastError)")
-            return -1
+            throw DatabaseError.executionFailed(lastError)
         }
         defer { sqlite3_finalize(stmt) }
 
@@ -57,44 +56,107 @@ public class TaskWriter {
         sqlite3_bind_double(stmt, 7, task.confidence)
 
         guard sqlite3_step(stmt) == SQLITE_DONE else {
-            Logger.error("TaskWriter: Failed to insert task: \(lastError)")
-            return -1
+            throw DatabaseError.executionFailed(lastError)
         }
         return sqlite3_last_insert_rowid(db)
     }
 
     /// Insert multiple tasks in a single transaction. Rolls back on first failure.
     @discardableResult
-    public func insertTasks(_ tasks: [TaskRecord]) -> Int {
+    public func insertTasks(_ tasks: [TaskRecord]) throws -> Int {
         guard !tasks.isEmpty else { return 0 }
 
         sqlite3_exec(db, "BEGIN TRANSACTION", nil, nil, nil)
-        var inserted = 0
-        for task in tasks {
-            if insertTask(task) <= 0 {
-                sqlite3_exec(db, "ROLLBACK", nil, nil, nil)
-                Logger.error("TaskWriter: insertTasks rolled back after \(inserted) of \(tasks.count) inserts")
-                return 0
+        do {
+            var inserted = 0
+            for task in tasks {
+                _ = try insertTask(task)
+                inserted += 1
             }
-            inserted += 1
+            sqlite3_exec(db, "COMMIT", nil, nil, nil)
+            return inserted
+        } catch {
+            sqlite3_exec(db, "ROLLBACK", nil, nil, nil)
+            throw error
         }
-        sqlite3_exec(db, "COMMIT", nil, nil, nil)
-        return inserted
     }
 
     /// Delete all tasks for a given date (for regeneration).
-    public func deleteTasks(for dateString: String) {
+    public func deleteTasks(for dateString: String) throws {
         let sql = "DELETE FROM tasks WHERE date = ?"
         var stmt: OpaquePointer?
-        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return }
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
+            throw DatabaseError.executionFailed(lastError)
+        }
         defer { sqlite3_finalize(stmt) }
 
         sqlite3_bind_text(stmt, 1, (dateString as NSString).utf8String, -1, nil)
 
-        if sqlite3_step(stmt) != SQLITE_DONE {
-            Logger.error("TaskWriter: Failed to delete tasks: \(lastError)")
+        guard sqlite3_step(stmt) == SQLITE_DONE else {
+            throw DatabaseError.executionFailed(lastError)
         }
     }
+
+    // MARK: - Task Editing
+
+    /// Update a task's title and description by ID.
+    public func updateTask(id: Int64, title: String, description: String) throws {
+        let sql = "UPDATE tasks SET title = ?, description = ? WHERE id = ?"
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
+            throw DatabaseError.executionFailed(lastError)
+        }
+        defer { sqlite3_finalize(stmt) }
+
+        sqlite3_bind_text(stmt, 1, (title as NSString).utf8String, -1, nil)
+        sqlite3_bind_text(stmt, 2, (description as NSString).utf8String, -1, nil)
+        sqlite3_bind_int64(stmt, 3, id)
+
+        guard sqlite3_step(stmt) == SQLITE_DONE else {
+            throw DatabaseError.executionFailed(lastError)
+        }
+    }
+
+    /// Delete a single task by its ID.
+    public func deleteTask(id: Int64) throws {
+        let sql = "DELETE FROM tasks WHERE id = ?"
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
+            throw DatabaseError.executionFailed(lastError)
+        }
+        defer { sqlite3_finalize(stmt) }
+
+        sqlite3_bind_int64(stmt, 1, id)
+
+        guard sqlite3_step(stmt) == SQLITE_DONE else {
+            throw DatabaseError.executionFailed(lastError)
+        }
+    }
+
+    // MARK: - Screenshot Deletion
+
+    /// Delete screenshot records by their IDs (single or bulk).
+    public func deleteScreenshots(ids: Set<Int64>) throws {
+        guard !ids.isEmpty else { return }
+
+        let placeholders = ids.map { _ in "?" }.joined(separator: ",")
+        let sql = "DELETE FROM screenshots WHERE id IN (\(placeholders))"
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
+            throw DatabaseError.executionFailed(lastError)
+        }
+        defer { sqlite3_finalize(stmt) }
+
+        for (index, id) in ids.enumerated() {
+            sqlite3_bind_int64(stmt, Int32(index + 1), id)
+        }
+
+        guard sqlite3_step(stmt) == SQLITE_DONE else {
+            throw DatabaseError.executionFailed(lastError)
+        }
+    }
+
+    // MARK: - Helpers
 
     private var lastError: String {
         db.flatMap { String(cString: sqlite3_errmsg($0)) } ?? "no database"

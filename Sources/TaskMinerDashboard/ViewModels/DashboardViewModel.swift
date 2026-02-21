@@ -1,5 +1,6 @@
 import Foundation
 import SwiftUI
+import UniformTypeIdentifiers
 import TaskMinerShared
 
 @Observable
@@ -28,6 +29,9 @@ final class DashboardViewModel {
     var isGeneratingSummary = false
     var summaryError: String?
     var hasGeminiKey: Bool
+
+    // AI day summary (generated alongside tasks)
+    var daySummaryText: String?
 
     // App name → bundle ID mapping (for icon resolution)
     var appNameBundleMap: [String: String] = [:]
@@ -60,12 +64,18 @@ final class DashboardViewModel {
 
     func selectDate(_ date: Date) {
         selectedDate = date
+        daySummaryText = nil
         loadDataForSelectedDate()
     }
 
     func refresh() {
         loadAvailableDates()
         loadDataForSelectedDate()
+    }
+
+    /// Whether the selected date is today.
+    var isToday: Bool {
+        Calendar.current.isDateInToday(selectedDate)
     }
 
     // MARK: - AI Summary Generation
@@ -98,22 +108,75 @@ final class DashboardViewModel {
 
         Task {
             do {
-                let newTasks = try await summarizer.summarize(
+                let result = try await summarizer.summarize(
                     activities: activityData,
-                    date: date
+                    date: date,
+                    customPrompt: SettingsManager.shared.customPrompt
                 )
 
-                // Delete old tasks for this date and insert new ones
-                writer.deleteTasks(for: dateStr)
-                writer.insertTasks(newTasks)
+                try writer.deleteTasks(for: dateStr)
+                try writer.insertTasks(result.tasks)
 
-                // Reload tasks from DB
-                self.tasks = db.tasks(for: date)
+                // Refresh all data for the day (tasks, activities, summary stats)
+                self.loadDataForSelectedDate()
+                self.daySummaryText = result.daySummary
                 self.isGeneratingSummary = false
             } catch {
                 self.summaryError = error.localizedDescription
                 self.isGeneratingSummary = false
             }
+        }
+    }
+
+    // MARK: - Task Editing & Deletion
+
+    var canEditData: Bool { taskWriter != nil }
+
+    /// Update a task's title and description, then refresh from DB.
+    func updateTask(id: Int64, title: String, description: String) {
+        guard let writer = taskWriter else { return }
+        do {
+            try writer.updateTask(id: id, title: title, description: description)
+            tasks = dbReader?.tasks(for: selectedDate) ?? []
+        } catch {
+            summaryError = "Failed to update task: \(error.localizedDescription)"
+        }
+    }
+
+    /// Delete a single task by ID, then refresh from DB.
+    func deleteTask(id: Int64) {
+        guard let writer = taskWriter else { return }
+        do {
+            try writer.deleteTask(id: id)
+            tasks = dbReader?.tasks(for: selectedDate) ?? []
+        } catch {
+            summaryError = "Failed to delete task: \(error.localizedDescription)"
+        }
+    }
+
+    // MARK: - Screenshot Deletion
+
+    /// Delete screenshots: remove files from disk, then delete DB rows, then refresh.
+    func deleteScreenshots(ids: Set<Int64>) {
+        guard let writer = taskWriter else { return }
+
+        // Resolve file paths for the IDs being deleted
+        let toDelete = screenshots.filter { ids.contains($0.id ?? -1) }
+
+        // Delete files from disk first
+        let fm = FileManager.default
+        for record in toDelete {
+            guard !record.filePath.isEmpty else { continue }
+            let fullPath = config.screenshotDirectory.appendingPathComponent(record.filePath)
+            try? fm.removeItem(at: fullPath)
+        }
+
+        // Delete DB rows
+        do {
+            try writer.deleteScreenshots(ids: ids)
+            screenshots = dbReader?.screenshots(for: selectedDate) ?? []
+        } catch {
+            summaryError = "Failed to delete screenshots: \(error.localizedDescription)"
         }
     }
 
@@ -133,6 +196,62 @@ final class DashboardViewModel {
             self.taskSummarizer = nil
             self.hasGeminiKey = false
         }
+    }
+
+    // MARK: - Export
+
+    /// Build CSV content from the current task list.
+    func tasksCSV() -> String {
+        let timeFmt = DateFormatter()
+        timeFmt.dateFormat = "HH:mm:ss"
+
+        let dateFmt = DateFormatter()
+        dateFmt.dateFormat = "yyyy-MM-dd"
+
+        var lines: [String] = []
+        lines.append("Date,Start,End,Duration,Title,Description,Apps,Confidence")
+
+        for task in tasks {
+            let date = task.date
+            let start = timeFmt.string(from: task.startTime)
+            let end = timeFmt.string(from: task.endTime)
+            let duration = Int(task.endTime.timeIntervalSince(task.startTime))
+            let mins = duration / 60
+            let secs = duration % 60
+            let durStr = String(format: "%d:%02d", mins, secs)
+            let title = csvEscape(task.title)
+            let desc = csvEscape(task.description)
+            let apps = csvEscape(task.appNamesList.joined(separator: ", "))
+            let conf = String(format: "%.0f%%", task.confidence * 100)
+            lines.append("\(date),\(start),\(end),\(durStr),\(title),\(desc),\(apps),\(conf)")
+        }
+
+        return lines.joined(separator: "\n")
+    }
+
+    /// Export tasks as CSV via NSSavePanel.
+    func exportTasksCSV() {
+        guard !tasks.isEmpty else { return }
+
+        let panel = NSSavePanel()
+        panel.allowedContentTypes = [.commaSeparatedText]
+        panel.nameFieldStringValue = "tasks-\(tasks.first?.date ?? "export").csv"
+        panel.title = "Export Tasks"
+
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+
+        do {
+            try tasksCSV().write(to: url, atomically: true, encoding: .utf8)
+        } catch {
+            summaryError = "Export failed: \(error.localizedDescription)"
+        }
+    }
+
+    private func csvEscape(_ value: String) -> String {
+        if value.contains(",") || value.contains("\"") || value.contains("\n") {
+            return "\"\(value.replacingOccurrences(of: "\"", with: "\"\""))\""
+        }
+        return value
     }
 
     // MARK: - Pause
