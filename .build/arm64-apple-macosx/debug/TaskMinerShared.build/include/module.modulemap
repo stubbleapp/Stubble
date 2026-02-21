@@ -1,0 +1,3 @@
+module TaskMinerShared {
+    header "/Users/samattias/TM/.build/arm64-apple-macosx/debug/TaskMinerShared.build/include/TaskMinerShared-Swift.h"
+}

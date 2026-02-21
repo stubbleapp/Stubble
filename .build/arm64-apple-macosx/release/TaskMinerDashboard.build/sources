@@ -1,0 +1,17 @@
+/Users/samattias/TM/Sources/TaskMinerDashboard/App/DashboardApp.swift
+/Users/samattias/TM/Sources/TaskMinerDashboard/Utilities/AppIconResolver.swift
+/Users/samattias/TM/Sources/TaskMinerDashboard/Utilities/DateFormatting.swift
+/Users/samattias/TM/Sources/TaskMinerDashboard/Utilities/ThumbnailCache.swift
+/Users/samattias/TM/Sources/TaskMinerDashboard/ViewModels/ActivityGroup.swift
+/Users/samattias/TM/Sources/TaskMinerDashboard/ViewModels/DashboardViewModel.swift
+/Users/samattias/TM/Sources/TaskMinerDashboard/Views/ActivityGroupView.swift
+/Users/samattias/TM/Sources/TaskMinerDashboard/Views/ActivityTimelineView.swift
+/Users/samattias/TM/Sources/TaskMinerDashboard/Views/AppIconView.swift
+/Users/samattias/TM/Sources/TaskMinerDashboard/Views/ContentView.swift
+/Users/samattias/TM/Sources/TaskMinerDashboard/Views/DaySelectorView.swift
+/Users/samattias/TM/Sources/TaskMinerDashboard/Views/PauseControlView.swift
+/Users/samattias/TM/Sources/TaskMinerDashboard/Views/ScreenshotBrowserView.swift
+/Users/samattias/TM/Sources/TaskMinerDashboard/Views/ScreenshotDetailView.swift
+/Users/samattias/TM/Sources/TaskMinerDashboard/Views/ScreenshotThumbnailView.swift
+/Users/samattias/TM/Sources/TaskMinerDashboard/Views/TaskSummaryView.swift
+/Users/samattias/TM/Sources/TaskMinerDashboard/Views/TimelineBarView.swift

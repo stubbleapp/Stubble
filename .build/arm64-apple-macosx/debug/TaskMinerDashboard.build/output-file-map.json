@@ -1,0 +1,159 @@
+{
+  "": {
+    "swift-dependencies": "/Users/samattias/TM/.build/arm64-apple-macosx/debug/TaskMinerDashboard.build/master.swiftdeps"
+  },
+  "/Users/samattias/TM/Sources/TaskMinerDashboard/App/DashboardApp.swift": {
+    "dependencies": "/Users/samattias/TM/.build/arm64-apple-macosx/debug/TaskMinerDashboard.build/DashboardApp.d",
+    "object": "/Users/samattias/TM/.build/arm64-apple-macosx/debug/TaskMinerDashboard.build/DashboardApp.swift.o",
+    "swiftmodule": "/Users/samattias/TM/.build/arm64-apple-macosx/debug/TaskMinerDashboard.build/DashboardApp~partial.swiftmodule",
+    "swift-dependencies": "/Users/samattias/TM/.build/arm64-apple-macosx/debug/TaskMinerDashboard.build/DashboardApp.swiftdeps",
+    "diagnostics": "/Users/samattias/TM/.build/arm64-apple-macosx/debug/TaskMinerDashboard.build/DashboardApp.dia"
+  },
+  "/Users/samattias/TM/Sources/TaskMinerDashboard/Theme/Theme.swift": {
+    "dependencies": "/Users/samattias/TM/.build/arm64-apple-macosx/debug/TaskMinerDashboard.build/Theme.d",
+    "object": "/Users/samattias/TM/.build/arm64-apple-macosx/debug/TaskMinerDashboard.build/Theme.swift.o",
+    "swiftmodule": "/Users/samattias/TM/.build/arm64-apple-macosx/debug/TaskMinerDashboard.build/Theme~partial.swiftmodule",
+    "swift-dependencies": "/Users/samattias/TM/.build/arm64-apple-macosx/debug/TaskMinerDashboard.build/Theme.swiftdeps",
+    "diagnostics": "/Users/samattias/TM/.build/arm64-apple-macosx/debug/TaskMinerDashboard.build/Theme.dia"
+  },
+  "/Users/samattias/TM/Sources/TaskMinerDashboard/Utilities/AppIconResolver.swift": {
+    "dependencies": "/Users/samattias/TM/.build/arm64-apple-macosx/debug/TaskMinerDashboard.build/AppIconResolver.d",
+    "object": "/Users/samattias/TM/.build/arm64-apple-macosx/debug/TaskMinerDashboard.build/AppIconResolver.swift.o",
+    "swiftmodule": "/Users/samattias/TM/.build/arm64-apple-macosx/debug/TaskMinerDashboard.build/AppIconResolver~partial.swiftmodule",
+    "swift-dependencies": "/Users/samattias/TM/.build/arm64-apple-macosx/debug/TaskMinerDashboard.build/AppIconResolver.swiftdeps",
+    "diagnostics": "/Users/samattias/TM/.build/arm64-apple-macosx/debug/TaskMinerDashboard.build/AppIconResolver.dia"
+  },
+  "/Users/samattias/TM/Sources/TaskMinerDashboard/Utilities/DateFormatting.swift": {
+    "dependencies": "/Users/samattias/TM/.build/arm64-apple-macosx/debug/TaskMinerDashboard.build/DateFormatting.d",
+    "object": "/Users/samattias/TM/.build/arm64-apple-macosx/debug/TaskMinerDashboard.build/DateFormatting.swift.o",
+    "swiftmodule": "/Users/samattias/TM/.build/arm64-apple-macosx/debug/TaskMinerDashboard.build/DateFormatting~partial.swiftmodule",
+    "swift-dependencies": "/Users/samattias/TM/.build/arm64-apple-macosx/debug/TaskMinerDashboard.build/DateFormatting.swiftdeps",
+    "diagnostics": "/Users/samattias/TM/.build/arm64-apple-macosx/debug/TaskMinerDashboard.build/DateFormatting.dia"
+  },
+  "/Users/samattias/TM/Sources/TaskMinerDashboard/Utilities/SettingsManager.swift": {
+    "dependencies": "/Users/samattias/TM/.build/arm64-apple-macosx/debug/TaskMinerDashboard.build/SettingsManager.d",
+    "object": "/Users/samattias/TM/.build/arm64-apple-macosx/debug/TaskMinerDashboard.build/SettingsManager.swift.o",
+    "swiftmodule": "/Users/samattias/TM/.build/arm64-apple-macosx/debug/TaskMinerDashboard.build/SettingsManager~partial.swiftmodule",
+    "swift-dependencies": "/Users/samattias/TM/.build/arm64-apple-macosx/debug/TaskMinerDashboard.build/SettingsManager.swiftdeps",
+    "diagnostics": "/Users/samattias/TM/.build/arm64-apple-macosx/debug/TaskMinerDashboard.build/SettingsManager.dia"
+  },
+  "/Users/samattias/TM/Sources/TaskMinerDashboard/Utilities/ThumbnailCache.swift": {
+    "dependencies": "/Users/samattias/TM/.build/arm64-apple-macosx/debug/TaskMinerDashboard.build/ThumbnailCache.d",
+    "object": "/Users/samattias/TM/.build/arm64-apple-macosx/debug/TaskMinerDashboard.build/ThumbnailCache.swift.o",
+    "swiftmodule": "/Users/samattias/TM/.build/arm64-apple-macosx/debug/TaskMinerDashboard.build/ThumbnailCache~partial.swiftmodule",
+    "swift-dependencies": "/Users/samattias/TM/.build/arm64-apple-macosx/debug/TaskMinerDashboard.build/ThumbnailCache.swiftdeps",
+    "diagnostics": "/Users/samattias/TM/.build/arm64-apple-macosx/debug/TaskMinerDashboard.build/ThumbnailCache.dia"
+  },
+  "/Users/samattias/TM/Sources/TaskMinerDashboard/ViewModels/ActivityGroup.swift": {
+    "dependencies": "/Users/samattias/TM/.build/arm64-apple-macosx/debug/TaskMinerDashboard.build/ActivityGroup.d",
+    "object": "/Users/samattias/TM/.build/arm64-apple-macosx/debug/TaskMinerDashboard.build/ActivityGroup.swift.o",
+    "swiftmodule": "/Users/samattias/TM/.build/arm64-apple-macosx/debug/TaskMinerDashboard.build/ActivityGroup~partial.swiftmodule",
+    "swift-dependencies": "/Users/samattias/TM/.build/arm64-apple-macosx/debug/TaskMinerDashboard.build/ActivityGroup.swiftdeps",
+    "diagnostics": "/Users/samattias/TM/.build/arm64-apple-macosx/debug/TaskMinerDashboard.build/ActivityGroup.dia"
+  },
+  "/Users/samattias/TM/Sources/TaskMinerDashboard/ViewModels/DashboardViewModel.swift": {
+    "dependencies": "/Users/samattias/TM/.build/arm64-apple-macosx/debug/TaskMinerDashboard.build/DashboardViewModel.d",
+    "object": "/Users/samattias/TM/.build/arm64-apple-macosx/debug/TaskMinerDashboard.build/DashboardViewModel.swift.o",
+    "swiftmodule": "/Users/samattias/TM/.build/arm64-apple-macosx/debug/TaskMinerDashboard.build/DashboardViewModel~partial.swiftmodule",
+    "swift-dependencies": "/Users/samattias/TM/.build/arm64-apple-macosx/debug/TaskMinerDashboard.build/DashboardViewModel.swiftdeps",
+    "diagnostics": "/Users/samattias/TM/.build/arm64-apple-macosx/debug/TaskMinerDashboard.build/DashboardViewModel.dia"
+  },
+  "/Users/samattias/TM/Sources/TaskMinerDashboard/Views/ActivityGroupView.swift": {
+    "dependencies": "/Users/samattias/TM/.build/arm64-apple-macosx/debug/TaskMinerDashboard.build/ActivityGroupView.d",
+    "object": "/Users/samattias/TM/.build/arm64-apple-macosx/debug/TaskMinerDashboard.build/ActivityGroupView.swift.o",
+    "swiftmodule": "/Users/samattias/TM/.build/arm64-apple-macosx/debug/TaskMinerDashboard.build/ActivityGroupView~partial.swiftmodule",
+    "swift-dependencies": "/Users/samattias/TM/.build/arm64-apple-macosx/debug/TaskMinerDashboard.build/ActivityGroupView.swiftdeps",
+    "diagnostics": "/Users/samattias/TM/.build/arm64-apple-macosx/debug/TaskMinerDashboard.build/ActivityGroupView.dia"
+  },
+  "/Users/samattias/TM/Sources/TaskMinerDashboard/Views/ActivityTimelineView.swift": {
+    "dependencies": "/Users/samattias/TM/.build/arm64-apple-macosx/debug/TaskMinerDashboard.build/ActivityTimelineView.d",
+    "object": "/Users/samattias/TM/.build/arm64-apple-macosx/debug/TaskMinerDashboard.build/ActivityTimelineView.swift.o",
+    "swiftmodule": "/Users/samattias/TM/.build/arm64-apple-macosx/debug/TaskMinerDashboard.build/ActivityTimelineView~partial.swiftmodule",
+    "swift-dependencies": "/Users/samattias/TM/.build/arm64-apple-macosx/debug/TaskMinerDashboard.build/ActivityTimelineView.swiftdeps",
+    "diagnostics": "/Users/samattias/TM/.build/arm64-apple-macosx/debug/TaskMinerDashboard.build/ActivityTimelineView.dia"
+  },
+  "/Users/samattias/TM/Sources/TaskMinerDashboard/Views/AppIconView.swift": {
+    "dependencies": "/Users/samattias/TM/.build/arm64-apple-macosx/debug/TaskMinerDashboard.build/AppIconView.d",
+    "object": "/Users/samattias/TM/.build/arm64-apple-macosx/debug/TaskMinerDashboard.build/AppIconView.swift.o",
+    "swiftmodule": "/Users/samattias/TM/.build/arm64-apple-macosx/debug/TaskMinerDashboard.build/AppIconView~partial.swiftmodule",
+    "swift-dependencies": "/Users/samattias/TM/.build/arm64-apple-macosx/debug/TaskMinerDashboard.build/AppIconView.swiftdeps",
+    "diagnostics": "/Users/samattias/TM/.build/arm64-apple-macosx/debug/TaskMinerDashboard.build/AppIconView.dia"
+  },
+  "/Users/samattias/TM/Sources/TaskMinerDashboard/Views/ContentView.swift": {
+    "dependencies": "/Users/samattias/TM/.build/arm64-apple-macosx/debug/TaskMinerDashboard.build/ContentView.d",
+    "object": "/Users/samattias/TM/.build/arm64-apple-macosx/debug/TaskMinerDashboard.build/ContentView.swift.o",
+    "swiftmodule": "/Users/samattias/TM/.build/arm64-apple-macosx/debug/TaskMinerDashboard.build/ContentView~partial.swiftmodule",
+    "swift-dependencies": "/Users/samattias/TM/.build/arm64-apple-macosx/debug/TaskMinerDashboard.build/ContentView.swiftdeps",
+    "diagnostics": "/Users/samattias/TM/.build/arm64-apple-macosx/debug/TaskMinerDashboard.build/ContentView.dia"
+  },
+  "/Users/samattias/TM/Sources/TaskMinerDashboard/Views/DaySelectorView.swift": {
+    "dependencies": "/Users/samattias/TM/.build/arm64-apple-macosx/debug/TaskMinerDashboard.build/DaySelectorView.d",
+    "object": "/Users/samattias/TM/.build/arm64-apple-macosx/debug/TaskMinerDashboard.build/DaySelectorView.swift.o",
+    "swiftmodule": "/Users/samattias/TM/.build/arm64-apple-macosx/debug/TaskMinerDashboard.build/DaySelectorView~partial.swiftmodule",
+    "swift-dependencies": "/Users/samattias/TM/.build/arm64-apple-macosx/debug/TaskMinerDashboard.build/DaySelectorView.swiftdeps",
+    "diagnostics": "/Users/samattias/TM/.build/arm64-apple-macosx/debug/TaskMinerDashboard.build/DaySelectorView.dia"
+  },
+  "/Users/samattias/TM/Sources/TaskMinerDashboard/Views/DaySummaryCardView.swift": {
+    "dependencies": "/Users/samattias/TM/.build/arm64-apple-macosx/debug/TaskMinerDashboard.build/DaySummaryCardView.d",
+    "object": "/Users/samattias/TM/.build/arm64-apple-macosx/debug/TaskMinerDashboard.build/DaySummaryCardView.swift.o",
+    "swiftmodule": "/Users/samattias/TM/.build/arm64-apple-macosx/debug/TaskMinerDashboard.build/DaySummaryCardView~partial.swiftmodule",
+    "swift-dependencies": "/Users/samattias/TM/.build/arm64-apple-macosx/debug/TaskMinerDashboard.build/DaySummaryCardView.swiftdeps",
+    "diagnostics": "/Users/samattias/TM/.build/arm64-apple-macosx/debug/TaskMinerDashboard.build/DaySummaryCardView.dia"
+  },
+  "/Users/samattias/TM/Sources/TaskMinerDashboard/Views/PauseControlView.swift": {
+    "dependencies": "/Users/samattias/TM/.build/arm64-apple-macosx/debug/TaskMinerDashboard.build/PauseControlView.d",
+    "object": "/Users/samattias/TM/.build/arm64-apple-macosx/debug/TaskMinerDashboard.build/PauseControlView.swift.o",
+    "swiftmodule": "/Users/samattias/TM/.build/arm64-apple-macosx/debug/TaskMinerDashboard.build/PauseControlView~partial.swiftmodule",
+    "swift-dependencies": "/Users/samattias/TM/.build/arm64-apple-macosx/debug/TaskMinerDashboard.build/PauseControlView.swiftdeps",
+    "diagnostics": "/Users/samattias/TM/.build/arm64-apple-macosx/debug/TaskMinerDashboard.build/PauseControlView.dia"
+  },
+  "/Users/samattias/TM/Sources/TaskMinerDashboard/Views/ScreenshotBrowserView.swift": {
+    "dependencies": "/Users/samattias/TM/.build/arm64-apple-macosx/debug/TaskMinerDashboard.build/ScreenshotBrowserView.d",
+    "object": "/Users/samattias/TM/.build/arm64-apple-macosx/debug/TaskMinerDashboard.build/ScreenshotBrowserView.swift.o",
+    "swiftmodule": "/Users/samattias/TM/.build/arm64-apple-macosx/debug/TaskMinerDashboard.build/ScreenshotBrowserView~partial.swiftmodule",
+    "swift-dependencies": "/Users/samattias/TM/.build/arm64-apple-macosx/debug/TaskMinerDashboard.build/ScreenshotBrowserView.swiftdeps",
+    "diagnostics": "/Users/samattias/TM/.build/arm64-apple-macosx/debug/TaskMinerDashboard.build/ScreenshotBrowserView.dia"
+  },
+  "/Users/samattias/TM/Sources/TaskMinerDashboard/Views/ScreenshotDetailView.swift": {
+    "dependencies": "/Users/samattias/TM/.build/arm64-apple-macosx/debug/TaskMinerDashboard.build/ScreenshotDetailView.d",
+    "object": "/Users/samattias/TM/.build/arm64-apple-macosx/debug/TaskMinerDashboard.build/ScreenshotDetailView.swift.o",
+    "swiftmodule": "/Users/samattias/TM/.build/arm64-apple-macosx/debug/TaskMinerDashboard.build/ScreenshotDetailView~partial.swiftmodule",
+    "swift-dependencies": "/Users/samattias/TM/.build/arm64-apple-macosx/debug/TaskMinerDashboard.build/ScreenshotDetailView.swiftdeps",
+    "diagnostics": "/Users/samattias/TM/.build/arm64-apple-macosx/debug/TaskMinerDashboard.build/ScreenshotDetailView.dia"
+  },
+  "/Users/samattias/TM/Sources/TaskMinerDashboard/Views/ScreenshotThumbnailView.swift": {
+    "dependencies": "/Users/samattias/TM/.build/arm64-apple-macosx/debug/TaskMinerDashboard.build/ScreenshotThumbnailView.d",
+    "object": "/Users/samattias/TM/.build/arm64-apple-macosx/debug/TaskMinerDashboard.build/ScreenshotThumbnailView.swift.o",
+    "swiftmodule": "/Users/samattias/TM/.build/arm64-apple-macosx/debug/TaskMinerDashboard.build/ScreenshotThumbnailView~partial.swiftmodule",
+    "swift-dependencies": "/Users/samattias/TM/.build/arm64-apple-macosx/debug/TaskMinerDashboard.build/ScreenshotThumbnailView.swiftdeps",
+    "diagnostics": "/Users/samattias/TM/.build/arm64-apple-macosx/debug/TaskMinerDashboard.build/ScreenshotThumbnailView.dia"
+  },
+  "/Users/samattias/TM/Sources/TaskMinerDashboard/Views/SettingsView.swift": {
+    "dependencies": "/Users/samattias/TM/.build/arm64-apple-macosx/debug/TaskMinerDashboard.build/SettingsView.d",
+    "object": "/Users/samattias/TM/.build/arm64-apple-macosx/debug/TaskMinerDashboard.build/SettingsView.swift.o",
+    "swiftmodule": "/Users/samattias/TM/.build/arm64-apple-macosx/debug/TaskMinerDashboard.build/SettingsView~partial.swiftmodule",
+    "swift-dependencies": "/Users/samattias/TM/.build/arm64-apple-macosx/debug/TaskMinerDashboard.build/SettingsView.swiftdeps",
+    "diagnostics": "/Users/samattias/TM/.build/arm64-apple-macosx/debug/TaskMinerDashboard.build/SettingsView.dia"
+  },
+  "/Users/samattias/TM/Sources/TaskMinerDashboard/Views/TaskSummaryView.swift": {
+    "dependencies": "/Users/samattias/TM/.build/arm64-apple-macosx/debug/TaskMinerDashboard.build/TaskSummaryView.d",
+    "object": "/Users/samattias/TM/.build/arm64-apple-macosx/debug/TaskMinerDashboard.build/TaskSummaryView.swift.o",
+    "swiftmodule": "/Users/samattias/TM/.build/arm64-apple-macosx/debug/TaskMinerDashboard.build/TaskSummaryView~partial.swiftmodule",
+    "swift-dependencies": "/Users/samattias/TM/.build/arm64-apple-macosx/debug/TaskMinerDashboard.build/TaskSummaryView.swiftdeps",
+    "diagnostics": "/Users/samattias/TM/.build/arm64-apple-macosx/debug/TaskMinerDashboard.build/TaskSummaryView.dia"
+  },
+  "/Users/samattias/TM/Sources/TaskMinerDashboard/Views/TaskTimelineView.swift": {
+    "dependencies": "/Users/samattias/TM/.build/arm64-apple-macosx/debug/TaskMinerDashboard.build/TaskTimelineView.d",
+    "object": "/Users/samattias/TM/.build/arm64-apple-macosx/debug/TaskMinerDashboard.build/TaskTimelineView.swift.o",
+    "swiftmodule": "/Users/samattias/TM/.build/arm64-apple-macosx/debug/TaskMinerDashboard.build/TaskTimelineView~partial.swiftmodule",
+    "swift-dependencies": "/Users/samattias/TM/.build/arm64-apple-macosx/debug/TaskMinerDashboard.build/TaskTimelineView.swiftdeps",
+    "diagnostics": "/Users/samattias/TM/.build/arm64-apple-macosx/debug/TaskMinerDashboard.build/TaskTimelineView.dia"
+  },
+  "/Users/samattias/TM/Sources/TaskMinerDashboard/Views/TimelineBarView.swift": {
+    "dependencies": "/Users/samattias/TM/.build/arm64-apple-macosx/debug/TaskMinerDashboard.build/TimelineBarView.d",
+    "object": "/Users/samattias/TM/.build/arm64-apple-macosx/debug/TaskMinerDashboard.build/TimelineBarView.swift.o",
+    "swiftmodule": "/Users/samattias/TM/.build/arm64-apple-macosx/debug/TaskMinerDashboard.build/TimelineBarView~partial.swiftmodule",
+    "swift-dependencies": "/Users/samattias/TM/.build/arm64-apple-macosx/debug/TaskMinerDashboard.build/TimelineBarView.swiftdeps",
+    "diagnostics": "/Users/samattias/TM/.build/arm64-apple-macosx/debug/TaskMinerDashboard.build/TimelineBarView.dia"
+  }
+}

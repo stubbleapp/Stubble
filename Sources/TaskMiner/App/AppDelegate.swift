@@ -1,0 +1,374 @@
+import Foundation
+import AppKit
+import TaskMinerShared
+
+class AppDelegate {
+    private let config: Configuration
+    private let db: DatabaseManager
+    private let pauseController: PauseController
+    private let activityMonitor: ActivityMonitor
+    private let windowTitleMonitor: WindowTitleMonitor
+    private let idleDetector: IdleDetector
+    private let screenshotCapture: ScreenshotCapture
+    private let screenshotStorage: ScreenshotStorage
+    private let ocrEngine: OCREngine
+    private let taskSummarizer: TaskSummarizer?
+
+    private var currentActivity: ActivityRecord?
+    private var currentActivityId: Int64?
+    private var periodicTimer: Timer?
+    private var summarizationTimer: Timer?
+    private var lastScreenshotTime: Date = .distantPast
+    private var lastSummaryDate: String = ""
+    private var lastSummarizationTime: Date = .distantPast
+
+    init(config: Configuration, db: DatabaseManager) throws {
+        self.config = config
+        self.db = db
+        self.pauseController = PauseController(dataDirectory: config.dataDirectory)
+        self.activityMonitor = ActivityMonitor()
+        self.windowTitleMonitor = WindowTitleMonitor()
+        self.idleDetector = IdleDetector(threshold: config.idleThreshold)
+        self.screenshotCapture = ScreenshotCapture(quality: config.screenshotQuality)
+        self.screenshotStorage = try ScreenshotStorage(
+            directory: config.screenshotDirectory,
+            maxAgeDays: config.maxScreenshotAgeDays
+        )
+        self.ocrEngine = OCREngine()
+
+        // Initialize AI summarization: Keychain first (Dashboard-saved key), then env
+        if let geminiClient = GeminiClient.resolvedClient() {
+            self.taskSummarizer = TaskSummarizer(geminiClient: geminiClient)
+            Logger.info("Gemini AI summarization enabled")
+        } else {
+            self.taskSummarizer = nil
+            Logger.info("No Gemini API key (Keychain or GEMINI_API_KEY) — AI summarization disabled (OCR still active)")
+        }
+    }
+
+    func start() {
+        // Wire up app change callback
+        activityMonitor.onAppChanged = { [weak self] app in
+            self?.handleAppChange(app: app)
+        }
+
+        // Wire up title change callback
+        windowTitleMonitor.onTitleChanged = { [weak self] title in
+            self?.handleTitleChange(newTitle: title)
+        }
+
+        // Start monitoring
+        activityMonitor.start()
+
+        // Bootstrap with current frontmost app
+        if let frontApp = activityMonitor.currentApp() {
+            startNewActivity(
+                appName: frontApp.localizedName ?? "Unknown",
+                bundleId: frontApp.bundleIdentifier,
+                pid: frontApp.processIdentifier,
+                isIdle: false
+            )
+            takeScreenshot(trigger: .manual)
+        }
+
+        // Start periodic timer on the main run loop
+        periodicTimer = Timer.scheduledTimer(
+            withTimeInterval: config.windowTitlePollInterval,
+            repeats: true
+        ) { [weak self] _ in
+            self?.periodicCheck()
+        }
+
+        // Track today's date for daily summary generation
+        lastSummaryDate = todayString()
+
+        // Start 15-minute AI summarization timer (if Gemini is configured)
+        if taskSummarizer != nil {
+            lastSummarizationTime = Date()
+            summarizationTimer = Timer.scheduledTimer(
+                withTimeInterval: 60, // Check every 60s, run every 15 min
+                repeats: true
+            ) { [weak self] _ in
+                self?.checkSummarization()
+            }
+            Logger.info("AI summarization timer started (every 15 minutes)")
+        }
+
+        Logger.info("TaskMiner started - monitoring desktop activity")
+        Logger.info("Screenshot interval: \(Int(config.screenshotInterval))s, Idle threshold: \(Int(config.idleThreshold))s")
+    }
+
+    func shutdown() {
+        Logger.info("Shutting down...")
+
+        // Stop timers
+        periodicTimer?.invalidate()
+        periodicTimer = nil
+        summarizationTimer?.invalidate()
+        summarizationTimer = nil
+
+        // Stop monitors
+        activityMonitor.stop()
+        windowTitleMonitor.stop()
+
+        // Finalize current activity
+        finalizeCurrentActivity()
+
+        // Generate daily summary
+        db.generateDailySummary(for: Date())
+
+        // Close database
+        db.close()
+
+        Logger.info("TaskMiner stopped gracefully")
+    }
+
+    // MARK: - Event Handlers
+
+    private func handleAppChange(app: NSRunningApplication) {
+        let appName = app.localizedName ?? "Unknown"
+        let bundleId = app.bundleIdentifier
+
+        // Finalize previous activity
+        finalizeCurrentActivity()
+
+        // Start new activity
+        startNewActivity(
+            appName: appName,
+            bundleId: bundleId,
+            pid: app.processIdentifier,
+            isIdle: false
+        )
+
+        // Screenshot on app switch
+        takeScreenshot(trigger: .appSwitch)
+    }
+
+    private func handleTitleChange(newTitle: String) {
+        guard let current = currentActivity else { return }
+
+        // Only create a new activity if the title actually differs
+        guard current.windowTitle != newTitle else { return }
+
+        // Finalize current
+        finalizeCurrentActivity()
+
+        // Start new with same app but new title
+        let record = ActivityRecord(
+            appName: current.appName,
+            bundleId: current.bundleId,
+            windowTitle: newTitle,
+            isIdle: false
+        )
+        currentActivity = record
+        currentActivityId = db.insertActivity(record)
+
+        Logger.debug("New activity: \(current.appName) — \(newTitle)")
+
+        // Screenshot on title change
+        takeScreenshot(trigger: .titleChange)
+    }
+
+    // MARK: - Periodic Check
+
+    private func periodicCheck() {
+        // 0. Check pause state
+        if pauseController.isPaused {
+            if currentActivity != nil && currentActivity?.appName != "Paused" {
+                finalizeCurrentActivity()
+                startNewActivity(appName: "Paused", bundleId: nil, pid: 0, isIdle: true)
+                Logger.info("Monitoring paused")
+            }
+            return
+        } else if currentActivity?.appName == "Paused" {
+            Logger.info("Monitoring resumed")
+            finalizeCurrentActivity()
+            if let frontApp = activityMonitor.currentApp() {
+                startNewActivity(
+                    appName: frontApp.localizedName ?? "Unknown",
+                    bundleId: frontApp.bundleIdentifier,
+                    pid: frontApp.processIdentifier,
+                    isIdle: false
+                )
+                takeScreenshot(trigger: .appSwitch)
+            }
+        }
+
+        // 1. Check idle transitions
+        let transition = idleDetector.checkTransition()
+        switch transition {
+        case .becameIdle:
+            Logger.info("User became idle (\(Int(idleDetector.idleTime))s)")
+            finalizeCurrentActivity()
+            startNewActivity(appName: "Idle", bundleId: nil, pid: 0, isIdle: true)
+
+        case .becameActive:
+            Logger.info("User became active")
+            finalizeCurrentActivity()
+            // Re-read current frontmost app
+            if let frontApp = activityMonitor.currentApp() {
+                startNewActivity(
+                    appName: frontApp.localizedName ?? "Unknown",
+                    bundleId: frontApp.bundleIdentifier,
+                    pid: frontApp.processIdentifier,
+                    isIdle: false
+                )
+                takeScreenshot(trigger: .appSwitch)
+            }
+
+        case .noChange:
+            break
+        }
+
+        // 2. Poll window title (catches missed AX notifications)
+        if !idleDetector.isIdle {
+            windowTitleMonitor.pollTitle()
+        }
+
+        // 3. Periodic screenshot (only when active)
+        if !idleDetector.isIdle {
+            let elapsed = Date().timeIntervalSince(lastScreenshotTime)
+            if elapsed >= config.screenshotInterval {
+                takeScreenshot(trigger: .periodic)
+            }
+        }
+
+        // 4. Daily summary at midnight rollover
+        let today = todayString()
+        if today != lastSummaryDate {
+            // Generate summary for yesterday
+            if let yesterday = Calendar.current.date(byAdding: .day, value: -1, to: Date()) {
+                db.generateDailySummary(for: yesterday)
+            }
+            // Keep only current day: delete screenshot DB rows and files from previous days
+            let startOfToday = Calendar.current.startOfDay(for: Date())
+            db.deleteScreenshots(before: startOfToday)
+            screenshotStorage.cleanupKeepingOnlyToday()
+            lastSummaryDate = today
+        }
+    }
+
+    // MARK: - Activity Lifecycle
+
+    private func startNewActivity(appName: String, bundleId: String?, pid: pid_t, isIdle: Bool) {
+        var record = ActivityRecord(
+            appName: appName,
+            bundleId: bundleId,
+            isIdle: isIdle
+        )
+
+        // Read window title for non-idle activities
+        if !isIdle && pid != 0 {
+            windowTitleMonitor.updateFocusedApp(pid: pid)
+            record.windowTitle = windowTitleMonitor.title.isEmpty ? nil : windowTitleMonitor.title
+        }
+
+        currentActivity = record
+        currentActivityId = db.insertActivity(record)
+
+        if !isIdle {
+            Logger.info("Activity: \(appName) — \(record.windowTitle ?? "(no title)")")
+        }
+    }
+
+    private func finalizeCurrentActivity() {
+        guard let activity = currentActivity, let id = currentActivityId else { return }
+
+        let now = Date()
+        let duration = now.timeIntervalSince(activity.timestamp)
+        db.finalizeActivity(id: id, endTime: now, duration: duration)
+
+        Logger.debug("Finalized activity \(id): \(activity.appName) (\(Int(duration))s)")
+
+        currentActivity = nil
+        currentActivityId = nil
+    }
+
+    // MARK: - Screenshots
+
+    private func takeScreenshot(trigger: ScreenshotTrigger) {
+        let now = Date()
+        let path = screenshotStorage.generatePath(for: now)
+
+        // Capture to CGImage first (needed for both save and OCR)
+        guard let image = screenshotCapture.captureFullScreen() else {
+            Logger.error("Screenshot capture failed")
+            return
+        }
+
+        // Save as JPEG
+        guard screenshotCapture.saveAsJPEG(image: image, to: path) else { return }
+
+        // Run OCR on the captured image (~150ms, synchronous)
+        let ocrText = ocrEngine.recognizeText(in: image)
+        if let text = ocrText {
+            Logger.debug("OCR extracted \(text.count) chars from screenshot")
+        }
+
+        let record = ScreenshotRecord(
+            timestamp: now,
+            filePath: screenshotStorage.relativePath(for: path),
+            fileSize: screenshotStorage.fileSize(at: path),
+            activityId: currentActivityId,
+            trigger: trigger,
+            ocrText: ocrText
+        )
+        db.insertScreenshot(record)
+        lastScreenshotTime = now
+    }
+
+    // MARK: - AI Summarization
+
+    private func checkSummarization() {
+        let elapsed = Date().timeIntervalSince(lastSummarizationTime)
+        guard elapsed >= 900 else { return } // 900s = 15 min
+        guard !idleDetector.isIdle else { return }
+        guard !pauseController.isPaused else { return }
+
+        lastSummarizationTime = Date()
+        runSummarization(from: Date().addingTimeInterval(-900), to: Date())
+    }
+
+    private func runSummarization(from startTime: Date, to endTime: Date) {
+        guard let summarizer = taskSummarizer else { return }
+
+        Logger.info("Running AI summarization for last 15 minutes...")
+
+        // Gather recent activities + OCR text from DB
+        let activityData = db.recentActivitiesWithOCR(from: startTime, to: endTime)
+        guard !activityData.isEmpty else {
+            Logger.debug("No activities to summarize")
+            return
+        }
+
+        let db = self.db
+        Task {
+            do {
+                let tasks = try await summarizer.summarize(
+                    activities: activityData,
+                    date: endTime
+                )
+                guard !tasks.isEmpty else { return }
+                // DB writes on main; AppDelegate and DatabaseManager run on main run loop.
+                await MainActor.run {
+                    for task in tasks {
+                        db.insertTask(task)
+                    }
+                    Logger.info("AI generated \(tasks.count) task(s)")
+                }
+            } catch {
+                await MainActor.run {
+                    Logger.error("Summarization failed: \(error.localizedDescription)")
+                }
+            }
+        }
+    }
+
+    // MARK: - Helpers
+
+    private func todayString() -> String {
+        let f = DateFormatter()
+        f.dateFormat = "yyyy-MM-dd"
+        return f.string(from: Date())
+    }
+}

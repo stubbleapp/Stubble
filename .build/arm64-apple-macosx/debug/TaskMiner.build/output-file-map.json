@@ -1,0 +1,82 @@
+{
+  "": {
+    "swift-dependencies": "/Users/samattias/TM/.build/arm64-apple-macosx/debug/TaskMiner.build/master.swiftdeps"
+  },
+  "/Users/samattias/TM/Sources/TaskMiner/App/AppDelegate.swift": {
+    "dependencies": "/Users/samattias/TM/.build/arm64-apple-macosx/debug/TaskMiner.build/AppDelegate.d",
+    "object": "/Users/samattias/TM/.build/arm64-apple-macosx/debug/TaskMiner.build/AppDelegate.swift.o",
+    "swiftmodule": "/Users/samattias/TM/.build/arm64-apple-macosx/debug/TaskMiner.build/AppDelegate~partial.swiftmodule",
+    "swift-dependencies": "/Users/samattias/TM/.build/arm64-apple-macosx/debug/TaskMiner.build/AppDelegate.swiftdeps",
+    "diagnostics": "/Users/samattias/TM/.build/arm64-apple-macosx/debug/TaskMiner.build/AppDelegate.dia"
+  },
+  "/Users/samattias/TM/Sources/TaskMiner/App/Configuration.swift": {
+    "dependencies": "/Users/samattias/TM/.build/arm64-apple-macosx/debug/TaskMiner.build/Configuration.d",
+    "object": "/Users/samattias/TM/.build/arm64-apple-macosx/debug/TaskMiner.build/Configuration.swift.o",
+    "swiftmodule": "/Users/samattias/TM/.build/arm64-apple-macosx/debug/TaskMiner.build/Configuration~partial.swiftmodule",
+    "swift-dependencies": "/Users/samattias/TM/.build/arm64-apple-macosx/debug/TaskMiner.build/Configuration.swiftdeps",
+    "diagnostics": "/Users/samattias/TM/.build/arm64-apple-macosx/debug/TaskMiner.build/Configuration.dia"
+  },
+  "/Users/samattias/TM/Sources/TaskMiner/Monitoring/ActivityMonitor.swift": {
+    "dependencies": "/Users/samattias/TM/.build/arm64-apple-macosx/debug/TaskMiner.build/ActivityMonitor.d",
+    "object": "/Users/samattias/TM/.build/arm64-apple-macosx/debug/TaskMiner.build/ActivityMonitor.swift.o",
+    "swiftmodule": "/Users/samattias/TM/.build/arm64-apple-macosx/debug/TaskMiner.build/ActivityMonitor~partial.swiftmodule",
+    "swift-dependencies": "/Users/samattias/TM/.build/arm64-apple-macosx/debug/TaskMiner.build/ActivityMonitor.swiftdeps",
+    "diagnostics": "/Users/samattias/TM/.build/arm64-apple-macosx/debug/TaskMiner.build/ActivityMonitor.dia"
+  },
+  "/Users/samattias/TM/Sources/TaskMiner/Monitoring/IdleDetector.swift": {
+    "dependencies": "/Users/samattias/TM/.build/arm64-apple-macosx/debug/TaskMiner.build/IdleDetector.d",
+    "object": "/Users/samattias/TM/.build/arm64-apple-macosx/debug/TaskMiner.build/IdleDetector.swift.o",
+    "swiftmodule": "/Users/samattias/TM/.build/arm64-apple-macosx/debug/TaskMiner.build/IdleDetector~partial.swiftmodule",
+    "swift-dependencies": "/Users/samattias/TM/.build/arm64-apple-macosx/debug/TaskMiner.build/IdleDetector.swiftdeps",
+    "diagnostics": "/Users/samattias/TM/.build/arm64-apple-macosx/debug/TaskMiner.build/IdleDetector.dia"
+  },
+  "/Users/samattias/TM/Sources/TaskMiner/Monitoring/ScreenshotCapture.swift": {
+    "dependencies": "/Users/samattias/TM/.build/arm64-apple-macosx/debug/TaskMiner.build/ScreenshotCapture.d",
+    "object": "/Users/samattias/TM/.build/arm64-apple-macosx/debug/TaskMiner.build/ScreenshotCapture.swift.o",
+    "swiftmodule": "/Users/samattias/TM/.build/arm64-apple-macosx/debug/TaskMiner.build/ScreenshotCapture~partial.swiftmodule",
+    "swift-dependencies": "/Users/samattias/TM/.build/arm64-apple-macosx/debug/TaskMiner.build/ScreenshotCapture.swiftdeps",
+    "diagnostics": "/Users/samattias/TM/.build/arm64-apple-macosx/debug/TaskMiner.build/ScreenshotCapture.dia"
+  },
+  "/Users/samattias/TM/Sources/TaskMiner/Monitoring/WindowTitleMonitor.swift": {
+    "dependencies": "/Users/samattias/TM/.build/arm64-apple-macosx/debug/TaskMiner.build/WindowTitleMonitor.d",
+    "object": "/Users/samattias/TM/.build/arm64-apple-macosx/debug/TaskMiner.build/WindowTitleMonitor.swift.o",
+    "swiftmodule": "/Users/samattias/TM/.build/arm64-apple-macosx/debug/TaskMiner.build/WindowTitleMonitor~partial.swiftmodule",
+    "swift-dependencies": "/Users/samattias/TM/.build/arm64-apple-macosx/debug/TaskMiner.build/WindowTitleMonitor.swiftdeps",
+    "diagnostics": "/Users/samattias/TM/.build/arm64-apple-macosx/debug/TaskMiner.build/WindowTitleMonitor.dia"
+  },
+  "/Users/samattias/TM/Sources/TaskMiner/Processing/OCREngine.swift": {
+    "dependencies": "/Users/samattias/TM/.build/arm64-apple-macosx/debug/TaskMiner.build/OCREngine.d",
+    "object": "/Users/samattias/TM/.build/arm64-apple-macosx/debug/TaskMiner.build/OCREngine.swift.o",
+    "swiftmodule": "/Users/samattias/TM/.build/arm64-apple-macosx/debug/TaskMiner.build/OCREngine~partial.swiftmodule",
+    "swift-dependencies": "/Users/samattias/TM/.build/arm64-apple-macosx/debug/TaskMiner.build/OCREngine.swiftdeps",
+    "diagnostics": "/Users/samattias/TM/.build/arm64-apple-macosx/debug/TaskMiner.build/OCREngine.dia"
+  },
+  "/Users/samattias/TM/Sources/TaskMiner/Storage/DatabaseManager.swift": {
+    "dependencies": "/Users/samattias/TM/.build/arm64-apple-macosx/debug/TaskMiner.build/DatabaseManager.d",
+    "object": "/Users/samattias/TM/.build/arm64-apple-macosx/debug/TaskMiner.build/DatabaseManager.swift.o",
+    "swiftmodule": "/Users/samattias/TM/.build/arm64-apple-macosx/debug/TaskMiner.build/DatabaseManager~partial.swiftmodule",
+    "swift-dependencies": "/Users/samattias/TM/.build/arm64-apple-macosx/debug/TaskMiner.build/DatabaseManager.swiftdeps",
+    "diagnostics": "/Users/samattias/TM/.build/arm64-apple-macosx/debug/TaskMiner.build/DatabaseManager.dia"
+  },
+  "/Users/samattias/TM/Sources/TaskMiner/Storage/ScreenshotStorage.swift": {
+    "dependencies": "/Users/samattias/TM/.build/arm64-apple-macosx/debug/TaskMiner.build/ScreenshotStorage.d",
+    "object": "/Users/samattias/TM/.build/arm64-apple-macosx/debug/TaskMiner.build/ScreenshotStorage.swift.o",
+    "swiftmodule": "/Users/samattias/TM/.build/arm64-apple-macosx/debug/TaskMiner.build/ScreenshotStorage~partial.swiftmodule",
+    "swift-dependencies": "/Users/samattias/TM/.build/arm64-apple-macosx/debug/TaskMiner.build/ScreenshotStorage.swiftdeps",
+    "diagnostics": "/Users/samattias/TM/.build/arm64-apple-macosx/debug/TaskMiner.build/ScreenshotStorage.dia"
+  },
+  "/Users/samattias/TM/Sources/TaskMiner/Utilities/Permissions.swift": {
+    "dependencies": "/Users/samattias/TM/.build/arm64-apple-macosx/debug/TaskMiner.build/Permissions.d",
+    "object": "/Users/samattias/TM/.build/arm64-apple-macosx/debug/TaskMiner.build/Permissions.swift.o",
+    "swiftmodule": "/Users/samattias/TM/.build/arm64-apple-macosx/debug/TaskMiner.build/Permissions~partial.swiftmodule",
+    "swift-dependencies": "/Users/samattias/TM/.build/arm64-apple-macosx/debug/TaskMiner.build/Permissions.swiftdeps",
+    "diagnostics": "/Users/samattias/TM/.build/arm64-apple-macosx/debug/TaskMiner.build/Permissions.dia"
+  },
+  "/Users/samattias/TM/Sources/TaskMiner/main.swift": {
+    "dependencies": "/Users/samattias/TM/.build/arm64-apple-macosx/debug/TaskMiner.build/main.d",
+    "object": "/Users/samattias/TM/.build/arm64-apple-macosx/debug/TaskMiner.build/main.swift.o",
+    "swiftmodule": "/Users/samattias/TM/.build/arm64-apple-macosx/debug/TaskMiner.build/main~partial.swiftmodule",
+    "swift-dependencies": "/Users/samattias/TM/.build/arm64-apple-macosx/debug/TaskMiner.build/main.swiftdeps",
+    "diagnostics": "/Users/samattias/TM/.build/arm64-apple-macosx/debug/TaskMiner.build/main.dia"
+  }
+}
