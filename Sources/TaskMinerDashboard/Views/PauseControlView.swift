@@ -1,26 +1,25 @@
 import SwiftUI
 import TaskMinerShared
 
-private let pauseButtonHeight: CGFloat = 28
 private let pauseLabelPaddingH: CGFloat = 12
 private let pauseLabelPaddingV: CGFloat = 5
 
-/// Pause/resume control for the toolbar — pill style, HIG-aligned height and padding.
+/// Pause/resume control for the toolbar — matches icon button size when compact, capsule when resumed.
 struct PauseControlView: View {
     @Environment(DashboardViewModel.self) var viewModel
+    /// When set, render as a circular icon button (same size as Export/Settings). Default 28.
+    var iconSize: CGFloat = 28
 
     var body: some View {
         if viewModel.pauseState != nil {
             Button(action: { viewModel.resumeMonitoring() }) {
-                Label("Resume", systemImage: "play.fill")
-                    .font(.system(size: 12, weight: .medium))
+                Image(systemName: "play.fill")
+                    .font(.system(size: 13, weight: .medium))
                     .foregroundStyle(Theme.textPrimary)
-                    .padding(.horizontal, pauseLabelPaddingH)
-                    .padding(.vertical, pauseLabelPaddingV)
-                    .frame(height: pauseButtonHeight)
-                    .contentShape(Capsule())
+                    .frame(width: iconSize, height: iconSize)
+                    .contentShape(Rectangle())
                     .background(Theme.selectedSurface)
-                    .clipShape(Capsule())
+                    .clipShape(Circle())
             }
             .buttonStyle(.plain)
             .accessibilityLabel("Resume monitoring")
@@ -32,15 +31,13 @@ struct PauseControlView: View {
                 Divider()
                 Button("Until resumed") { viewModel.pause(for: nil) }
             } label: {
-                Label("Pause", systemImage: "pause.fill")
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundStyle(Theme.textPrimary)
-                    .padding(.horizontal, pauseLabelPaddingH)
-                    .padding(.vertical, pauseLabelPaddingV)
-                    .frame(height: pauseButtonHeight)
-                    .contentShape(Capsule())
+                Image(systemName: "pause.fill")
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(Theme.textSecondary)
+                    .frame(width: iconSize, height: iconSize)
+                    .contentShape(Rectangle())
                     .background(Theme.selectedSurface)
-                    .clipShape(Capsule())
+                    .clipShape(Circle())
             }
             .menuStyle(.borderlessButton)
             .menuIndicator(.hidden)

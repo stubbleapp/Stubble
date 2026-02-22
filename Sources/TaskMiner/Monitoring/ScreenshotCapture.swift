@@ -1,4 +1,4 @@
-≈import Foundation
+import Foundation
 import AppKit
 import CoreGraphics
 import TaskMinerShared

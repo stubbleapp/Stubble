@@ -64,13 +64,9 @@ public final class GeminiClient: Sendable {
         body["generationConfig"] = [
             "temperature": 0.3,
             "maxOutputTokens": 8192,
-            "responseMimeType": "application/json"
+            "responseMimeType": "application/json",
+            "thinkingConfig": ["thinkingBudget": 0]
         ] as [String: Any]
-
-        // thinkingConfig must be top-level, NOT inside generationConfig
-        body["thinkingConfig"] = [
-            "thinkingBudget": 0
-        ]
 
         let jsonData = try JSONSerialization.data(withJSONObject: body)
 

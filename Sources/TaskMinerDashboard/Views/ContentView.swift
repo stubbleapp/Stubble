@@ -3,8 +3,7 @@ import TaskMinerShared
 
 // MARK: - Toolbar layout constants (HIG-aligned)
 private enum ToolbarLayout {
-    static let itemSpacing: CGFloat = 10
-    static let trailingGroupSpacing: CGFloat = 12
+    static let trailingGroupSpacing: CGFloat = 8
     static let toolbarTrailingPadding: CGFloat = 12
     static let iconButtonSize: CGFloat = 28
     static let minTouchTarget: CGFloat = 28
@@ -50,10 +49,7 @@ struct ContentView: View {
                         Image(systemName: "square.and.arrow.up")
                             .font(.system(size: 13, weight: .medium))
                             .foregroundStyle(Theme.textSecondary)
-                            .frame(
-                                width: ToolbarLayout.iconButtonSize,
-                                height: ToolbarLayout.iconButtonSize
-                            )
+                            .frame(width: ToolbarLayout.iconButtonSize, height: ToolbarLayout.iconButtonSize)
                             .contentShape(Rectangle())
                             .background(Theme.selectedSurface)
                             .clipShape(Circle())
@@ -71,10 +67,7 @@ struct ContentView: View {
                             .font(.system(size: 13, weight: .medium))
                             .foregroundStyle(Theme.textSecondary)
                             .symbolVariant(.fill)
-                            .frame(
-                                width: ToolbarLayout.iconButtonSize,
-                                height: ToolbarLayout.iconButtonSize
-                            )
+                            .frame(width: ToolbarLayout.iconButtonSize, height: ToolbarLayout.iconButtonSize)
                             .contentShape(Rectangle())
                             .background(Theme.selectedSurface)
                             .clipShape(Circle())
@@ -82,7 +75,7 @@ struct ContentView: View {
                     .buttonStyle(.plain)
                     .accessibilityLabel("Settings")
 
-                    PauseControlView()
+                    PauseControlView(iconSize: ToolbarLayout.iconButtonSize)
                 }
                 .padding(.trailing, ToolbarLayout.toolbarTrailingPadding)
             }
