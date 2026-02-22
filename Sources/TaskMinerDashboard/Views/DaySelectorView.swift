@@ -8,11 +8,6 @@ struct DaySelectorView: View {
 
     private let dayCount = 30
 
-    private static let dayDateFmt: DateFormatter = {
-        let f = DateFormatter()
-        f.dateFormat = "yyyy-MM-dd"
-        return f
-    }()
 
     private var days: [DayItem] {
         let cal = Calendar.current
@@ -21,7 +16,7 @@ struct DaySelectorView: View {
 
         return (0..<dayCount).reversed().compactMap { offset in
             guard let date = cal.date(byAdding: .day, value: -offset, to: today) else { return nil }
-            let dateStr = Self.dayDateFmt.string(from: date)
+            let dateStr = SharedFormatters.dayFormatter.string(from: date)
             let dayNum = cal.component(.day, from: date)
             let isToday = offset == 0
             let hasData = availableSet.contains(dateStr)

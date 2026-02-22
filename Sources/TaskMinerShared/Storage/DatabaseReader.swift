@@ -36,78 +36,94 @@ public class DatabaseReader {
         runMigrations()
     }
 
+    /// Current schema version. Bump this when adding new migrations.
+    private static let schemaVersion = 4
+
     /// Apply schema migrations so the dashboard works even if the CLI hasn't run yet.
+    /// Uses PRAGMA user_version to track which migrations have already run.
     private func runMigrations() {
-        // Migration 1: add ocr_text column to screenshots
+        let currentVersion = getUserVersion()
+
+        if currentVersion < 1 {
+            // Migration 1: add ocr_text column to screenshots
+            execMigration("ALTER TABLE screenshots ADD COLUMN ocr_text TEXT",
+                         label: "1: add ocr_text", ignoreDuplicate: true)
+        }
+
+        if currentVersion < 2 {
+            // Migration 2: create tasks table + indexes
+            let tasksSql = """
+            CREATE TABLE IF NOT EXISTS tasks (
+                id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                date        TEXT NOT NULL,
+                start_time  TEXT NOT NULL,
+                end_time    TEXT NOT NULL,
+                title       TEXT NOT NULL,
+                description TEXT NOT NULL DEFAULT '',
+                app_names   TEXT DEFAULT '[]',
+                confidence  REAL DEFAULT 0.0
+            )
+            """
+            execMigration(tasksSql, label: "2: create tasks table")
+            sqlite3_exec(db, "CREATE INDEX IF NOT EXISTS idx_tasks_date ON tasks(date)", nil, nil, nil)
+            sqlite3_exec(db, "CREATE INDEX IF NOT EXISTS idx_tasks_start ON tasks(start_time)", nil, nil, nil)
+        }
+
+        if currentVersion < 3 {
+            // Migration 3: add relevant_links column to tasks
+            execMigration("ALTER TABLE tasks ADD COLUMN relevant_links TEXT DEFAULT '[]'",
+                         label: "3: add relevant_links", ignoreDuplicate: true)
+        }
+
+        if currentVersion < 4 {
+            // Migration 4: create project_activities table + index
+            let paSql = """
+            CREATE TABLE IF NOT EXISTS project_activities (
+                id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                date        TEXT NOT NULL,
+                name        TEXT NOT NULL,
+                summary     TEXT NOT NULL DEFAULT '',
+                total_duration REAL DEFAULT 0,
+                app_names   TEXT DEFAULT '[]',
+                task_titles TEXT DEFAULT '[]',
+                start_time  TEXT NOT NULL,
+                end_time    TEXT NOT NULL,
+                color_index INTEGER DEFAULT 0
+            )
+            """
+            execMigration(paSql, label: "4: create project_activities table")
+            sqlite3_exec(db, "CREATE INDEX IF NOT EXISTS idx_pa_date ON project_activities(date)", nil, nil, nil)
+        }
+
+        // Update stored version
+        if currentVersion < Self.schemaVersion {
+            setUserVersion(Self.schemaVersion)
+            Logger.info("DatabaseReader schema version updated: \(currentVersion) → \(Self.schemaVersion)")
+        }
+    }
+
+    /// Execute a single migration SQL statement with error handling.
+    private func execMigration(_ sql: String, label: String, ignoreDuplicate: Bool = false) {
         var errMsg: UnsafeMutablePointer<CChar>?
-        let rc1 = sqlite3_exec(db, "ALTER TABLE screenshots ADD COLUMN ocr_text TEXT", nil, nil, &errMsg)
-        if rc1 != SQLITE_OK {
+        let rc = sqlite3_exec(db, sql, nil, nil, &errMsg)
+        if rc != SQLITE_OK {
             let msg = errMsg.map { String(cString: $0) } ?? ""
             sqlite3_free(errMsg)
-            if !msg.contains("duplicate column") {
-                Logger.error("DatabaseReader migration failed: \(msg)")
+            if !(ignoreDuplicate && msg.contains("duplicate column")) {
+                Logger.error("DatabaseReader migration \(label) failed: \(msg)")
             }
         }
+    }
 
-        // Migration 2: create tasks table
-        errMsg = nil
-        let tasksSql = """
-        CREATE TABLE IF NOT EXISTS tasks (
-            id          INTEGER PRIMARY KEY AUTOINCREMENT,
-            date        TEXT NOT NULL,
-            start_time  TEXT NOT NULL,
-            end_time    TEXT NOT NULL,
-            title       TEXT NOT NULL,
-            description TEXT NOT NULL DEFAULT '',
-            app_names   TEXT DEFAULT '[]',
-            confidence  REAL DEFAULT 0.0
-        )
-        """
-        let rc2 = sqlite3_exec(db, tasksSql, nil, nil, &errMsg)
-        if rc2 != SQLITE_OK {
-            let msg = errMsg.map { String(cString: $0) } ?? ""
-            sqlite3_free(errMsg)
-            Logger.error("DatabaseReader tasks migration failed: \(msg)")
-        }
+    private func getUserVersion() -> Int {
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, "PRAGMA user_version", -1, &stmt, nil) == SQLITE_OK else { return 0 }
+        defer { sqlite3_finalize(stmt) }
+        return sqlite3_step(stmt) == SQLITE_ROW ? Int(sqlite3_column_int(stmt, 0)) : 0
+    }
 
-        // Migration 2b: indexes for tasks
-        sqlite3_exec(db, "CREATE INDEX IF NOT EXISTS idx_tasks_date ON tasks(date)", nil, nil, nil)
-        sqlite3_exec(db, "CREATE INDEX IF NOT EXISTS idx_tasks_start ON tasks(start_time)", nil, nil, nil)
-
-        // Migration 3: add relevant_links column to tasks
-        errMsg = nil
-        let rc3 = sqlite3_exec(db, "ALTER TABLE tasks ADD COLUMN relevant_links TEXT DEFAULT '[]'", nil, nil, &errMsg)
-        if rc3 != SQLITE_OK {
-            let msg = errMsg.map { String(cString: $0) } ?? ""
-            sqlite3_free(errMsg)
-            if !msg.contains("duplicate column") {
-                Logger.error("DatabaseReader relevant_links migration failed: \(msg)")
-            }
-        }
-
-        // Migration 4: create project_activities table
-        errMsg = nil
-        let paSql = """
-        CREATE TABLE IF NOT EXISTS project_activities (
-            id          INTEGER PRIMARY KEY AUTOINCREMENT,
-            date        TEXT NOT NULL,
-            name        TEXT NOT NULL,
-            summary     TEXT NOT NULL DEFAULT '',
-            total_duration REAL DEFAULT 0,
-            app_names   TEXT DEFAULT '[]',
-            task_titles TEXT DEFAULT '[]',
-            start_time  TEXT NOT NULL,
-            end_time    TEXT NOT NULL,
-            color_index INTEGER DEFAULT 0
-        )
-        """
-        let rc4 = sqlite3_exec(db, paSql, nil, nil, &errMsg)
-        if rc4 != SQLITE_OK {
-            let msg = errMsg.map { String(cString: $0) } ?? ""
-            sqlite3_free(errMsg)
-            Logger.error("DatabaseReader project_activities migration failed: \(msg)")
-        }
-        sqlite3_exec(db, "CREATE INDEX IF NOT EXISTS idx_pa_date ON project_activities(date)", nil, nil, nil)
+    private func setUserVersion(_ version: Int) {
+        sqlite3_exec(db, "PRAGMA user_version = \(version)", nil, nil, nil)
     }
 
     deinit {

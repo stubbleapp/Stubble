@@ -110,9 +110,6 @@ public enum LinkExtractor {
 
     // MARK: - Private helpers
 
-    /// Known IDE/editor bundle IDs that show file paths in their window titles.
-    private static let idePatterns: [String: (String) -> String?] = [:]
-
     /// Extract file path from an IDE/editor window title.
     private static func extractFilePath(from title: String, appName: String, bundleId: String?) -> String? {
         let bid = bundleId ?? ""

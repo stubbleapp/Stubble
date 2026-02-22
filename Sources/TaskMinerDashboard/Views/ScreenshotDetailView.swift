@@ -193,7 +193,11 @@ struct ScreenshotDetailView: View {
         .frame(minWidth: 1000, minHeight: 600)
         .onAppear {
             if let activityId = screenshot.activityId {
-                linkedActivity = dbReader?.activity(byId: activityId)
+                if let db = dbReader {
+                    linkedActivity = db.activity(byId: activityId)
+                } else {
+                    Logger.warning("ScreenshotDetailView: dbReader unavailable, cannot load linked activity")
+                }
             }
         }
         .alert("Delete Screenshot?", isPresented: $showDeleteConfirmation) {

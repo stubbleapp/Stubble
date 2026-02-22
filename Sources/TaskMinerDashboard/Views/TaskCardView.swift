@@ -20,12 +20,6 @@ struct TaskCardView: View {
     /// How far a full swipe triggers immediate deletion.
     private let fullSwipeThreshold: CGFloat = -200
 
-    private static let timeFmt: DateFormatter = {
-        let f = DateFormatter()
-        f.dateFormat = "HH:mm"
-        return f
-    }()
-
     var body: some View {
         ZStack(alignment: .trailing) {
             // Delete background — revealed on swipe
@@ -106,7 +100,7 @@ struct TaskCardView: View {
             VStack(alignment: .leading, spacing: 4) {
                 // Always visible: time + title
                 HStack(spacing: 6) {
-                    Text(Self.timeFmt.string(from: task.startTime))
+                    Text(SharedFormatters.timeFormatter.string(from: task.startTime))
                         .font(.system(size: 11, weight: .medium).monospacedDigit())
                         .foregroundStyle(Theme.textMuted)
 

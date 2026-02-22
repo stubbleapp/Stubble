@@ -12,8 +12,11 @@ private let SQLITE_TRANSIENT = unsafeBitCast(
 /// Bind a Swift String as TEXT with SQLITE_TRANSIENT so SQLite copies the bytes.
 /// Safe for temporary / stack-allocated pointers.
 public func sqliteBindText(_ stmt: OpaquePointer?, _ index: Int32, _ value: String) {
-    _ = value.withCString { cStr in
+    let rc = value.withCString { cStr in
         sqlite3_bind_text(stmt, index, cStr, -1, SQLITE_TRANSIENT)
+    }
+    if rc != SQLITE_OK {
+        Logger.warning("sqliteBindText failed at index \(index): rc=\(rc)")
     }
 }
 
@@ -27,10 +30,45 @@ public enum SharedFormatters {
         return f
     }()
 
-    /// "yyyy-MM-dd" formatter — used for task date strings.
+    /// "yyyy-MM-dd" — used for task date strings and DB queries.
     public static let dayFormatter: DateFormatter = {
         let f = DateFormatter()
         f.dateFormat = "yyyy-MM-dd"
+        return f
+    }()
+
+    /// "HH:mm" — used for time display throughout the UI.
+    public static let timeFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "HH:mm"
+        return f
+    }()
+
+    /// "HH:mm:ss" — used for CSV export.
+    public static let timeSecondsFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "HH:mm:ss"
+        return f
+    }()
+
+    /// "EEEE, MMMM d" — section headers (e.g. "Monday, January 6").
+    public static let headerDateFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "EEEE, MMMM d"
+        return f
+    }()
+
+    /// "EEEE, MMMM d, yyyy" — full date with year.
+    public static let longDateFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "EEEE, MMMM d, yyyy"
+        return f
+    }()
+
+    /// "EEE d" — short format for day selector (e.g. "Mon 6").
+    public static let shortDayFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "EEE d"
         return f
     }()
 }

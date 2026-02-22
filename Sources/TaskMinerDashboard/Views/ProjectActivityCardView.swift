@@ -6,12 +6,6 @@ struct ProjectActivityCardView: View {
     @Environment(DashboardViewModel.self) var viewModel
     @State private var isExpanded = false
 
-    private static let timeFmt: DateFormatter = {
-        let f = DateFormatter()
-        f.dateFormat = "HH:mm"
-        return f
-    }()
-
     var body: some View {
         HStack(spacing: 0) {
             // Color bar

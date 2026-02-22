@@ -54,17 +54,11 @@ enum TimelineItem: Identifiable {
 struct TaskTimelineView: View {
     @Environment(DashboardViewModel.self) var viewModel
 
-    private static let dateFmt: DateFormatter = {
-        let f = DateFormatter()
-        f.dateFormat = "EEEE, MMMM d"
-        return f
-    }()
-
     var body: some View {
         VStack(spacing: 0) {
             // Date title + regenerate
             HStack {
-                Text(Self.dateFmt.string(from: viewModel.selectedDate))
+                Text(SharedFormatters.headerDateFormatter.string(from: viewModel.selectedDate))
                     .font(.system(size: 22, weight: .bold, design: .default))
                     .foregroundStyle(Theme.textPrimary)
 
@@ -212,12 +206,6 @@ struct IdleGapView: View {
     let startTime: Date
     let endTime: Date
     let duration: TimeInterval
-
-    private static let timeFmt: DateFormatter = {
-        let f = DateFormatter()
-        f.dateFormat = "HH:mm"
-        return f
-    }()
 
     var body: some View {
         HStack(alignment: .center, spacing: 12) {

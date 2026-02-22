@@ -1,4 +1,5 @@
 import Foundation
+import TaskMinerShared
 
 func formatDuration(_ seconds: TimeInterval) -> String {
     let total = Int(seconds)
@@ -14,17 +15,11 @@ func formatDuration(_ seconds: TimeInterval) -> String {
     }
 }
 
-private let timeRangeFormatter: DateFormatter = {
-    let f = DateFormatter()
-    f.dateFormat = "HH:mm"
-    return f
-}()
-
 func formatTimeRange(start: Date?, end: Date?) -> String {
     guard let start else { return "" }
-    let startStr = timeRangeFormatter.string(from: start)
+    let startStr = SharedFormatters.timeFormatter.string(from: start)
     if let end {
-        return "\(startStr) – \(timeRangeFormatter.string(from: end))"
+        return "\(startStr) – \(SharedFormatters.timeFormatter.string(from: end))"
     }
     return startStr
 }

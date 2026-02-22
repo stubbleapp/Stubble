@@ -82,19 +82,43 @@ class DatabaseManager {
         }
     }
 
+    /// Current schema version. Bump this when adding new migrations.
+    private static let schemaVersion = 1
+
     private func runMigrations() {
-        // Migration: add ocr_text column to screenshots if not present
-        var errMsg: UnsafeMutablePointer<CChar>?
-        let rc = sqlite3_exec(db, "ALTER TABLE screenshots ADD COLUMN ocr_text TEXT", nil, nil, &errMsg)
-        if rc != SQLITE_OK {
-            let msg = errMsg.map { String(cString: $0) } ?? ""
-            sqlite3_free(errMsg)
-            if !msg.contains("duplicate column") {
-                Logger.error("Migration failed: \(msg)")
+        let currentVersion = getUserVersion()
+
+        if currentVersion < 1 {
+            // Migration 1: add ocr_text column to screenshots
+            var errMsg: UnsafeMutablePointer<CChar>?
+            let rc = sqlite3_exec(db, "ALTER TABLE screenshots ADD COLUMN ocr_text TEXT", nil, nil, &errMsg)
+            if rc != SQLITE_OK {
+                let msg = errMsg.map { String(cString: $0) } ?? ""
+                sqlite3_free(errMsg)
+                if !msg.contains("duplicate column") {
+                    Logger.error("Migration 1 failed: \(msg)")
+                }
+            } else {
+                Logger.info("Migration 1: added ocr_text column to screenshots")
             }
-        } else {
-            Logger.info("Migration: added ocr_text column to screenshots")
         }
+
+        // Always update version to current
+        if currentVersion < Self.schemaVersion {
+            setUserVersion(Self.schemaVersion)
+            Logger.info("Schema version updated: \(currentVersion) → \(Self.schemaVersion)")
+        }
+    }
+
+    private func getUserVersion() -> Int {
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, "PRAGMA user_version", -1, &stmt, nil) == SQLITE_OK else { return 0 }
+        defer { sqlite3_finalize(stmt) }
+        return sqlite3_step(stmt) == SQLITE_ROW ? Int(sqlite3_column_int(stmt, 0)) : 0
+    }
+
+    private func setUserVersion(_ version: Int) {
+        sqlite3_exec(db, "PRAGMA user_version = \(version)", nil, nil, nil)
     }
 
     // MARK: - Activity CRUD

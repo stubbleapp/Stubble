@@ -40,11 +40,6 @@ public struct SummarizationResult: Sendable {
 public final class TaskSummarizer: Sendable {
     private let geminiClient: GeminiClient
 
-    private static let timeFormatter: DateFormatter = {
-        let f = DateFormatter()
-        f.dateFormat = "HH:mm:ss"
-        return f
-    }()
 
     public init(geminiClient: GeminiClient) {
         self.geminiClient = geminiClient
@@ -264,8 +259,8 @@ public final class TaskSummarizer: Sendable {
         var ocrSections: [(time: String, text: String)] = []
 
         for block in blocks {
-            let start = Self.timeFormatter.string(from: block.startTime)
-            let end = Self.timeFormatter.string(from: block.endTime)
+            let start = SharedFormatters.timeSecondsFormatter.string(from: block.startTime)
+            let end = SharedFormatters.timeSecondsFormatter.string(from: block.endTime)
             let dur = "\(Int(block.totalDuration))s"
             let titles = block.windowTitles.prefix(5).joined(separator: " | ")
             lines.append("[\(start)–\(end)] \(block.appName) (\(dur)) — \(titles)")

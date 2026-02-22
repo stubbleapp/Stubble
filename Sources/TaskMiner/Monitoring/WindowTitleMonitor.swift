@@ -55,8 +55,10 @@ class WindowTitleMonitor {
             appElement, kAXFocusedWindowAttribute as CFString, &focusedWindow
         )
         guard err1 == .success, let ref = focusedWindow else { return nil }
+        // CFTypeRef is type-erased; verify the type ID before bridging cast.
+        // swiftlint:disable:next force_cast
         guard CFGetTypeID(ref) == AXUIElementGetTypeID() else { return nil }
-        let windowElement = ref as! AXUIElement  // safe: type ID checked above
+        let windowElement = ref as! AXUIElement
 
         var titleValue: CFTypeRef?
         let err2 = AXUIElementCopyAttributeValue(
@@ -100,6 +102,12 @@ class WindowTitleMonitor {
 
     private func tearDownObserver() {
         guard let observer = observer else { return }
+
+        // Remove AX notification registrations to prevent leaked callbacks
+        let appElement = AXUIElementCreateApplication(currentPid)
+        AXObserverRemoveNotification(observer, appElement, kAXFocusedWindowChangedNotification as CFString)
+        AXObserverRemoveNotification(observer, appElement, kAXTitleChangedNotification as CFString)
+
         CFRunLoopRemoveSource(
             CFRunLoopGetMain(),
             AXObserverGetRunLoopSource(observer),

@@ -1,4 +1,5 @@
 import Foundation
+import SwiftUI
 import TaskMinerShared
 
 /// Clusters TaskRecords into higher-level ProjectActivities using Gemini AI.
@@ -6,11 +7,6 @@ import TaskMinerShared
 final class ProjectActivityGenerator: Sendable {
     private let geminiClient: GeminiClient
 
-    private static let timeFmt: DateFormatter = {
-        let f = DateFormatter()
-        f.dateFormat = "HH:mm"
-        return f
-    }()
 
     init(geminiClient: GeminiClient) {
         self.geminiClient = geminiClient
@@ -52,7 +48,7 @@ final class ProjectActivityGenerator: Sendable {
 
     /// Fallback when AI is unavailable: one ProjectActivity per task.
     static func fallbackActivities(from tasks: [TaskRecord]) -> [ProjectActivity] {
-        let paletteSize = 10 // Theme.barPalette.count
+        let paletteSize = Theme.barPalette.count
         return tasks
             .map { task in
                 ProjectActivity(
@@ -87,8 +83,8 @@ final class ProjectActivityGenerator: Sendable {
         lines.append("## Today's Tasks")
         lines.append("")
         for (index, task) in todayTasks.enumerated() {
-            let start = Self.timeFmt.string(from: task.startTime)
-            let end = Self.timeFmt.string(from: task.endTime)
+            let start = SharedFormatters.timeFormatter.string(from: task.startTime)
+            let end = SharedFormatters.timeFormatter.string(from: task.endTime)
             let dur = Int(task.endTime.timeIntervalSince(task.startTime) / 60)
             let apps = task.appNamesList.joined(separator: ", ")
             lines.append("[\(index)] \(start)-\(end) (\(dur)m) \"\(task.title)\" — \(apps)")
@@ -173,7 +169,7 @@ final class ProjectActivityGenerator: Sendable {
             return Self.fallbackActivities(from: todayTasks)
         }
 
-        let paletteSize = 10 // Theme.barPalette.count
+        let paletteSize = Theme.barPalette.count
         var assignedIndices = Set<Int>()
         var result: [ProjectActivity] = []
 

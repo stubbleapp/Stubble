@@ -24,21 +24,30 @@ public final class UserMemoryStore: Sendable {
 
     /// Load all memory entries from disk.
     public func load() -> [MemoryEntry] {
-        guard FileManager.default.fileExists(atPath: filePath.path),
-              let data = try? Data(contentsOf: filePath),
-              let entries = try? JSONDecoder.iso8601.decode([MemoryEntry].self, from: data)
-        else {
+        guard FileManager.default.fileExists(atPath: filePath.path) else { return [] }
+        do {
+            let data = try Data(contentsOf: filePath)
+            return try JSONDecoder.iso8601.decode([MemoryEntry].self, from: data)
+        } catch {
+            Logger.error("UserMemoryStore: failed to load from \(filePath.lastPathComponent): \(error.localizedDescription)")
             return []
         }
-        return entries
     }
 
     /// Replace the entire memory with new entries and persist to disk.
     public func save(_ entries: [MemoryEntry]) {
         let dir = filePath.deletingLastPathComponent()
-        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        if let data = try? JSONEncoder.iso8601.encode(entries) {
-            try? data.write(to: filePath, options: .atomic)
+        do {
+            try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        } catch {
+            Logger.error("UserMemoryStore: failed to create directory \(dir.path): \(error.localizedDescription)")
+            return
+        }
+        do {
+            let data = try JSONEncoder.iso8601.encode(entries)
+            try data.write(to: filePath, options: .atomic)
+        } catch {
+            Logger.error("UserMemoryStore: failed to save \(entries.count) entries to \(filePath.lastPathComponent): \(error.localizedDescription)")
         }
     }
 

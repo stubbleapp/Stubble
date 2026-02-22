@@ -21,6 +21,7 @@ class AppDelegate {
     private var lastScreenshotTime: Date = .distantPast
     private var lastSummaryDate: String = ""
     private var lastSummarizationTime: Date = .distantPast
+    private var isShuttingDown = false
 
     init(config: Configuration, db: DatabaseManager) throws {
         self.config = config
@@ -106,6 +107,8 @@ class AppDelegate {
     }
 
     func shutdown() {
+        guard !isShuttingDown else { return }
+        isShuttingDown = true
         Logger.info("Shutting down...")
 
         // Stop timers
@@ -185,6 +188,7 @@ class AppDelegate {
     // MARK: - Periodic Check
 
     private func periodicCheck() {
+        guard !isShuttingDown else { return }
         // 0. Check pause state
         if pauseController.isPaused {
             if currentActivity != nil && currentActivity?.appName != "Paused" {
@@ -316,6 +320,7 @@ class AppDelegate {
     // MARK: - Screenshots
 
     private func takeScreenshot(trigger: ScreenshotTrigger) {
+        guard !isShuttingDown else { return }
         Logger.debug("takeScreenshot(trigger: \(trigger.rawValue))")
         let now = Date()
         let path = screenshotStorage.generatePath(for: now)
@@ -360,6 +365,7 @@ class AppDelegate {
     // MARK: - AI Summarization
 
     private func checkSummarization() {
+        guard !isShuttingDown else { return }
         let elapsed = Date().timeIntervalSince(lastSummarizationTime)
         guard elapsed >= 900 else { return } // 900s = 15 min
         guard !idleDetector.isIdle else { return }

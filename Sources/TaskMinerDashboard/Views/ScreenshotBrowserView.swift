@@ -136,9 +136,11 @@ struct ScreenshotBrowserView: View {
             if !isSelecting { isSelecting = true }
 
             if modifiers.contains(.shift), let lastIdx = lastSelectedIndex {
-                // Range select
-                let range = min(lastIdx, index)...max(lastIdx, index)
-                for i in range {
+                // Range select — clamp to valid bounds in case the array changed
+                let lo = max(0, min(lastIdx, index))
+                let hi = min(viewModel.screenshots.count - 1, max(lastIdx, index))
+                guard lo <= hi else { return }
+                for i in lo...hi {
                     if let sid = viewModel.screenshots[i].id {
                         selectedIds.insert(sid)
                     }

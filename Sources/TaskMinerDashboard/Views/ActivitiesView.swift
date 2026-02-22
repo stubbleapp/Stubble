@@ -4,17 +4,11 @@ import TaskMinerShared
 struct ActivitiesView: View {
     @Environment(DashboardViewModel.self) var viewModel
 
-    private static let dateFmt: DateFormatter = {
-        let f = DateFormatter()
-        f.dateFormat = "EEEE, MMMM d"
-        return f
-    }()
-
     var body: some View {
         VStack(spacing: 0) {
             // Date title + refresh
             HStack {
-                Text(Self.dateFmt.string(from: viewModel.selectedDate))
+                Text(SharedFormatters.headerDateFormatter.string(from: viewModel.selectedDate))
                     .font(.system(size: 22, weight: .bold, design: .default))
                     .foregroundStyle(Theme.textPrimary)
 

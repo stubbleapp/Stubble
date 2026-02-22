@@ -10,9 +10,9 @@ final class DashboardViewModel {
     var configurationError: String?
     let dbReader: DatabaseReader?
     let pauseController: PauseController
-    private let taskWriter: TaskWriter?
-    private var taskSummarizer: TaskSummarizer?
-    private var geminiClient: GeminiClient?
+    let taskWriter: TaskWriter?
+    var taskSummarizer: TaskSummarizer?
+    var geminiClient: GeminiClient?
     let memoryStore: UserMemoryStore
 
     var selectedDate: Date = Date()
@@ -41,7 +41,7 @@ final class DashboardViewModel {
     var projectActivities: [ProjectActivity] = []
     var isGeneratingActivities = false
     var activitiesError: String?
-    private var activityGenerator: ProjectActivityGenerator?
+    var activityGenerator: ProjectActivityGenerator?
 
     // Chat
     var chatMessages: [ChatMessage] = []
@@ -56,7 +56,9 @@ final class DashboardViewModel {
     private var pauseTimer: Timer?
 
     deinit {
-        // View model is owned by the view hierarchy and deallocated on the main thread.
+        // deinit is nonisolated but this @MainActor class is always deallocated on
+        // the main thread (owned by the SwiftUI view hierarchy). assumeIsolated is
+        // the standard pattern for accessing @MainActor properties from deinit.
         MainActor.assumeIsolated {
             pauseTimer?.invalidate()
         }
@@ -242,181 +244,6 @@ final class DashboardViewModel {
         }
     }
 
-    // MARK: - Chat
-
-    private static let chatTimeFmt: DateFormatter = {
-        let f = DateFormatter()
-        f.dateFormat = "HH:mm"
-        return f
-    }()
-
-    func sendChatMessage(_ text: String) {
-        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return }
-        guard let client = geminiClient else {
-            chatError = "Gemini API key not configured"
-            return
-        }
-
-        chatMessages.append(ChatMessage(role: .user, content: trimmed))
-        isChatLoading = true
-        chatError = nil
-
-        // Capture context for the async task
-        let taskContext = buildChatTaskContext()
-        let memoryContext = memoryStore.contextString()
-        let history = buildConversationHistory()
-
-        Task {
-            do {
-                let systemInstruction = """
-                You are a helpful assistant embedded in a desktop activity tracker called TaskMiner. \
-                You answer questions about the user's computer activity and tasks for the day. \
-                Be concise and conversational — keep responses short unless asked for detail. \
-                Use the provided task data and activity context to give accurate answers. \
-                If the user asks about time, calculate it from the task start/end times provided. \
-                Format durations as hours and minutes (e.g. "2h 15m"). \
-                Never make up tasks or times that aren't in the context. \
-                If you don't have enough information, say so.
-                """
-
-                let prompt = """
-                Today's tasks and activity context:
-                \(taskContext)
-                \(memoryContext.map { "User context: \($0)" } ?? "")
-
-                \(trimmed)
-                """
-
-                let response = try await client.generateText(
-                    prompt: prompt,
-                    systemInstruction: systemInstruction,
-                    conversationHistory: history
-                )
-
-                self.chatMessages.append(ChatMessage(role: .assistant, content: response))
-                self.isChatLoading = false
-            } catch {
-                self.chatError = error.localizedDescription
-                self.isChatLoading = false
-            }
-        }
-    }
-
-    func clearChat() {
-        chatMessages = []
-        chatError = nil
-        isChatLoading = false
-    }
-
-    /// Build a text block summarizing the current day's tasks for chat context.
-    private func buildChatTaskContext() -> String {
-        guard !tasks.isEmpty else { return "No tasks recorded for this day." }
-
-        var lines: [String] = []
-        let dateFmt = DateFormatter()
-        dateFmt.dateFormat = "EEEE, MMMM d, yyyy"
-        lines.append("Date: \(dateFmt.string(from: selectedDate))")
-
-        if let summary = daySummaryText {
-            lines.append("Day summary: \(summary)")
-        }
-
-        let totalActive = Int(activeSeconds)
-        let hours = totalActive / 3600
-        let mins = (totalActive % 3600) / 60
-        lines.append("Total active time: \(hours)h \(mins)m")
-        lines.append("")
-        lines.append("Tasks:")
-
-        for task in tasks {
-            let start = Self.chatTimeFmt.string(from: task.startTime)
-            let end = Self.chatTimeFmt.string(from: task.endTime)
-            let duration = Int(task.endTime.timeIntervalSince(task.startTime))
-            let durMins = duration / 60
-            let apps = task.appNamesList.joined(separator: ", ")
-            lines.append("- [\(start)–\(end)] (\(durMins)m) \(task.title)")
-            if !task.description.isEmpty {
-                lines.append("  \(task.description)")
-            }
-            if !apps.isEmpty {
-                lines.append("  Apps: \(apps)")
-            }
-        }
-
-        return lines.joined(separator: "\n")
-    }
-
-    /// Build Gemini-compatible conversation history from previous messages (excluding the latest user message).
-    private func buildConversationHistory() -> [[String: Any]]? {
-        // All messages except the last one (which is the new user message sent as the prompt)
-        let previous = chatMessages.dropLast()
-        guard !previous.isEmpty else { return nil }
-
-        return previous.map { msg in
-            [
-                "role": msg.role == .user ? "user" : "model",
-                "parts": [["text": msg.content]]
-            ] as [String: Any]
-        }
-    }
-
-    // MARK: - Export
-
-    /// Build CSV content from the current task list.
-    func tasksCSV() -> String {
-        let timeFmt = DateFormatter()
-        timeFmt.dateFormat = "HH:mm:ss"
-
-        let dateFmt = DateFormatter()
-        dateFmt.dateFormat = "yyyy-MM-dd"
-
-        var lines: [String] = []
-        lines.append("Date,Start,End,Duration,Title,Description,Apps,Confidence")
-
-        for task in tasks {
-            let date = task.date
-            let start = timeFmt.string(from: task.startTime)
-            let end = timeFmt.string(from: task.endTime)
-            let duration = Int(task.endTime.timeIntervalSince(task.startTime))
-            let mins = duration / 60
-            let secs = duration % 60
-            let durStr = String(format: "%d:%02d", mins, secs)
-            let title = csvEscape(task.title)
-            let desc = csvEscape(task.description)
-            let apps = csvEscape(task.appNamesList.joined(separator: ", "))
-            let conf = String(format: "%.0f%%", task.confidence * 100)
-            lines.append("\(date),\(start),\(end),\(durStr),\(title),\(desc),\(apps),\(conf)")
-        }
-
-        return lines.joined(separator: "\n")
-    }
-
-    /// Export tasks as CSV via NSSavePanel.
-    func exportTasksCSV() {
-        guard !tasks.isEmpty else { return }
-
-        let panel = NSSavePanel()
-        panel.allowedContentTypes = [.commaSeparatedText]
-        panel.nameFieldStringValue = "tasks-\(tasks.first?.date ?? "export").csv"
-        panel.title = "Export Tasks"
-
-        guard panel.runModal() == .OK, let url = panel.url else { return }
-
-        do {
-            try tasksCSV().write(to: url, atomically: true, encoding: .utf8)
-        } catch {
-            summaryError = "Export failed: \(error.localizedDescription)"
-        }
-    }
-
-    private func csvEscape(_ value: String) -> String {
-        if value.contains(",") || value.contains("\"") || value.contains("\n") {
-            return "\"\(value.replacingOccurrences(of: "\"", with: "\"\""))\""
-        }
-        return value
-    }
-
     // MARK: - Pause
 
     func pause(for duration: TimeInterval?) {
@@ -429,88 +256,11 @@ final class DashboardViewModel {
         pauseState = nil
     }
 
-    // MARK: - Project Activities
+    // MARK: - Helpers
 
-    /// Generate project activities by clustering tasks via AI.
-    /// Results are persisted to the database. Only regenerates when explicitly requested.
-    func generateProjectActivities(forceRegenerate: Bool = false) {
-        let dateStr = SharedFormatters.dayFormatter.string(from: selectedDate)
-
-        // Need tasks to cluster
-        guard !tasks.isEmpty else {
-            projectActivities = []
-            return
-        }
-
-        guard let generator = activityGenerator, taskWriter != nil else {
-            // No AI available — fallback: one project per task, persist
-            let fallback = ProjectActivityGenerator.fallbackActivities(from: tasks)
-            projectActivities = fallback
-            persistProjectActivities(fallback, dateStr: dateStr)
-            return
-        }
-
-        isGeneratingActivities = true
-        activitiesError = nil
-
-        let todayTasks = tasks
-        let recentTasks = loadRecentTasks(excluding: selectedDate, days: 7)
-        let memoryContext = memoryStore.contextString()
-
-        Task {
-            do {
-                let activities = try await generator.cluster(
-                    todayTasks: todayTasks,
-                    recentHistory: recentTasks,
-                    memoryContext: memoryContext
-                )
-                self.projectActivities = activities
-                self.persistProjectActivities(activities, dateStr: dateStr)
-                self.isGeneratingActivities = false
-            } catch {
-                self.activitiesError = error.localizedDescription
-                // Fallback to ungrouped
-                let fallback = ProjectActivityGenerator.fallbackActivities(from: todayTasks)
-                self.projectActivities = fallback
-                self.persistProjectActivities(fallback, dateStr: dateStr)
-                self.isGeneratingActivities = false
-            }
-        }
-    }
-
-    /// Persist project activities to the database (delete + re-insert).
-    private func persistProjectActivities(_ activities: [ProjectActivity], dateStr: String) {
-        guard let writer = taskWriter else { return }
-        do {
-            try writer.deleteProjectActivities(for: dateStr)
-            let records = activities.map { $0.toRecord(date: dateStr) }
-            try writer.insertProjectActivities(records)
-        } catch {
-            Logger.error("Failed to persist project activities: \(error.localizedDescription)")
-        }
-    }
-
-    /// Load tasks for the past N days (used as multi-day context for project clustering).
-    private func loadRecentTasks(excluding currentDate: Date, days: Int) -> [String: [TaskRecord]] {
-        guard let db = dbReader else { return [:] }
-        let cal = Calendar.current
-        var result: [String: [TaskRecord]] = [:]
-        for offset in 1...days {
-            guard let date = cal.date(byAdding: .day, value: -offset, to: currentDate) else { continue }
-            let tasks = db.tasks(for: date)
-            if !tasks.isEmpty {
-                let dateStr = SharedFormatters.dayFormatter.string(from: date)
-                result[dateStr] = tasks
-            }
-        }
-        return result
-    }
-
-    /// Reload project activities from the database.
-    private func reloadProjectActivities() {
-        guard let db = dbReader else { return }
-        let records = db.projectActivities(for: selectedDate)
-        projectActivities = records.map { ProjectActivity(from: $0) }
+    /// Resolve an app display name to its bundle identifier for icon lookup.
+    func bundleId(forAppName name: String) -> String? {
+        appNameBundleMap[name]
     }
 
     // MARK: - Private
@@ -523,12 +273,7 @@ final class DashboardViewModel {
         appNameBundleMap = dbReader?.appNameToBundleIdMap() ?? [:]
     }
 
-    /// Resolve an app display name to its bundle identifier for icon lookup.
-    func bundleId(forAppName name: String) -> String? {
-        appNameBundleMap[name]
-    }
-
-    private func loadDataForSelectedDate() {
+    func loadDataForSelectedDate() {
         guard let db = dbReader else { return }
 
         activities = db.activities(for: selectedDate)

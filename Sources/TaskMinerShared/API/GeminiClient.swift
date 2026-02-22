@@ -6,6 +6,11 @@ public final class GeminiClient: Sendable {
     private let model: String
     private let baseURL: String
 
+    /// Maximum number of retry attempts for transient failures.
+    private static let maxRetries = 2
+    /// Base delay between retries (doubles each attempt).
+    private static let retryBaseDelay: TimeInterval = 1.0
+
     public init(apiKey: String, model: String = "gemini-2.5-flash") {
         self.apiKey = apiKey
         self.model = model
@@ -37,19 +42,69 @@ public final class GeminiClient: Sendable {
 
     /// Send a text prompt to Gemini and return the response text.
     public func generateContent(prompt: String, systemInstruction: String? = nil) async throws -> String {
-        var components = URLComponents(string: baseURL)
-        components?.path = "/v1beta/models/\(model):generateContent"
-        components?.queryItems = [URLQueryItem(name: "key", value: apiKey)]
-        guard let url = components?.url else {
-            throw GeminiError.invalidURL
-        }
-
         let contents: [[String: Any]] = [
             [
                 "role": "user",
                 "parts": [["text": prompt]]
             ]
         ]
+
+        let generationConfig: [String: Any] = [
+            "temperature": 0.3,
+            "maxOutputTokens": 8192,
+            "responseMimeType": "application/json",
+            "thinkingConfig": ["thinkingBudget": 0]
+        ]
+
+        return try await sendRequest(
+            contents: contents,
+            systemInstruction: systemInstruction,
+            generationConfig: generationConfig
+        )
+    }
+
+    /// Send a conversational prompt to Gemini and return a plain-text response.
+    /// Unlike `generateContent()` which forces JSON, this returns natural language.
+    public func generateText(
+        prompt: String,
+        systemInstruction: String? = nil,
+        conversationHistory: [[String: Any]]? = nil
+    ) async throws -> String {
+        // Build contents: optional conversation history + current user message
+        var contents: [[String: Any]] = conversationHistory ?? []
+        contents.append([
+            "role": "user",
+            "parts": [["text": prompt]]
+        ])
+
+        let generationConfig: [String: Any] = [
+            "temperature": 0.5,
+            "maxOutputTokens": 4096,
+            "responseMimeType": "text/plain",
+            "thinkingConfig": ["thinkingBudget": 1024]
+        ]
+
+        return try await sendRequest(
+            contents: contents,
+            systemInstruction: systemInstruction,
+            generationConfig: generationConfig
+        )
+    }
+
+    // MARK: - Private
+
+    /// Common request + retry + response parsing.
+    private func sendRequest(
+        contents: [[String: Any]],
+        systemInstruction: String?,
+        generationConfig: [String: Any]
+    ) async throws -> String {
+        var components = URLComponents(string: baseURL)
+        components?.path = "/v1beta/models/\(model):generateContent"
+        components?.queryItems = [URLQueryItem(name: "key", value: apiKey)]
+        guard let url = components?.url else {
+            throw GeminiError.invalidURL
+        }
 
         var body: [String: Any] = [
             "contents": contents
@@ -61,12 +116,7 @@ public final class GeminiClient: Sendable {
             ]
         }
 
-        body["generationConfig"] = [
-            "temperature": 0.3,
-            "maxOutputTokens": 8192,
-            "responseMimeType": "application/json",
-            "thinkingConfig": ["thinkingBudget": 0]
-        ] as [String: Any]
+        body["generationConfig"] = generationConfig
 
         let jsonData = try JSONSerialization.data(withJSONObject: body)
 
@@ -76,18 +126,50 @@ public final class GeminiClient: Sendable {
         request.httpBody = jsonData
         request.timeoutInterval = 60
 
-        let (data, response) = try await URLSession.shared.data(for: request)
+        // Retry loop for transient failures
+        var lastError: Error = GeminiError.invalidResponse
+        for attempt in 0...Self.maxRetries {
+            if attempt > 0 {
+                let delay = Self.retryBaseDelay * pow(2.0, Double(attempt - 1))
+                Logger.warning("GeminiClient: retry \(attempt)/\(Self.maxRetries) after \(String(format: "%.1f", delay))s delay")
+                try await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
+            }
 
-        guard let httpResponse = response as? HTTPURLResponse else {
-            throw GeminiError.invalidResponse
+            do {
+                let (data, response) = try await URLSession.shared.data(for: request)
+
+                guard let httpResponse = response as? HTTPURLResponse else {
+                    throw GeminiError.invalidResponse
+                }
+
+                // Retry on transient HTTP errors
+                if Self.isRetryableStatusCode(httpResponse.statusCode) && attempt < Self.maxRetries {
+                    let errorBody = String(data: data, encoding: .utf8) ?? "unknown"
+                    lastError = GeminiError.apiError(statusCode: httpResponse.statusCode, message: errorBody)
+                    continue
+                }
+
+                guard httpResponse.statusCode == 200 else {
+                    let errorBody = String(data: data, encoding: .utf8) ?? "unknown"
+                    throw GeminiError.apiError(statusCode: httpResponse.statusCode, message: errorBody)
+                }
+
+                return try parseResponseText(data)
+            } catch let error as URLError where Self.isRetryableURLError(error) && attempt < Self.maxRetries {
+                Logger.warning("GeminiClient: transient network error: \(error.localizedDescription)")
+                lastError = error
+                continue
+            } catch {
+                // Non-retryable error (parse error, non-retryable HTTP, non-retryable network) — fail immediately
+                throw error
+            }
         }
 
-        guard httpResponse.statusCode == 200 else {
-            let errorBody = String(data: data, encoding: .utf8) ?? "unknown"
-            throw GeminiError.apiError(statusCode: httpResponse.statusCode, message: errorBody)
-        }
+        throw lastError
+    }
 
-        // Parse response JSON
+    /// Parse the Gemini response JSON and extract the text content.
+    private func parseResponseText(_ data: Data) throws -> String {
         // Gemini 2.5 Flash may include "thought" parts before the actual content,
         // so we find the last part that has a "text" key and is not a thought.
         guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
@@ -112,82 +194,19 @@ public final class GeminiClient: Sendable {
         return resultText
     }
 
-    /// Send a conversational prompt to Gemini and return a plain-text response.
-    /// Unlike `generateContent()` which forces JSON, this returns natural language.
-    public func generateText(
-        prompt: String,
-        systemInstruction: String? = nil,
-        conversationHistory: [[String: Any]]? = nil
-    ) async throws -> String {
-        var components = URLComponents(string: baseURL)
-        components?.path = "/v1beta/models/\(model):generateContent"
-        components?.queryItems = [URLQueryItem(name: "key", value: apiKey)]
-        guard let url = components?.url else {
-            throw GeminiError.invalidURL
+    /// HTTP status codes that indicate a transient/retryable server issue.
+    private static func isRetryableStatusCode(_ code: Int) -> Bool {
+        code == 429 || code == 500 || code == 502 || code == 503
+    }
+
+    /// URLError codes that indicate transient network issues worth retrying.
+    private static func isRetryableURLError(_ error: URLError) -> Bool {
+        switch error.code {
+        case .timedOut, .networkConnectionLost, .notConnectedToInternet:
+            return true
+        default:
+            return false
         }
-
-        // Build contents: optional conversation history + current user message
-        var contents: [[String: Any]] = conversationHistory ?? []
-        contents.append([
-            "role": "user",
-            "parts": [["text": prompt]]
-        ])
-
-        var body: [String: Any] = [
-            "contents": contents
-        ]
-
-        if let system = systemInstruction {
-            body["systemInstruction"] = [
-                "parts": [["text": system]]
-            ]
-        }
-
-        body["generationConfig"] = [
-            "temperature": 0.5,
-            "maxOutputTokens": 4096,
-            "responseMimeType": "text/plain",
-            "thinkingConfig": ["thinkingBudget": 1024]
-        ] as [String: Any]
-
-        let jsonData = try JSONSerialization.data(withJSONObject: body)
-
-        var request = URLRequest(url: url)
-        request.httpMethod = "POST"
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.httpBody = jsonData
-        request.timeoutInterval = 60
-
-        let (data, response) = try await URLSession.shared.data(for: request)
-
-        guard let httpResponse = response as? HTTPURLResponse else {
-            throw GeminiError.invalidResponse
-        }
-
-        guard httpResponse.statusCode == 200 else {
-            let errorBody = String(data: data, encoding: .utf8) ?? "unknown"
-            throw GeminiError.apiError(statusCode: httpResponse.statusCode, message: errorBody)
-        }
-
-        guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let candidates = json["candidates"] as? [[String: Any]],
-              let firstCandidate = candidates.first,
-              let content = firstCandidate["content"] as? [String: Any],
-              let parts = content["parts"] as? [[String: Any]]
-        else {
-            let preview = String(data: data.prefix(500), encoding: .utf8) ?? "?"
-            throw GeminiError.parseError("Could not parse response structure: \(preview)")
-        }
-
-        let text = parts.reversed()
-            .first(where: { $0["thought"] == nil && $0["text"] != nil })?["text"] as? String
-            ?? parts.last?["text"] as? String
-
-        guard let resultText = text else {
-            throw GeminiError.parseError("No text found in \(parts.count) response parts")
-        }
-
-        return resultText
     }
 }
 
