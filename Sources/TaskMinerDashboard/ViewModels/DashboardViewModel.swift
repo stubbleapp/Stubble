@@ -6,7 +6,8 @@ import TaskMinerShared
 @Observable
 @MainActor
 final class DashboardViewModel {
-    let config = SharedConfiguration()
+    // swiftlint:disable:next force_try
+    let config = try! SharedConfiguration()
     let dbReader: DatabaseReader?
     let pauseController: PauseController
     private let taskWriter: TaskWriter?
@@ -39,6 +40,12 @@ final class DashboardViewModel {
     // Pause
     var pauseState: PauseState?
     private var pauseTimer: Timer?
+
+    deinit {
+        MainActor.assumeIsolated {
+            pauseTimer?.invalidate()
+        }
+    }
 
     init() {
         self.dbReader = try? DatabaseReader(path: config.databasePath)

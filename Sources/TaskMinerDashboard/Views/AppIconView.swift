@@ -1,12 +1,14 @@
 import SwiftUI
+import AppKit
 
 struct AppIconView: View {
     let bundleId: String?
-    var size: CGFloat = 28
+    let size: CGFloat
 
     var body: some View {
         Image(nsImage: AppIconResolver.shared.icon(for: bundleId, size: size))
             .resizable()
+            .aspectRatio(contentMode: .fit)
             .frame(width: size, height: size)
     }
 }

@@ -250,7 +250,6 @@ struct TaskCardView: View {
     }
 
 }
-
 /// Overlapping app icon stack.
 struct AppIconStackView: View {
     let appNames: [String]
@@ -278,3 +277,4 @@ struct AppIconStackView: View {
         }
     }
 }
+

@@ -9,7 +9,8 @@ final class SettingsManager {
     private let filePath: URL
 
     private init() {
-        self.filePath = SharedConfiguration().settingsPath
+        // swiftlint:disable:next force_try
+        self.filePath = (try! SharedConfiguration()).settingsPath
     }
 
     // MARK: - Settings Model (non-secret settings only; key is in Keychain)

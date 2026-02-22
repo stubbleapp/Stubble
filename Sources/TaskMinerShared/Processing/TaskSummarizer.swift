@@ -191,6 +191,15 @@ public final class TaskSummarizer: Sendable {
         }
         jsonStr = jsonStr.trimmingCharacters(in: .whitespacesAndNewlines)
 
+        // If the response doesn't start with { or [, try to find the first JSON structure
+        if !jsonStr.hasPrefix("{") && !jsonStr.hasPrefix("[") {
+            if let braceIdx = jsonStr.firstIndex(of: "{") {
+                jsonStr = String(jsonStr[braceIdx...])
+            } else if let bracketIdx = jsonStr.firstIndex(of: "[") {
+                jsonStr = String(jsonStr[bracketIdx...])
+            }
+        }
+
         Logger.debug("Gemini response (\(jsonStr.count) chars): \(String(jsonStr.prefix(500)))")
 
         guard let data = jsonStr.data(using: .utf8) else {
@@ -212,15 +221,15 @@ public final class TaskSummarizer: Sendable {
                 } else if let arr = obj.values.compactMap({ $0 as? [[String: Any]] }).first {
                     array = arr
                 } else {
-                    throw GeminiError.parseError("JSON object has no array. Keys: \(Array(obj.keys)). Preview: \(String(jsonStr.prefix(200)))")
+                    throw GeminiError.parseError("JSON object has no task array. Keys: \(Array(obj.keys)). Preview: \(String(jsonStr.prefix(300)))")
                 }
             } else {
-                throw GeminiError.parseError("Unexpected JSON type. Preview: \(String(jsonStr.prefix(200)))")
+                throw GeminiError.parseError("Unexpected JSON type. Preview: \(String(jsonStr.prefix(300)))")
             }
         } catch let error as GeminiError {
             throw error
         } catch {
-            throw GeminiError.parseError("Invalid JSON: \(error.localizedDescription). Preview: \(String(jsonStr.prefix(200)))")
+            throw GeminiError.parseError("Invalid JSON: \(error.localizedDescription). Preview: \(String(jsonStr.prefix(300)))")
         }
 
         let dateStr = Self.dateFormatter.string(from: date)

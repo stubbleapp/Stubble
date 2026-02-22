@@ -6,11 +6,11 @@ public struct SharedConfiguration: Sendable {
     public let screenshotDirectory: URL
     public let settingsPath: URL
 
-    public init() {
+    public init() throws {
         guard let appSupport = FileManager.default.urls(
             for: .applicationSupportDirectory, in: .userDomainMask
         ).first else {
-            fatalError("Application Support directory is not available. TaskMiner cannot run without it.")
+            throw ConfigurationError.applicationSupportUnavailable
         }
         let base = appSupport.appendingPathComponent("TaskMiner")
         self.dataDirectory = base

@@ -66,14 +66,18 @@ public class TaskWriter {
     public func insertTasks(_ tasks: [TaskRecord]) throws -> Int {
         guard !tasks.isEmpty else { return 0 }
 
-        sqlite3_exec(db, "BEGIN TRANSACTION", nil, nil, nil)
+        guard sqlite3_exec(db, "BEGIN TRANSACTION", nil, nil, nil) == SQLITE_OK else {
+            throw DatabaseError.executionFailed("BEGIN TRANSACTION failed: \(lastError)")
+        }
         do {
             var inserted = 0
             for task in tasks {
                 _ = try insertTask(task)
                 inserted += 1
             }
-            sqlite3_exec(db, "COMMIT", nil, nil, nil)
+            guard sqlite3_exec(db, "COMMIT", nil, nil, nil) == SQLITE_OK else {
+                throw DatabaseError.executionFailed("COMMIT failed: \(lastError)")
+            }
             return inserted
         } catch {
             sqlite3_exec(db, "ROLLBACK", nil, nil, nil)

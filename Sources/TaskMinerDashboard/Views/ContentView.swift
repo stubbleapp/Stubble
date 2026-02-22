@@ -27,8 +27,6 @@ struct ContentView: View {
             switch selectedTab {
             case 0:
                 TaskTimelineView()
-            case 1:
-                ActivityTimelineView()
             default:
                 ScreenshotBrowserView()
             }
@@ -38,7 +36,7 @@ struct ContentView: View {
         .toolbar {
             ToolbarItem(placement: .principal) {
                 SegmentedPicker(
-                    items: ["Tasks", "Apps", "Screens"],
+                    items: ["Tasks", "Screens"],
                     selection: $selectedTab
                 )
                 .frame(maxWidth: 320)

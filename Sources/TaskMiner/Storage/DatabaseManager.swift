@@ -264,7 +264,10 @@ class DatabaseManager {
     func generateDailySummary(for date: Date) {
         let cal = Calendar.current
         let startOfDay = cal.startOfDay(for: date)
-        let endOfDay = cal.date(byAdding: .day, value: 1, to: startOfDay)!
+        guard let endOfDay = cal.date(byAdding: .day, value: 1, to: startOfDay) else {
+            Logger.error("Failed to compute end-of-day date")
+            return
+        }
 
         let startStr = Self.iso8601.string(from: startOfDay)
         let endStr = Self.iso8601.string(from: endOfDay)
@@ -452,6 +455,10 @@ class DatabaseManager {
                 Logger.info("Deleted \(deleted) screenshot record(s) from previous days")
             }
         }
+    }
+
+    deinit {
+        close()
     }
 
     func close() {

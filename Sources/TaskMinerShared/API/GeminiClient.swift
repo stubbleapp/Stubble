@@ -46,7 +46,7 @@ public final class GeminiClient: Sendable {
 
         let contents: [[String: Any]] = [
             [
-                "role": "user",ç
+                "role": "user",
                 "parts": [["text": prompt]]
             ]
         ]
@@ -61,14 +61,16 @@ public final class GeminiClient: Sendable {
             ]
         }
 
-        // Configure generation parameters
-        // Disable thinking to avoid it consuming output tokens and truncating JSON
         body["generationConfig"] = [
             "temperature": 0.3,
             "maxOutputTokens": 8192,
-            "responseMimeType": "application/json",
-            "thinkingConfig": ["thinkingBudget": 0]
+            "responseMimeType": "application/json"
         ] as [String: Any]
+
+        // thinkingConfig must be top-level, NOT inside generationConfig
+        body["thinkingConfig"] = [
+            "thinkingBudget": 0
+        ]
 
         let jsonData = try JSONSerialization.data(withJSONObject: body)
 
