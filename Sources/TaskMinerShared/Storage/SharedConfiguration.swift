@@ -5,6 +5,7 @@ public struct SharedConfiguration: Sendable {
     public let databasePath: URL
     public let screenshotDirectory: URL
     public let settingsPath: URL
+    public let memoryPath: URL
 
     public init() throws {
         guard let appSupport = FileManager.default.urls(
@@ -17,6 +18,7 @@ public struct SharedConfiguration: Sendable {
         self.databasePath = base.appendingPathComponent("taskminer.db")
         self.screenshotDirectory = base.appendingPathComponent("screenshots")
         self.settingsPath = base.appendingPathComponent("settings.json")
+        self.memoryPath = base.appendingPathComponent("memory.json")
     }
 }
 

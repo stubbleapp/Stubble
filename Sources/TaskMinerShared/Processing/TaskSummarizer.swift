@@ -33,6 +33,7 @@ public struct SummarizationInput: Sendable {
 public struct SummarizationResult: Sendable {
     public let tasks: [TaskRecord]
     public let daySummary: String?
+    public let newMemoryEntries: [String]
 }
 
 /// Builds prompts from activity data and parses Gemini responses into TaskRecords.
@@ -62,8 +63,14 @@ public final class TaskSummarizer: Sendable {
     }
 
     /// Summarize activity data into high-level tasks plus a day overview using Gemini AI.
-    public func summarize(activities: [SummarizationInput], date: Date, customPrompt: String? = nil) async throws -> SummarizationResult {
-        guard !activities.isEmpty else { return SummarizationResult(tasks: [], daySummary: nil) }
+    /// Optionally accepts existing memory context and returns new memory entries to merge.
+    public func summarize(
+        activities: [SummarizationInput],
+        date: Date,
+        customPrompt: String? = nil,
+        memoryContext: String? = nil
+    ) async throws -> SummarizationResult {
+        guard !activities.isEmpty else { return SummarizationResult(tasks: [], daySummary: nil, newMemoryEntries: []) }
 
         let prompt = buildPrompt(from: activities)
 
@@ -72,6 +79,17 @@ public final class TaskSummarizer: Sendable {
             userRules = "\nAdditional user instructions (always obey these): \(custom)"
         } else {
             userRules = ""
+        }
+
+        let memorySection: String
+        if let mem = memoryContext, !mem.isEmpty {
+            memorySection = """
+            \nYou have the following knowledge about this person from previous sessions. \
+            Use it to produce more accurate, consistent task titles and descriptions. \
+            Reference known project names, tools, and patterns where relevant:\n\(mem)
+            """
+        } else {
+            memorySection = ""
         }
 
         let systemInstruction = """
@@ -85,7 +103,7 @@ public final class TaskSummarizer: Sendable {
         multiple Swift files" not "The user was working on login validation"). \
         Silently omit any activity related to adult, explicit, or NSFW content — do not create tasks for it \
         and do not mention it in the day summary. \
-        Respond with a JSON object containing "tasks" and "day_summary". Do not include any text outside the JSON.\(userRules)
+        Respond with a JSON object containing "tasks" and "day_summary". Do not include any text outside the JSON.\(memorySection)\(userRules)
         """
 
         let response = try await geminiClient.generateContent(
@@ -101,44 +119,174 @@ public final class TaskSummarizer: Sendable {
         }
         #endif
 
-        return try parseResponse(response, date: date)
+        var result = try parseResponse(response, date: date)
+
+        // Second call: extract memory updates from what was just observed
+        let memoryEntries = await extractMemory(from: activities, existingMemory: memoryContext)
+        result = SummarizationResult(tasks: result.tasks, daySummary: result.daySummary, newMemoryEntries: memoryEntries)
+
+        return result
+    }
+
+    // MARK: - Memory Extraction
+
+    /// Ask the AI to identify new facts about the user from today's activity.
+    private func extractMemory(from activities: [SummarizationInput], existingMemory: String?) async -> [String] {
+        let appNames = Set(activities.map { $0.appName }).sorted()
+        let windowTitles = activities.compactMap { $0.windowTitle }.prefix(20)
+
+        var prompt = """
+        Based on the following desktop activity, identify factual observations about this person \
+        that would be useful to remember for future sessions. Focus on:
+        - Project names and what they involve
+        - Technologies, languages, and tools used regularly
+        - Work patterns (e.g., "primarily works in Swift using Xcode")
+        - Key repositories or codebases
+
+        Apps used: \(appNames.joined(separator: ", "))
+        Sample window titles: \(windowTitles.joined(separator: " | "))
+        """
+
+        if let existing = existingMemory, !existing.isEmpty {
+            prompt += """
+
+            Already known (do NOT repeat these):
+            \(existing)
+
+            Only return NEW facts not already covered above.
+            """
+        }
+
+        prompt += """
+
+        Respond with a JSON array of short factual strings. Each should be a single concise sentence.
+        If there is nothing new to learn, return an empty array [].
+        Example: ["Works on a macOS app called TaskMiner using SwiftUI", "Uses Gemini API for AI features"]
+        """
+
+        let systemInstruction = """
+        You extract factual observations about a person from their computer activity. \
+        Return ONLY a JSON array of strings. No markdown, no explanation. \
+        Each entry must be a short, factual, third-person statement. \
+        Never include sensitive data like passwords, tokens, or personal messages.
+        """
+
+        do {
+            let response = try await geminiClient.generateContent(
+                prompt: prompt,
+                systemInstruction: systemInstruction
+            )
+
+            var jsonStr = response.trimmingCharacters(in: .whitespacesAndNewlines)
+            if jsonStr.hasPrefix("```json") { jsonStr = String(jsonStr.dropFirst(7)) }
+            else if jsonStr.hasPrefix("```") { jsonStr = String(jsonStr.dropFirst(3)) }
+            if jsonStr.hasSuffix("```") { jsonStr = String(jsonStr.dropLast(3)) }
+            jsonStr = jsonStr.trimmingCharacters(in: .whitespacesAndNewlines)
+
+            // Find array in response
+            if !jsonStr.hasPrefix("["), let idx = jsonStr.firstIndex(of: "[") {
+                jsonStr = String(jsonStr[idx...])
+            }
+
+            guard let data = jsonStr.data(using: .utf8),
+                  let arr = try? JSONSerialization.jsonObject(with: data) as? [String]
+            else {
+                Logger.debug("Memory extraction: could not parse response")
+                return []
+            }
+
+            Logger.debug("Memory extraction: \(arr.count) new entries")
+            return arr
+        } catch {
+            Logger.debug("Memory extraction failed (non-fatal): \(error.localizedDescription)")
+            return []
+        }
     }
 
     // MARK: - Prompt Building
 
+    /// Pre-aggregate consecutive activity entries that share the same app into blocks.
+    /// This prevents the AI from creating a new task per screenshot interval.
+    private struct ActivityBlock {
+        let appName: String
+        let startTime: Date
+        var endTime: Date
+        var windowTitles: [String]
+        var totalDuration: TimeInterval
+        var ocrSamples: [String]
+    }
+
+    private func aggregateActivities(_ activities: [SummarizationInput]) -> [ActivityBlock] {
+        var blocks: [ActivityBlock] = []
+
+        for activity in activities where !activity.isIdle {
+            let title = activity.windowTitle ?? "(no title)"
+            let dur = activity.duration ?? 0
+
+            if var last = blocks.last, last.appName == activity.appName {
+                // Extend the current block
+                last.endTime = activity.timestamp.addingTimeInterval(dur)
+                last.totalDuration += dur
+                if !last.windowTitles.contains(title) {
+                    last.windowTitles.append(title)
+                }
+                if let ocr = activity.ocrText, !ocr.isEmpty, last.ocrSamples.count < 3 {
+                    let trimmed = String(ocr.prefix(400))
+                    if !last.ocrSamples.contains(where: { $0.prefix(80) == trimmed.prefix(80) }) {
+                        last.ocrSamples.append(trimmed)
+                    }
+                }
+                blocks[blocks.count - 1] = last
+            } else {
+                // Start a new block
+                var ocrSamples: [String] = []
+                if let ocr = activity.ocrText, !ocr.isEmpty {
+                    ocrSamples.append(String(ocr.prefix(400)))
+                }
+                blocks.append(ActivityBlock(
+                    appName: activity.appName,
+                    startTime: activity.timestamp,
+                    endTime: activity.timestamp.addingTimeInterval(dur),
+                    windowTitles: [title],
+                    totalDuration: dur,
+                    ocrSamples: ocrSamples
+                ))
+            }
+        }
+
+        return blocks
+    }
+
     private func buildPrompt(from activities: [SummarizationInput]) -> String {
+        let blocks = aggregateActivities(activities)
+
         var lines: [String] = []
-        lines.append("Analyze the following desktop activity log and identify the high-level tasks:")
+        lines.append("Analyze the following desktop activity log and identify the high-level tasks.")
+        lines.append("Each entry below is a block of continuous activity in one app — some blocks may belong to the same task.")
         lines.append("")
         lines.append("## Activity Log")
         lines.append("")
 
-        // Deduplicate and summarize activities
-        var seenOCR = Set<String>()
-        var ocrSamples: [(time: String, text: String)] = []
+        var ocrSections: [(time: String, text: String)] = []
 
-        for activity in activities where !activity.isIdle {
-            let time = Self.timeFormatter.string(from: activity.timestamp)
-            let dur = activity.duration.map { "\(Int($0))s" } ?? "?"
-            let title = activity.windowTitle ?? "(no title)"
-            lines.append("[\(time)] \(activity.appName) — \(title) (\(dur))")
+        for block in blocks {
+            let start = Self.timeFormatter.string(from: block.startTime)
+            let end = Self.timeFormatter.string(from: block.endTime)
+            let dur = "\(Int(block.totalDuration))s"
+            let titles = block.windowTitles.prefix(5).joined(separator: " | ")
+            lines.append("[\(start)–\(end)] \(block.appName) (\(dur)) — \(titles)")
 
-            // Collect unique OCR samples (max 10, max 500 chars each)
-            if let ocr = activity.ocrText, !ocr.isEmpty, ocrSamples.count < 10 {
-                let trimmed = String(ocr.prefix(500))
-                let hash = String(trimmed.prefix(100))
-                if !seenOCR.contains(hash) {
-                    seenOCR.insert(hash)
-                    ocrSamples.append((time: time, text: trimmed))
-                }
+            // Collect OCR samples (limit total to 10)
+            for ocr in block.ocrSamples where ocrSections.count < 10 {
+                ocrSections.append((time: start, text: ocr))
             }
         }
 
-        if !ocrSamples.isEmpty {
+        if !ocrSections.isEmpty {
             lines.append("")
             lines.append("## Screen Content (OCR)")
             lines.append("")
-            for sample in ocrSamples {
+            for sample in ocrSections {
                 lines.append("[\(sample.time)] \(sample.text)")
                 lines.append("---")
             }
@@ -163,12 +311,14 @@ public final class TaskSummarizer: Sendable {
         }
 
         Rules:
-        - Group related activities into a single task
+        - Aggressively merge related activity into coarser tasks — aim for roughly 3–8 tasks per full day
+        - If the same project or topic appears in multiple blocks (even separated by short breaks or other apps), merge them into ONE task that spans the full time range
+        - Every task title MUST be unique — never produce two tasks with the same or near-identical title
         - Titles MUST start with a present participle verb (e.g., Developing, Browsing, Watching, Reviewing, Debugging)
         - Descriptions must be impersonal — never write "the user", "you", or "they". Describe the activity directly.
         - day_summary should be written in a direct, impersonal style — describe what was worked on and where the bulk of time went. Never say "the user" or "you".
         - confidence should be 0.0-1.0 based on how certain you are
-        - Times should be based on the activity timestamps
+        - Times should be based on the activity timestamps — use the earliest start and latest end for merged tasks
         - Ignore idle periods
         - Silently skip any activity involving adult, explicit, or NSFW content — never include it in tasks or the day summary
         - If there's not enough information, return {"tasks": [], "day_summary": null}
@@ -263,7 +413,57 @@ public final class TaskSummarizer: Sendable {
             )
         }
 
-        return SummarizationResult(tasks: tasks, daySummary: daySummary)
+        let merged = Self.mergeDuplicateTasks(tasks)
+        return SummarizationResult(tasks: merged, daySummary: daySummary, newMemoryEntries: [])
+    }
+
+    /// Post-processing: merge tasks that share the same title into a single task
+    /// spanning the full time range, combining descriptions and apps.
+    private static func mergeDuplicateTasks(_ tasks: [TaskRecord]) -> [TaskRecord] {
+        guard tasks.count > 1 else { return tasks }
+
+        var groups: [String: [TaskRecord]] = [:]
+        var order: [String] = []
+
+        for task in tasks {
+            let key = task.title.lowercased()
+            if groups[key] == nil { order.append(key) }
+            groups[key, default: []].append(task)
+        }
+
+        return order.compactMap { key -> TaskRecord? in
+            guard let group = groups[key], let first = group.first else { return nil }
+            if group.count == 1 { return first }
+
+            let startTime = group.map(\.startTime).min() ?? first.startTime
+            let endTime = group.map(\.endTime).max() ?? first.endTime
+            let confidence = group.map(\.confidence).max() ?? first.confidence
+
+            // Merge descriptions — take longest or combine unique ones
+            let descs = group.map(\.description).filter { !$0.isEmpty }
+            let mergedDesc = descs.max(by: { $0.count < $1.count }) ?? first.description
+
+            // Merge app names
+            var appSet = Set<String>()
+            var appList: [String] = []
+            for t in group {
+                for app in t.appNamesList where appSet.insert(app).inserted {
+                    appList.append(app)
+                }
+            }
+            let appNamesJSON = (try? JSONSerialization.data(withJSONObject: appList))
+                .flatMap { String(data: $0, encoding: .utf8) } ?? "[]"
+
+            return TaskRecord(
+                date: first.date,
+                startTime: startTime,
+                endTime: endTime,
+                title: first.title,
+                description: mergedDesc,
+                appNames: appNamesJSON,
+                confidence: confidence
+            )
+        }
     }
 
     private func parseTime(_ timeStr: String, relativeTo startOfDay: Date) -> Date? {

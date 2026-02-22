@@ -12,6 +12,7 @@ final class DashboardViewModel {
     let pauseController: PauseController
     private let taskWriter: TaskWriter?
     private var taskSummarizer: TaskSummarizer?
+    let memoryStore: UserMemoryStore
 
     var selectedDate: Date = Date()
     var availableDates: [String] = []
@@ -51,6 +52,7 @@ final class DashboardViewModel {
         self.dbReader = try? DatabaseReader(path: config.databasePath)
         self.pauseController = PauseController(dataDirectory: config.dataDirectory)
         self.taskWriter = try? TaskWriter(path: config.databasePath)
+        self.memoryStore = UserMemoryStore(filePath: config.memoryPath)
 
         // Initialize AI summarization: Keychain first, then env (same as CLI)
         let geminiClient = GeminiClient.resolvedClient()
@@ -113,16 +115,24 @@ final class DashboardViewModel {
             return f.string(from: date)
         }()
 
+        let memoryContext = memoryStore.contextString()
+
         Task {
             do {
                 let result = try await summarizer.summarize(
                     activities: activityData,
                     date: date,
-                    customPrompt: SettingsManager.shared.customPrompt
+                    customPrompt: SettingsManager.shared.customPrompt,
+                    memoryContext: memoryContext
                 )
 
                 try writer.deleteTasks(for: dateStr)
                 try writer.insertTasks(result.tasks)
+
+                // Merge any new memory entries learned from this session
+                if !result.newMemoryEntries.isEmpty {
+                    self.memoryStore.merge(newEntries: result.newMemoryEntries)
+                }
 
                 // Refresh all data for the day (tasks, activities, summary stats)
                 self.loadDataForSelectedDate()

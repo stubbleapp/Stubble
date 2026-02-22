@@ -8,6 +8,7 @@ struct SettingsView: View {
     @State private var showKey = false
     @State private var saved = false
     @State private var customPrompt: String = ""
+    @State private var memoryEntries: [MemoryEntry] = []
 
     var body: some View {
         VStack(spacing: 0) {
@@ -82,7 +83,7 @@ struct SettingsView: View {
                         TextEditor(text: $customPrompt)
                             .font(.system(size: 12))
                             .scrollContentBackground(.hidden)
-                            .frame(minHeight: 80, maxHeight: 140)
+                            .frame(minHeight: 60, maxHeight: 100)
                             .padding(8)
                             .background(.ultraThinMaterial)
                             .cornerRadius(6)
@@ -91,6 +92,83 @@ struct SettingsView: View {
                             .font(.caption2)
                             .foregroundStyle(Theme.textMuted)
                             .italic()
+                    }
+
+                    // Memory
+                    VStack(alignment: .leading, spacing: 8) {
+                        HStack {
+                            Text("Memory")
+                                .font(.subheadline.weight(.medium))
+                                .foregroundStyle(Theme.textPrimary)
+
+                            Spacer()
+
+                            if !memoryEntries.isEmpty {
+                                Text("\(memoryEntries.count) items")
+                                    .font(.caption2)
+                                    .foregroundStyle(Theme.textMuted)
+                            }
+                        }
+
+                        if memoryEntries.isEmpty {
+                            Text("No memories yet. The AI will learn about your projects and habits as you generate summaries.")
+                                .font(.system(size: 12))
+                                .foregroundStyle(Theme.textMuted)
+                                .padding(12)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .background(.ultraThinMaterial)
+                                .cornerRadius(6)
+                        } else {
+                            VStack(spacing: 0) {
+                                ForEach(memoryEntries) { entry in
+                                    HStack(alignment: .top, spacing: 8) {
+                                        Text(entry.content)
+                                            .font(.system(size: 12))
+                                            .foregroundStyle(Theme.textSecondary)
+                                            .frame(maxWidth: .infinity, alignment: .leading)
+
+                                        Button {
+                                            withAnimation(.easeInOut(duration: 0.2)) {
+                                                viewModel.memoryStore.delete(id: entry.id)
+                                                memoryEntries.removeAll { $0.id == entry.id }
+                                            }
+                                        } label: {
+                                            Image(systemName: "xmark")
+                                                .font(.system(size: 9, weight: .medium))
+                                                .foregroundStyle(Theme.textMuted)
+                                                .frame(width: 18, height: 18)
+                                                .contentShape(Rectangle())
+                                        }
+                                        .buttonStyle(.plain)
+                                    }
+                                    .padding(.horizontal, 10)
+                                    .padding(.vertical, 7)
+
+                                    if entry.id != memoryEntries.last?.id {
+                                        Rectangle()
+                                            .fill(Theme.separator.opacity(0.5))
+                                            .frame(height: 0.5)
+                                            .padding(.leading, 10)
+                                    }
+                                }
+                            }
+                            .background(.ultraThinMaterial)
+                            .cornerRadius(6)
+
+                            Button {
+                                viewModel.memoryStore.save([])
+                                withAnimation { memoryEntries = [] }
+                            } label: {
+                                Text("Clear All")
+                                    .font(.system(size: 11, weight: .medium))
+                                    .foregroundStyle(Theme.statusError.opacity(0.8))
+                            }
+                            .buttonStyle(.plain)
+                        }
+
+                        Text("Learned automatically from your activity. Used to improve task accuracy and consistency across sessions.")
+                            .font(.caption2)
+                            .foregroundStyle(Theme.textMuted)
                     }
 
                     // Status + Save
@@ -146,12 +224,13 @@ struct SettingsView: View {
                 .padding()
             }
         }
-        .frame(width: 480, height: 380)
+        .frame(width: 480, height: 520)
         .background(.ultraThinMaterial)
         .onAppear {
             apiKey = GeminiKeychain.get() ?? ""
             showKey = !apiKey.isEmpty
             customPrompt = SettingsManager.shared.customPrompt ?? ""
+            memoryEntries = viewModel.memoryStore.load()
         }
     }
 
