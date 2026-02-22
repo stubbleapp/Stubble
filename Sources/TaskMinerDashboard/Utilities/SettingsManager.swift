@@ -6,11 +6,10 @@ import TaskMinerShared
 final class SettingsManager {
     static let shared = SettingsManager()
 
-    private let filePath: URL
+    private let filePath: URL?
 
     private init() {
-        // swiftlint:disable:next force_try
-        self.filePath = (try! SharedConfiguration()).settingsPath
+        self.filePath = (try? SharedConfiguration())?.settingsPath
     }
 
     // MARK: - Settings Model (non-secret settings only; key is in Keychain)
@@ -22,7 +21,8 @@ final class SettingsManager {
     // MARK: - Read / Write (for future file-based settings)
 
     func load() -> Settings {
-        guard FileManager.default.fileExists(atPath: filePath.path),
+        guard let filePath,
+              FileManager.default.fileExists(atPath: filePath.path),
               let data = try? Data(contentsOf: filePath),
               let settings = try? JSONDecoder().decode(Settings.self, from: data)
         else {
@@ -32,6 +32,7 @@ final class SettingsManager {
     }
 
     func save(_ settings: Settings) {
+        guard let filePath else { return }
         let dir = filePath.deletingLastPathComponent()
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         if let data = try? JSONEncoder().encode(settings) {

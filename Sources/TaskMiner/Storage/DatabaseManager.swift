@@ -5,12 +5,6 @@ import TaskMinerShared
 class DatabaseManager {
     private var db: OpaquePointer?
 
-    private static let iso8601: ISO8601DateFormatter = {
-        let f = ISO8601DateFormatter()
-        f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        return f
-    }()
-
     init(path: URL) throws {
         var dbPointer: OpaquePointer?
         let rc = sqlite3_open(path.path, &dbPointer)
@@ -107,6 +101,7 @@ class DatabaseManager {
 
     @discardableResult
     func insertActivity(_ record: ActivityRecord) throws -> Int64 {
+        guard let db = db else { throw DatabaseError.closed }
         let sql = """
         INSERT INTO activities (timestamp, end_time, app_name, bundle_id, window_title, duration, is_idle)
         VALUES (?, ?, ?, ?, ?, ?, ?)
@@ -117,26 +112,26 @@ class DatabaseManager {
         }
         defer { sqlite3_finalize(stmt) }
 
-        let ts = Self.iso8601.string(from: record.timestamp)
-        sqlite3_bind_text(stmt, 1, (ts as NSString).utf8String, -1, nil)
+        let ts = SharedFormatters.iso8601.string(from: record.timestamp)
+        sqliteBindText(stmt, 1, ts)
 
         if let endTime = record.endTime {
-            let et = Self.iso8601.string(from: endTime)
-            sqlite3_bind_text(stmt, 2, (et as NSString).utf8String, -1, nil)
+            let et = SharedFormatters.iso8601.string(from: endTime)
+            sqliteBindText(stmt, 2, et)
         } else {
             sqlite3_bind_null(stmt, 2)
         }
 
-        sqlite3_bind_text(stmt, 3, (record.appName as NSString).utf8String, -1, nil)
+        sqliteBindText(stmt, 3, record.appName)
 
         if let bundleId = record.bundleId {
-            sqlite3_bind_text(stmt, 4, (bundleId as NSString).utf8String, -1, nil)
+            sqliteBindText(stmt, 4, bundleId)
         } else {
             sqlite3_bind_null(stmt, 4)
         }
 
         if let title = record.windowTitle {
-            sqlite3_bind_text(stmt, 5, (title as NSString).utf8String, -1, nil)
+            sqliteBindText(stmt, 5, title)
         } else {
             sqlite3_bind_null(stmt, 5)
         }
@@ -157,6 +152,7 @@ class DatabaseManager {
     }
 
     func finalizeActivity(id: Int64, endTime: Date, duration: TimeInterval) throws {
+        guard db != nil else { throw DatabaseError.closed }
         let sql = "UPDATE activities SET end_time = ?, duration = ? WHERE id = ?"
         var stmt: OpaquePointer?
         guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
@@ -164,8 +160,8 @@ class DatabaseManager {
         }
         defer { sqlite3_finalize(stmt) }
 
-        let et = Self.iso8601.string(from: endTime)
-        sqlite3_bind_text(stmt, 1, (et as NSString).utf8String, -1, nil)
+        let et = SharedFormatters.iso8601.string(from: endTime)
+        sqliteBindText(stmt, 1, et)
         sqlite3_bind_double(stmt, 2, duration)
         sqlite3_bind_int64(stmt, 3, id)
 
@@ -174,24 +170,10 @@ class DatabaseManager {
         }
     }
 
-    func updateWindowTitle(id: Int64, title: String) throws {
-        let sql = "UPDATE activities SET window_title = ? WHERE id = ?"
-        var stmt: OpaquePointer?
-        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
-            throw DatabaseError.executionFailed(lastError)
-        }
-        defer { sqlite3_finalize(stmt) }
-
-        sqlite3_bind_text(stmt, 1, (title as NSString).utf8String, -1, nil)
-        sqlite3_bind_int64(stmt, 2, id)
-        guard sqlite3_step(stmt) == SQLITE_DONE else {
-            throw DatabaseError.executionFailed(lastError)
-        }
-    }
-
     // MARK: - Screenshot CRUD
 
     func insertScreenshot(_ record: ScreenshotRecord) throws {
+        guard db != nil else { throw DatabaseError.closed }
         let sql = """
         INSERT INTO screenshots (timestamp, file_path, file_size, activity_id, trigger_type, ocr_text)
         VALUES (?, ?, ?, ?, ?, ?)
@@ -202,9 +184,9 @@ class DatabaseManager {
         }
         defer { sqlite3_finalize(stmt) }
 
-        let ts = Self.iso8601.string(from: record.timestamp)
-        sqlite3_bind_text(stmt, 1, (ts as NSString).utf8String, -1, nil)
-        sqlite3_bind_text(stmt, 2, (record.filePath as NSString).utf8String, -1, nil)
+        let ts = SharedFormatters.iso8601.string(from: record.timestamp)
+        sqliteBindText(stmt, 1, ts)
+        sqliteBindText(stmt, 2, record.filePath)
 
         if let size = record.fileSize {
             sqlite3_bind_int(stmt, 3, Int32(size))
@@ -218,10 +200,10 @@ class DatabaseManager {
             sqlite3_bind_null(stmt, 4)
         }
 
-        sqlite3_bind_text(stmt, 5, (record.trigger.rawValue as NSString).utf8String, -1, nil)
+        sqliteBindText(stmt, 5, record.trigger.rawValue)
 
         if let ocrText = record.ocrText {
-            sqlite3_bind_text(stmt, 6, (ocrText as NSString).utf8String, -1, nil)
+            sqliteBindText(stmt, 6, ocrText)
         } else {
             sqlite3_bind_null(stmt, 6)
         }
@@ -235,6 +217,7 @@ class DatabaseManager {
 
     @discardableResult
     func insertTask(_ task: TaskRecord) throws -> Int64 {
+        guard db != nil else { throw DatabaseError.closed }
         let sql = """
         INSERT INTO tasks (date, start_time, end_time, title, description, app_names, confidence)
         VALUES (?, ?, ?, ?, ?, ?, ?)
@@ -245,12 +228,12 @@ class DatabaseManager {
         }
         defer { sqlite3_finalize(stmt) }
 
-        sqlite3_bind_text(stmt, 1, (task.date as NSString).utf8String, -1, nil)
-        sqlite3_bind_text(stmt, 2, (Self.iso8601.string(from: task.startTime) as NSString).utf8String, -1, nil)
-        sqlite3_bind_text(stmt, 3, (Self.iso8601.string(from: task.endTime) as NSString).utf8String, -1, nil)
-        sqlite3_bind_text(stmt, 4, (task.title as NSString).utf8String, -1, nil)
-        sqlite3_bind_text(stmt, 5, (task.description as NSString).utf8String, -1, nil)
-        sqlite3_bind_text(stmt, 6, (task.appNames as NSString).utf8String, -1, nil)
+        sqliteBindText(stmt, 1, task.date)
+        sqliteBindText(stmt, 2, SharedFormatters.iso8601.string(from: task.startTime))
+        sqliteBindText(stmt, 3, SharedFormatters.iso8601.string(from: task.endTime))
+        sqliteBindText(stmt, 4, task.title)
+        sqliteBindText(stmt, 5, task.description)
+        sqliteBindText(stmt, 6, task.appNames)
         sqlite3_bind_double(stmt, 7, task.confidence)
 
         guard sqlite3_step(stmt) == SQLITE_DONE else {
@@ -259,9 +242,24 @@ class DatabaseManager {
         return sqlite3_last_insert_rowid(db)
     }
 
+    func deleteTasks(for dateString: String) throws {
+        guard db != nil else { throw DatabaseError.closed }
+        let sql = "DELETE FROM tasks WHERE date = ?"
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
+            throw DatabaseError.executionFailed(lastError)
+        }
+        defer { sqlite3_finalize(stmt) }
+        sqliteBindText(stmt, 1, dateString)
+        guard sqlite3_step(stmt) == SQLITE_DONE else {
+            throw DatabaseError.executionFailed(lastError)
+        }
+    }
+
     // MARK: - Daily Summary
 
     func generateDailySummary(for date: Date) {
+        guard db != nil else { return }
         let cal = Calendar.current
         let startOfDay = cal.startOfDay(for: date)
         guard let endOfDay = cal.date(byAdding: .day, value: 1, to: startOfDay) else {
@@ -269,13 +267,9 @@ class DatabaseManager {
             return
         }
 
-        let startStr = Self.iso8601.string(from: startOfDay)
-        let endStr = Self.iso8601.string(from: endOfDay)
-        let dateStr = {
-            let f = DateFormatter()
-            f.dateFormat = "yyyy-MM-dd"
-            return f.string(from: date)
-        }()
+        let startStr = SharedFormatters.iso8601.string(from: startOfDay)
+        let endStr = SharedFormatters.iso8601.string(from: endOfDay)
+        let dateStr = SharedFormatters.dayFormatter.string(from: date)
 
         var totalActive: Double = 0
         var totalIdle: Double = 0
@@ -290,8 +284,8 @@ class DatabaseManager {
         guard sqlite3_prepare_v2(db, querySql, -1, &stmt, nil) == SQLITE_OK else { return }
         defer { sqlite3_finalize(stmt) }
 
-        sqlite3_bind_text(stmt, 1, (startStr as NSString).utf8String, -1, nil)
-        sqlite3_bind_text(stmt, 2, (endStr as NSString).utf8String, -1, nil)
+        sqliteBindText(stmt, 1, startStr)
+        sqliteBindText(stmt, 2, endStr)
 
         while sqlite3_step(stmt) == SQLITE_ROW {
             let duration = sqlite3_column_double(stmt, 3)
@@ -316,8 +310,8 @@ class DatabaseManager {
         var countStmt: OpaquePointer?
         var screenshotCount = 0
         if sqlite3_prepare_v2(db, countSql, -1, &countStmt, nil) == SQLITE_OK {
-            sqlite3_bind_text(countStmt, 1, (startStr as NSString).utf8String, -1, nil)
-            sqlite3_bind_text(countStmt, 2, (endStr as NSString).utf8String, -1, nil)
+            sqliteBindText(countStmt, 1, startStr)
+            sqliteBindText(countStmt, 2, endStr)
             if sqlite3_step(countStmt) == SQLITE_ROW {
                 screenshotCount = Int(sqlite3_column_int(countStmt, 0))
             }
@@ -346,14 +340,14 @@ class DatabaseManager {
         guard sqlite3_prepare_v2(db, upsertSql, -1, &upsertStmt, nil) == SQLITE_OK else { return }
         defer { sqlite3_finalize(upsertStmt) }
 
-        let now = Self.iso8601.string(from: Date())
-        sqlite3_bind_text(upsertStmt, 1, (dateStr as NSString).utf8String, -1, nil)
+        let now = SharedFormatters.iso8601.string(from: Date())
+        sqliteBindText(upsertStmt, 1, dateStr)
         sqlite3_bind_double(upsertStmt, 2, totalActive)
         sqlite3_bind_double(upsertStmt, 3, totalIdle)
-        sqlite3_bind_text(upsertStmt, 4, (appUsageJSON as NSString).utf8String, -1, nil)
-        sqlite3_bind_text(upsertStmt, 5, (topWindowsJSON as NSString).utf8String, -1, nil)
+        sqliteBindText(upsertStmt, 4, appUsageJSON)
+        sqliteBindText(upsertStmt, 5, topWindowsJSON)
         sqlite3_bind_int(upsertStmt, 6, Int32(screenshotCount))
-        sqlite3_bind_text(upsertStmt, 7, (now as NSString).utf8String, -1, nil)
+        sqliteBindText(upsertStmt, 7, now)
 
         if sqlite3_step(upsertStmt) != SQLITE_DONE {
             Logger.error("Failed to upsert daily summary: \(lastError)")
@@ -366,8 +360,9 @@ class DatabaseManager {
 
     /// Returns activity + OCR data for a time range (used by AI summarization)
     func recentActivitiesWithOCR(from start: Date, to end: Date) -> [SummarizationInput] {
-        let startStr = Self.iso8601.string(from: start)
-        let endStr = Self.iso8601.string(from: end)
+        guard db != nil else { return [] }
+        let startStr = SharedFormatters.iso8601.string(from: start)
+        let endStr = SharedFormatters.iso8601.string(from: end)
 
         let sql = """
         SELECT a.app_name, a.bundle_id, a.window_title, a.timestamp, a.duration, a.is_idle,
@@ -384,8 +379,8 @@ class DatabaseManager {
         }
         defer { sqlite3_finalize(stmt) }
 
-        sqlite3_bind_text(stmt, 1, (startStr as NSString).utf8String, -1, nil)
-        sqlite3_bind_text(stmt, 2, (endStr as NSString).utf8String, -1, nil)
+        sqliteBindText(stmt, 1, startStr)
+        sqliteBindText(stmt, 2, endStr)
 
         var results: [SummarizationInput] = []
         while sqlite3_step(stmt) == SQLITE_ROW {
@@ -393,7 +388,7 @@ class DatabaseManager {
                 appName: sqlite3_column_text(stmt, 0).map { String(cString: $0) } ?? "Unknown",
                 bundleId: sqlite3_column_text(stmt, 1).map { String(cString: $0) },
                 windowTitle: sqlite3_column_text(stmt, 2).map { String(cString: $0) },
-                timestamp: sqlite3_column_text(stmt, 3).flatMap { Self.iso8601.date(from: String(cString: $0)) } ?? Date(),
+                timestamp: sqlite3_column_text(stmt, 3).flatMap { SharedFormatters.iso8601.date(from: String(cString: $0)) } ?? Date(),
                 duration: sqlite3_column_type(stmt, 4) != SQLITE_NULL ? sqlite3_column_double(stmt, 4) : nil,
                 isIdle: sqlite3_column_int(stmt, 5) != 0,
                 ocrText: sqlite3_column_text(stmt, 6).map { String(cString: $0) }
@@ -405,50 +400,16 @@ class DatabaseManager {
 
     // MARK: - Cleanup
 
-    /// Returns file paths of screenshots older than the cutoff that already have OCR text extracted.
-    /// These are safe to delete from disk since their text content is preserved in the database.
-    func analyzedScreenshotPaths(olderThan cutoff: Date) -> [(id: Int64, filePath: String)] {
-        let cutoffStr = Self.iso8601.string(from: cutoff)
-        let sql = """
-        SELECT id, file_path FROM screenshots
-        WHERE timestamp < ? AND ocr_text IS NOT NULL AND ocr_text != ''
-        ORDER BY timestamp ASC
-        """
-        var stmt: OpaquePointer?
-        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return [] }
-        defer { sqlite3_finalize(stmt) }
-
-        sqlite3_bind_text(stmt, 1, (cutoffStr as NSString).utf8String, -1, nil)
-
-        var results: [(id: Int64, filePath: String)] = []
-        while sqlite3_step(stmt) == SQLITE_ROW {
-            let id = sqlite3_column_int64(stmt, 0)
-            let path = sqlite3_column_text(stmt, 1).map { String(cString: $0) } ?? ""
-            results.append((id: id, filePath: path))
-        }
-        return results
-    }
-
-    /// Mark a screenshot's file as deleted (set file_path to empty) after the file has been removed from disk.
-    /// We keep the DB row so OCR text and metadata remain available for queries.
-    func markScreenshotFileDeleted(id: Int64) {
-        let sql = "UPDATE screenshots SET file_path = '', file_size = NULL WHERE id = ?"
-        var stmt: OpaquePointer?
-        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return }
-        defer { sqlite3_finalize(stmt) }
-        sqlite3_bind_int64(stmt, 1, id)
-        sqlite3_step(stmt)
-    }
-
     /// Delete all screenshot rows with timestamp before the given date (e.g. start of today).
     /// Used to keep only the current day's screenshots.
     func deleteScreenshots(before cutoff: Date) {
-        let cutoffStr = Self.iso8601.string(from: cutoff)
+        guard db != nil else { return }
+        let cutoffStr = SharedFormatters.iso8601.string(from: cutoff)
         let sql = "DELETE FROM screenshots WHERE timestamp < ?"
         var stmt: OpaquePointer?
         guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return }
         defer { sqlite3_finalize(stmt) }
-        sqlite3_bind_text(stmt, 1, (cutoffStr as NSString).utf8String, -1, nil)
+        sqliteBindText(stmt, 1, cutoffStr)
         if sqlite3_step(stmt) == SQLITE_DONE {
             let deleted = sqlite3_changes(db)
             if deleted > 0 {
@@ -473,6 +434,7 @@ class DatabaseManager {
 
     @discardableResult
     private func execute(_ sql: String) throws -> Int32 {
+        guard let db = db else { throw DatabaseError.closed }
         var errMsg: UnsafeMutablePointer<CChar>?
         let rc = sqlite3_exec(db, sql, nil, nil, &errMsg)
         if rc != SQLITE_OK && rc != SQLITE_ROW {
@@ -486,4 +448,5 @@ class DatabaseManager {
     private var lastError: String {
         db.flatMap { String(cString: sqlite3_errmsg($0)) } ?? "no database"
     }
+
 }

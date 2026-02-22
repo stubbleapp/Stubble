@@ -1,5 +1,4 @@
 import SwiftUI
-import AppKit
 
 struct AppIconView: View {
     let bundleId: String?

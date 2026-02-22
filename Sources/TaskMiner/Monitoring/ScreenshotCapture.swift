@@ -46,11 +46,4 @@ class ScreenshotCapture {
         }
     }
 
-    func captureAndSave(to url: URL) -> Bool {
-        guard let image = captureFullScreen() else {
-            Logger.error("Screenshot capture failed")
-            return false
-        }
-        return saveAsJPEG(image: image, to: url)
-    }
 }

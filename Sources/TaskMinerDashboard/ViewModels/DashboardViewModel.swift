@@ -6,8 +6,8 @@ import TaskMinerShared
 @Observable
 @MainActor
 final class DashboardViewModel {
-    // swiftlint:disable:next force_try
-    let config = try! SharedConfiguration()
+    let config: SharedConfiguration?
+    var configurationError: String?
     let dbReader: DatabaseReader?
     let pauseController: PauseController
     private let taskWriter: TaskWriter?
@@ -43,16 +43,25 @@ final class DashboardViewModel {
     private var pauseTimer: Timer?
 
     deinit {
+        // View model is owned by the view hierarchy and deallocated on the main thread.
         MainActor.assumeIsolated {
             pauseTimer?.invalidate()
         }
     }
 
     init() {
-        self.dbReader = try? DatabaseReader(path: config.databasePath)
-        self.pauseController = PauseController(dataDirectory: config.dataDirectory)
-        self.taskWriter = try? TaskWriter(path: config.databasePath)
-        self.memoryStore = UserMemoryStore(filePath: config.memoryPath)
+        do {
+            self.config = try SharedConfiguration()
+            self.configurationError = nil
+        } catch {
+            self.config = nil
+            self.configurationError = "Application Support unavailable: \(error.localizedDescription)"
+        }
+        let baseDir = config?.dataDirectory ?? FileManager.default.temporaryDirectory
+        self.dbReader = config.flatMap { try? DatabaseReader(path: $0.databasePath) }
+        self.pauseController = PauseController(dataDirectory: baseDir)
+        self.taskWriter = config.flatMap { try? TaskWriter(path: $0.databasePath) }
+        self.memoryStore = UserMemoryStore(filePath: config?.memoryPath ?? baseDir.appendingPathComponent("memory.json"))
 
         // Initialize AI summarization: Keychain first, then env (same as CLI)
         let geminiClient = GeminiClient.resolvedClient()
@@ -74,11 +83,6 @@ final class DashboardViewModel {
     func selectDate(_ date: Date) {
         selectedDate = date
         daySummaryText = nil
-        loadDataForSelectedDate()
-    }
-
-    func refresh() {
-        loadAvailableDates()
         loadDataForSelectedDate()
     }
 
@@ -147,8 +151,6 @@ final class DashboardViewModel {
 
     // MARK: - Task Editing & Deletion
 
-    var canEditData: Bool { taskWriter != nil }
-
     /// Update a task's title and description, then refresh from DB.
     func updateTask(id: Int64, title: String, description: String) {
         guard let writer = taskWriter else { return }
@@ -184,6 +186,7 @@ final class DashboardViewModel {
         let fm = FileManager.default
         for record in toDelete {
             guard !record.filePath.isEmpty else { continue }
+            guard let config = config else { continue }
             let fullPath = config.screenshotDirectory.appendingPathComponent(record.filePath)
             try? fm.removeItem(at: fullPath)
         }

@@ -56,7 +56,7 @@ class WindowTitleMonitor {
         )
         guard err1 == .success, let ref = focusedWindow else { return nil }
         guard CFGetTypeID(ref) == AXUIElementGetTypeID() else { return nil }
-        let windowElement = ref as! AXUIElement
+        let windowElement = ref as! AXUIElement  // safe: type ID checked above
 
         var titleValue: CFTypeRef?
         let err2 = AXUIElementCopyAttributeValue(

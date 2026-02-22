@@ -310,31 +310,36 @@ class AppDelegate {
             return
         }
 
-        guard screenshotCapture.saveAsJPEG(image: image, to: path) else {
-            Logger.error("Screenshot save failed to \(path.path)")
-            return
-        }
+        let capturedActivityId = currentActivityId
 
-        let ocrText = ocrEngine.recognizeText(in: image)
-        if let text = ocrText {
-            Logger.debug("OCR extracted \(text.count) chars from screenshot")
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            guard let self else { return }
+            guard self.screenshotCapture.saveAsJPEG(image: image, to: path) else {
+                Logger.error("Screenshot save failed to \(path.path)")
+                return
+            }
+            let ocrText = self.ocrEngine.recognizeText(in: image)
+            if let text = ocrText {
+                Logger.debug("OCR extracted \(text.count) chars from screenshot")
+            }
+            let record = ScreenshotRecord(
+                timestamp: now,
+                filePath: self.screenshotStorage.relativePath(for: path),
+                fileSize: self.screenshotStorage.fileSize(at: path),
+                activityId: capturedActivityId,
+                trigger: trigger,
+                ocrText: ocrText
+            )
+            DispatchQueue.main.async {
+                do {
+                    try self.db.insertScreenshot(record)
+                    Logger.debug("Screenshot recorded (trigger: \(trigger.rawValue))")
+                } catch {
+                    Logger.error("Failed to insert screenshot: \(error.localizedDescription)")
+                }
+                self.lastScreenshotTime = now
+            }
         }
-
-        let record = ScreenshotRecord(
-            timestamp: now,
-            filePath: screenshotStorage.relativePath(for: path),
-            fileSize: screenshotStorage.fileSize(at: path),
-            activityId: currentActivityId,
-            trigger: trigger,
-            ocrText: ocrText
-        )
-        do {
-            try db.insertScreenshot(record)
-            Logger.debug("Screenshot recorded (trigger: \(trigger.rawValue))")
-        } catch {
-            Logger.error("Failed to insert screenshot: \(error.localizedDescription)")
-        }
-        lastScreenshotTime = now
     }
 
     // MARK: - AI Summarization
@@ -361,15 +366,41 @@ class AppDelegate {
             return
         }
 
+        // Load custom prompt from shared settings file
+        let customPrompt: String? = {
+            guard let config = try? SharedConfiguration(),
+                  let data = try? Data(contentsOf: config.settingsPath),
+                  let settings = try? JSONDecoder().decode(CLISettings.self, from: data)
+            else { return nil }
+            return settings.customPrompt
+        }()
+
+        // Load memory context
+        let memoryStore: UserMemoryStore? = {
+            guard let config = try? SharedConfiguration() else { return nil }
+            return UserMemoryStore(filePath: config.memoryPath)
+        }()
+        let memoryContext = memoryStore?.contextString()
+
         let db = self.db
+        let dateStr = todayString()
         Task {
             do {
                 let result = try await summarizer.summarize(
                     activities: activityData,
-                    date: endTime
+                    date: endTime,
+                    customPrompt: customPrompt,
+                    memoryContext: memoryContext
                 )
                 guard !result.tasks.isEmpty else { return }
                 await MainActor.run {
+                    // Delete existing tasks for today before inserting fresh ones
+                    do {
+                        try db.deleteTasks(for: dateStr)
+                    } catch {
+                        Logger.error("Failed to delete old tasks: \(error.localizedDescription)")
+                    }
+
                     var inserted = 0
                     for task in result.tasks {
                         do {
@@ -382,6 +413,11 @@ class AppDelegate {
                     if inserted > 0 {
                         Logger.info("AI generated \(inserted) task(s)")
                     }
+
+                    // Merge new memory entries
+                    if !result.newMemoryEntries.isEmpty {
+                        memoryStore?.merge(newEntries: result.newMemoryEntries)
+                    }
                 }
             } catch {
                 await MainActor.run {
@@ -391,11 +427,14 @@ class AppDelegate {
         }
     }
 
+    /// Minimal Codable struct to read the shared settings file from the dashboard.
+    private struct CLISettings: Codable {
+        var customPrompt: String?
+    }
+
     // MARK: - Helpers
 
     private func todayString() -> String {
-        let f = DateFormatter()
-        f.dateFormat = "yyyy-MM-dd"
-        return f.string(from: Date())
+        SharedFormatters.dayFormatter.string(from: Date())
     }
 }

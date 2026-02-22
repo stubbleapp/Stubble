@@ -40,21 +40,9 @@ public struct SummarizationResult: Sendable {
 public final class TaskSummarizer: Sendable {
     private let geminiClient: GeminiClient
 
-    private static let iso8601: ISO8601DateFormatter = {
-        let f = ISO8601DateFormatter()
-        f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        return f
-    }()
-
     private static let timeFormatter: DateFormatter = {
         let f = DateFormatter()
         f.dateFormat = "HH:mm:ss"
-        return f
-    }()
-
-    private static let dateFormatter: DateFormatter = {
-        let f = DateFormatter()
-        f.dateFormat = "yyyy-MM-dd"
         return f
     }()
 
@@ -257,8 +245,13 @@ public final class TaskSummarizer: Sendable {
         return blocks
     }
 
+    /// Minimum duration (seconds) for an activity block to be included in the prompt.
+    /// Shorter blocks are likely accidental clicks, closing apps, or brief tab switches.
+    private static let minBlockDuration: TimeInterval = 5
+
     private func buildPrompt(from activities: [SummarizationInput]) -> String {
         let blocks = aggregateActivities(activities)
+            .filter { $0.totalDuration >= Self.minBlockDuration }
 
         var lines: [String] = []
         lines.append("Analyze the following desktop activity log and identify the high-level tasks.")
@@ -382,7 +375,7 @@ public final class TaskSummarizer: Sendable {
             throw GeminiError.parseError("Invalid JSON: \(error.localizedDescription). Preview: \(String(jsonStr.prefix(300)))")
         }
 
-        let dateStr = Self.dateFormatter.string(from: date)
+        let dateStr = SharedFormatters.dayFormatter.string(from: date)
         let cal = Calendar.current
         let startOfDay = cal.startOfDay(for: date)
 
@@ -466,15 +459,15 @@ public final class TaskSummarizer: Sendable {
         }
     }
 
-    private func parseTime(_ timeStr: String, relativeTo startOfDay: Date) -> Date? {
+    private func parseTime(_ timeStr: String, relativeTo day: Date) -> Date? {
         let parts = timeStr.split(separator: ":").compactMap { Int($0) }
         guard parts.count >= 2 else { return nil }
 
-        var components = DateComponents()
-        components.hour = parts[0]
-        components.minute = parts[1]
-        components.second = parts.count > 2 ? parts[2] : 0
-
-        return Calendar.current.date(byAdding: components, to: startOfDay)
+        return Calendar.current.date(
+            bySettingHour: parts[0],
+            minute: parts[1],
+            second: parts.count > 2 ? parts[2] : 0,
+            of: day
+        )
     }
 }

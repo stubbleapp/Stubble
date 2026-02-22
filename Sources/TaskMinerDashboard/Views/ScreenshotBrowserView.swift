@@ -84,7 +84,7 @@ struct ScreenshotBrowserView: View {
                         ForEach(Array(viewModel.screenshots.enumerated()), id: \.element.id) { index, screenshot in
                             ScreenshotThumbnailView(
                                 screenshot: screenshot,
-                                screenshotDir: viewModel.config.screenshotDirectory,
+                                screenshotDir: viewModel.config?.screenshotDirectory ?? FileManager.default.temporaryDirectory,
                                 isSelected: isSelecting && selectedIds.contains(screenshot.id ?? -1)
                             )
                             .onTapGesture {
@@ -99,7 +99,7 @@ struct ScreenshotBrowserView: View {
         .sheet(item: $selectedScreenshot) { screenshot in
             ScreenshotDetailView(
                 screenshot: screenshot,
-                screenshotDir: viewModel.config.screenshotDirectory,
+                screenshotDir: viewModel.config?.screenshotDirectory ?? FileManager.default.temporaryDirectory,
                 dbReader: viewModel.dbReader,
                 tasks: viewModel.tasks
             )

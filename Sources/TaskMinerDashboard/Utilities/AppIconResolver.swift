@@ -18,8 +18,9 @@ final class AppIconResolver {
         if let appURL = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleId) {
             result = NSWorkspace.shared.icon(forFile: appURL.path)
         }
-        cache[bundleId] = sized(result, size)
-        return cache[bundleId]!
+        let sizedResult = sized(result, size)
+        cache[bundleId] = sizedResult
+        return sizedResult
     }
 
     private func sized(_ image: NSImage, _ size: CGFloat) -> NSImage {

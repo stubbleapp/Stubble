@@ -78,9 +78,6 @@ enum Theme {
     /// Primary accent — CTAs, links (orange-red).
     static let accent = Color(red: 0.91, green: 0.36, blue: 0.29)
 
-    /// Subtle accent variant.
-    static let accentSubtle = Color(red: 0.91, green: 0.36, blue: 0.29).opacity(0.85)
-
     // MARK: - Borders & Dividers
 
     static let separator = adaptive(
@@ -139,7 +136,4 @@ enum Theme {
     static let triggerPeriodic = Color(red: 0.35, green: 0.72, blue: 0.55)
     static let triggerManual = Color(red: 0.62, green: 0.48, blue: 0.75)
 
-    // MARK: - Code / emphasis
-
-    static let codeHighlight = Color(red: 0.85, green: 0.45, blue: 0.48).opacity(0.25)
 }

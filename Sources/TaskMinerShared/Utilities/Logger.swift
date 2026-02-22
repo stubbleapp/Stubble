@@ -23,15 +23,9 @@ public enum LogLevel: Int, Comparable, Sendable {
 public enum Logger {
     public static var minimumLevel: LogLevel = .info
 
-    private static let formatter: ISO8601DateFormatter = {
-        let f = ISO8601DateFormatter()
-        f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        return f
-    }()
-
     public static func log(_ level: LogLevel, _ message: String) {
         guard level >= minimumLevel else { return }
-        let ts = formatter.string(from: Date())
+        let ts = SharedFormatters.iso8601.string(from: Date())
         fputs("[\(ts)] [\(level.label)] \(message)\n", stderr)
     }
 

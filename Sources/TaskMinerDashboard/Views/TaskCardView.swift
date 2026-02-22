@@ -128,24 +128,17 @@ struct TaskCardView: View {
             }
         }
         .padding(.trailing, 4)
-        .background {
-            // Invisible tap target for expand/collapse — only active when NOT editing.
-            // Using .background instead of .onTapGesture so it doesn't steal
-            // focus from TextFields during editing.
+        .overlay {
+            // Tap target for expand/collapse — removed entirely during editing
+            // so TextFields can receive clicks.
             if !isEditing {
-                Rectangle()
-                    .fill(Color.clear)
+                Color.clear
                     .contentShape(Rectangle())
                     .onTapGesture {
                         withAnimation(.easeInOut(duration: 0.2)) {
                             isExpanded.toggle()
                         }
                     }
-                    .simultaneousGesture(
-                        TapGesture(count: 2).onEnded {
-                            startEditing()
-                        }
-                    )
             }
         }
         .contextMenu {
@@ -248,8 +241,8 @@ struct TaskCardView: View {
         }
         .frame(width: 10)
     }
-
 }
+
 /// Overlapping app icon stack.
 struct AppIconStackView: View {
     let appNames: [String]
@@ -277,4 +270,3 @@ struct AppIconStackView: View {
         }
     }
 }
-

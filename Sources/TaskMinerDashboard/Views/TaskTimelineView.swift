@@ -54,8 +54,40 @@ enum TimelineItem: Identifiable {
 struct TaskTimelineView: View {
     @Environment(DashboardViewModel.self) var viewModel
 
+    private static let dateFmt: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "EEEE, MMMM d"
+        return f
+    }()
+
     var body: some View {
         VStack(spacing: 0) {
+            // Date title + regenerate
+            HStack {
+                Text(Self.dateFmt.string(from: viewModel.selectedDate))
+                    .font(.system(size: 22, weight: .bold, design: .default))
+                    .foregroundStyle(Theme.textPrimary)
+
+                Spacer()
+
+                if viewModel.isToday && viewModel.hasGeminiKey {
+                    Button(action: { viewModel.generateSummary() }) {
+                        Image(systemName: "arrow.clockwise")
+                            .font(.system(size: 14, weight: .medium))
+                            .foregroundStyle(Theme.accent)
+                            .symbolEffect(.bounce, value: viewModel.isGeneratingSummary)
+                            .frame(width: 32, height: 32)
+                            .background(Theme.accent.opacity(0.08))
+                            .clipShape(Circle())
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(viewModel.isGeneratingSummary)
+                }
+            }
+            .padding(.horizontal, 20)
+            .padding(.top, 16)
+            .padding(.bottom, 8)
+
             // Error banner
             if let error = viewModel.summaryError {
                 HStack(spacing: 8) {
@@ -106,7 +138,7 @@ struct TaskTimelineView: View {
                             .foregroundStyle(Theme.accent)
                             .padding(.top, 4)
                         } else {
-                            Text("Set GEMINI_API_KEY to enable")
+                            Text("Add your API key in Settings to enable")
                                 .font(.caption)
                                 .foregroundStyle(Theme.textMuted)
                         }
@@ -175,22 +207,8 @@ struct TaskTimelineView: View {
                     .animation(.easeInOut(duration: 0.2), value: viewModel.isGeneratingSummary)
                     .padding(.horizontal, 20)
 
-                    // Bottom refresh button (today only)
-                    if viewModel.isToday && viewModel.hasGeminiKey {
-                        Button(action: { viewModel.generateSummary() }) {
-                            Image(systemName: "arrow.clockwise")
-                                .font(.system(size: 14, weight: .medium))
-                                .foregroundStyle(Theme.accent)
-                                .symbolEffect(.bounce, value: viewModel.isGeneratingSummary)
-                                .frame(width: 32, height: 32)
-                                .background(Theme.accent.opacity(0.08))
-                                .clipShape(Circle())
-                        }
-                        .buttonStyle(.plain)
-                        .disabled(viewModel.isGeneratingSummary)
-                        .padding(.top, 20)
-                        .padding(.bottom, 24)
-                    }
+                    Spacer()
+                        .frame(height: 24)
                 }
             }
         }

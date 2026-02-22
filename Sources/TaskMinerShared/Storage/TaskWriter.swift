@@ -6,12 +6,6 @@ import SQLite3
 public class TaskWriter {
     private var db: OpaquePointer?
 
-    private static let iso8601: ISO8601DateFormatter = {
-        let f = ISO8601DateFormatter()
-        f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        return f
-    }()
-
     public init(path: URL) throws {
         var dbPointer: OpaquePointer?
         let rc = sqlite3_open_v2(
@@ -47,12 +41,12 @@ public class TaskWriter {
         }
         defer { sqlite3_finalize(stmt) }
 
-        sqlite3_bind_text(stmt, 1, (task.date as NSString).utf8String, -1, nil)
-        sqlite3_bind_text(stmt, 2, (Self.iso8601.string(from: task.startTime) as NSString).utf8String, -1, nil)
-        sqlite3_bind_text(stmt, 3, (Self.iso8601.string(from: task.endTime) as NSString).utf8String, -1, nil)
-        sqlite3_bind_text(stmt, 4, (task.title as NSString).utf8String, -1, nil)
-        sqlite3_bind_text(stmt, 5, (task.description as NSString).utf8String, -1, nil)
-        sqlite3_bind_text(stmt, 6, (task.appNames as NSString).utf8String, -1, nil)
+        sqliteBindText(stmt, 1, task.date)
+        sqliteBindText(stmt, 2, SharedFormatters.iso8601.string(from: task.startTime))
+        sqliteBindText(stmt, 3, SharedFormatters.iso8601.string(from: task.endTime))
+        sqliteBindText(stmt, 4, task.title)
+        sqliteBindText(stmt, 5, task.description)
+        sqliteBindText(stmt, 6, task.appNames)
         sqlite3_bind_double(stmt, 7, task.confidence)
 
         guard sqlite3_step(stmt) == SQLITE_DONE else {
@@ -94,7 +88,7 @@ public class TaskWriter {
         }
         defer { sqlite3_finalize(stmt) }
 
-        sqlite3_bind_text(stmt, 1, (dateString as NSString).utf8String, -1, nil)
+        sqliteBindText(stmt, 1, dateString)
 
         guard sqlite3_step(stmt) == SQLITE_DONE else {
             throw DatabaseError.executionFailed(lastError)
@@ -112,8 +106,8 @@ public class TaskWriter {
         }
         defer { sqlite3_finalize(stmt) }
 
-        sqlite3_bind_text(stmt, 1, (title as NSString).utf8String, -1, nil)
-        sqlite3_bind_text(stmt, 2, (description as NSString).utf8String, -1, nil)
+        sqliteBindText(stmt, 1, title)
+        sqliteBindText(stmt, 2, description)
         sqlite3_bind_int64(stmt, 3, id)
 
         guard sqlite3_step(stmt) == SQLITE_DONE else {

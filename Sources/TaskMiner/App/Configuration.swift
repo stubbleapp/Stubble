@@ -7,20 +7,16 @@ struct Configuration {
     var windowTitlePollInterval: TimeInterval = 2.0
     var screenshotQuality: CGFloat = 0.6
     var maxScreenshotAgeDays: Int = 7
-    let dataDirectory: URL
-    let databasePath: URL
-    let screenshotDirectory: URL
+
+    /// Shared paths (same as Dashboard) — single source of truth.
+    let shared: SharedConfiguration
+
+    var dataDirectory: URL { shared.dataDirectory }
+    var databasePath: URL { shared.databasePath }
+    var screenshotDirectory: URL { shared.screenshotDirectory }
 
     init() throws {
-        guard let appSupport = FileManager.default.urls(
-            for: .applicationSupportDirectory, in: .userDomainMask
-        ).first else {
-            throw ConfigurationError.applicationSupportUnavailable
-        }
-        let base = appSupport.appendingPathComponent("TaskMiner")
-        self.dataDirectory = base
-        self.databasePath = base.appendingPathComponent("taskminer.db")
-        self.screenshotDirectory = base.appendingPathComponent("screenshots")
+        self.shared = try SharedConfiguration()
     }
 
     mutating func parseArguments() {

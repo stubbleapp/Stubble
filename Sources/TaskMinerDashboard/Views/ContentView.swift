@@ -16,6 +16,19 @@ struct ContentView: View {
 
     var body: some View {
         VStack(spacing: 0) {
+            if let error = viewModel.configurationError {
+                HStack(spacing: 8) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .foregroundStyle(Theme.statusError)
+                    Text(error)
+                        .font(.caption)
+                        .foregroundStyle(Theme.textSecondary)
+                    Spacer()
+                }
+                .padding(10)
+                .background(Theme.statusError.opacity(0.12))
+            }
+
             DaySelectorView()
                 .background(Theme.secondaryBackground)
 

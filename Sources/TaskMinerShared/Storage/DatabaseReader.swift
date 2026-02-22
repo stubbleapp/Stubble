@@ -5,24 +5,20 @@ public enum DatabaseError: Error, LocalizedError {
     case openFailed(String)
     case executionFailed(String)
     case migrationFailed(String)
+    case closed
 
     public var errorDescription: String? {
         switch self {
         case .openFailed(let msg): return "Database open failed: \(msg)"
         case .executionFailed(let msg): return "Database error: \(msg)"
         case .migrationFailed(let msg): return "Migration failed: \(msg)"
+        case .closed: return "Database connection is closed"
         }
     }
 }
 
 public class DatabaseReader {
     private var db: OpaquePointer?
-
-    private static let iso8601: ISO8601DateFormatter = {
-        let f = ISO8601DateFormatter()
-        f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        return f
-    }()
 
     public init(path: URL) throws {
         var dbPointer: OpaquePointer?
@@ -97,15 +93,15 @@ public class DatabaseReader {
         guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return [] }
         defer { sqlite3_finalize(stmt) }
 
-        sqlite3_bind_text(stmt, 1, (range.start as NSString).utf8String, -1, nil)
-        sqlite3_bind_text(stmt, 2, (range.end as NSString).utf8String, -1, nil)
+        sqliteBindText(stmt, 1, range.start)
+        sqliteBindText(stmt, 2, range.end)
 
         var results: [ActivityRecord] = []
         while sqlite3_step(stmt) == SQLITE_ROW {
             let record = ActivityRecord(
                 id: sqlite3_column_int64(stmt, 0),
-                timestamp: sqlite3_column_text(stmt, 1).flatMap({ Self.iso8601.date(from: String(cString: $0)) }) ?? Date(),
-                endTime: sqlite3_column_text(stmt, 2).flatMap({ Self.iso8601.date(from: String(cString: $0)) }),
+                timestamp: sqlite3_column_text(stmt, 1).flatMap({ SharedFormatters.iso8601.date(from: String(cString: $0)) }) ?? Date(),
+                endTime: sqlite3_column_text(stmt, 2).flatMap({ SharedFormatters.iso8601.date(from: String(cString: $0)) }),
                 appName: sqlite3_column_text(stmt, 3).map({ String(cString: $0) }) ?? "Unknown",
                 bundleId: sqlite3_column_text(stmt, 4).map({ String(cString: $0) }),
                 windowTitle: sqlite3_column_text(stmt, 5).map({ String(cString: $0) }),
@@ -131,15 +127,15 @@ public class DatabaseReader {
         guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return [] }
         defer { sqlite3_finalize(stmt) }
 
-        sqlite3_bind_text(stmt, 1, (range.start as NSString).utf8String, -1, nil)
-        sqlite3_bind_text(stmt, 2, (range.end as NSString).utf8String, -1, nil)
+        sqliteBindText(stmt, 1, range.start)
+        sqliteBindText(stmt, 2, range.end)
 
         var results: [ScreenshotRecord] = []
         while sqlite3_step(stmt) == SQLITE_ROW {
             let triggerStr = sqlite3_column_text(stmt, 5).map({ String(cString: $0) }) ?? "manual"
             let record = ScreenshotRecord(
                 id: sqlite3_column_int64(stmt, 0),
-                timestamp: sqlite3_column_text(stmt, 1).flatMap({ Self.iso8601.date(from: String(cString: $0)) }) ?? Date(),
+                timestamp: sqlite3_column_text(stmt, 1).flatMap({ SharedFormatters.iso8601.date(from: String(cString: $0)) }) ?? Date(),
                 filePath: sqlite3_column_text(stmt, 2).map({ String(cString: $0) }) ?? "",
                 fileSize: sqlite3_column_type(stmt, 3) != SQLITE_NULL ? Int(sqlite3_column_int(stmt, 3)) : nil,
                 activityId: sqlite3_column_type(stmt, 4) != SQLITE_NULL ? sqlite3_column_int64(stmt, 4) : nil,
@@ -154,11 +150,7 @@ public class DatabaseReader {
     // MARK: - Tasks
 
     public func tasks(for date: Date) -> [TaskRecord] {
-        let dateStr = {
-            let f = DateFormatter()
-            f.dateFormat = "yyyy-MM-dd"
-            return f.string(from: date)
-        }()
+        let dateStr = SharedFormatters.dayFormatter.string(from: date)
 
         let sql = """
         SELECT id, date, start_time, end_time, title, description, app_names, confidence
@@ -170,15 +162,15 @@ public class DatabaseReader {
         guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return [] }
         defer { sqlite3_finalize(stmt) }
 
-        sqlite3_bind_text(stmt, 1, (dateStr as NSString).utf8String, -1, nil)
+        sqliteBindText(stmt, 1, dateStr)
 
         var results: [TaskRecord] = []
         while sqlite3_step(stmt) == SQLITE_ROW {
             let record = TaskRecord(
                 id: sqlite3_column_int64(stmt, 0),
                 date: sqlite3_column_text(stmt, 1).map({ String(cString: $0) }) ?? dateStr,
-                startTime: sqlite3_column_text(stmt, 2).flatMap({ Self.iso8601.date(from: String(cString: $0)) }) ?? Date(),
-                endTime: sqlite3_column_text(stmt, 3).flatMap({ Self.iso8601.date(from: String(cString: $0)) }) ?? Date(),
+                startTime: sqlite3_column_text(stmt, 2).flatMap({ SharedFormatters.iso8601.date(from: String(cString: $0)) }) ?? Date(),
+                endTime: sqlite3_column_text(stmt, 3).flatMap({ SharedFormatters.iso8601.date(from: String(cString: $0)) }) ?? Date(),
                 title: sqlite3_column_text(stmt, 4).map({ String(cString: $0) }) ?? "",
                 description: sqlite3_column_text(stmt, 5).map({ String(cString: $0) }) ?? "",
                 appNames: sqlite3_column_text(stmt, 6).map({ String(cString: $0) }) ?? "[]",
@@ -205,8 +197,8 @@ public class DatabaseReader {
         guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return [] }
         defer { sqlite3_finalize(stmt) }
 
-        sqlite3_bind_text(stmt, 1, (range.start as NSString).utf8String, -1, nil)
-        sqlite3_bind_text(stmt, 2, (range.end as NSString).utf8String, -1, nil)
+        sqliteBindText(stmt, 1, range.start)
+        sqliteBindText(stmt, 2, range.end)
 
         var results: [SummarizationInput] = []
         while sqlite3_step(stmt) == SQLITE_ROW {
@@ -214,7 +206,7 @@ public class DatabaseReader {
                 appName: sqlite3_column_text(stmt, 0).map { String(cString: $0) } ?? "Unknown",
                 bundleId: sqlite3_column_text(stmt, 1).map { String(cString: $0) },
                 windowTitle: sqlite3_column_text(stmt, 2).map { String(cString: $0) },
-                timestamp: sqlite3_column_text(stmt, 3).flatMap { Self.iso8601.date(from: String(cString: $0)) } ?? Date(),
+                timestamp: sqlite3_column_text(stmt, 3).flatMap { SharedFormatters.iso8601.date(from: String(cString: $0)) } ?? Date(),
                 duration: sqlite3_column_type(stmt, 4) != SQLITE_NULL ? sqlite3_column_double(stmt, 4) : nil,
                 isIdle: sqlite3_column_int(stmt, 5) != 0,
                 ocrText: sqlite3_column_text(stmt, 6).map { String(cString: $0) }
@@ -242,8 +234,8 @@ public class DatabaseReader {
 
         return ActivityRecord(
             id: sqlite3_column_int64(stmt, 0),
-            timestamp: sqlite3_column_text(stmt, 1).flatMap({ Self.iso8601.date(from: String(cString: $0)) }) ?? Date(),
-            endTime: sqlite3_column_text(stmt, 2).flatMap({ Self.iso8601.date(from: String(cString: $0)) }),
+            timestamp: sqlite3_column_text(stmt, 1).flatMap({ SharedFormatters.iso8601.date(from: String(cString: $0)) }) ?? Date(),
+            endTime: sqlite3_column_text(stmt, 2).flatMap({ SharedFormatters.iso8601.date(from: String(cString: $0)) }),
             appName: sqlite3_column_text(stmt, 3).map({ String(cString: $0) }) ?? "Unknown",
             bundleId: sqlite3_column_text(stmt, 4).map({ String(cString: $0) }),
             windowTitle: sqlite3_column_text(stmt, 5).map({ String(cString: $0) }),
@@ -269,34 +261,6 @@ public class DatabaseReader {
         return results
     }
 
-    // MARK: - Daily Summary
-
-    public func dailySummary(for dateString: String) -> DailySummary? {
-        let sql = """
-        SELECT id, date, total_active_seconds, total_idle_seconds,
-               app_usage_json, top_windows_json, screenshot_count, generated_at
-        FROM daily_summaries WHERE date = ?
-        """
-        var stmt: OpaquePointer?
-        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return nil }
-        defer { sqlite3_finalize(stmt) }
-
-        sqlite3_bind_text(stmt, 1, (dateString as NSString).utf8String, -1, nil)
-
-        guard sqlite3_step(stmt) == SQLITE_ROW else { return nil }
-
-        return DailySummary(
-            id: sqlite3_column_int64(stmt, 0),
-            date: String(cString: sqlite3_column_text(stmt, 1)),
-            totalActiveSeconds: sqlite3_column_double(stmt, 2),
-            totalIdleSeconds: sqlite3_column_double(stmt, 3),
-            appUsageJSON: sqlite3_column_text(stmt, 4).map({ String(cString: $0) }) ?? "{}",
-            topWindowsJSON: sqlite3_column_text(stmt, 5).map({ String(cString: $0) }) ?? "[]",
-            screenshotCount: Int(sqlite3_column_int(stmt, 6)),
-            generatedAt: sqlite3_column_text(stmt, 7).flatMap({ Self.iso8601.date(from: String(cString: $0)) })
-        )
-    }
-
     /// Compute activity totals on-the-fly for days without a pre-generated summary
     public func computeSummary(for date: Date) -> (activeSeconds: Double, idleSeconds: Double, activityCount: Int, screenshotCount: Int) {
         let range = dateRange(for: date)
@@ -314,8 +278,8 @@ public class DatabaseReader {
         var activityCount: Int = 0
 
         if sqlite3_prepare_v2(db, actSql, -1, &actStmt, nil) == SQLITE_OK {
-            sqlite3_bind_text(actStmt, 1, (range.start as NSString).utf8String, -1, nil)
-            sqlite3_bind_text(actStmt, 2, (range.end as NSString).utf8String, -1, nil)
+            sqliteBindText(actStmt, 1, range.start)
+            sqliteBindText(actStmt, 2, range.end)
             if sqlite3_step(actStmt) == SQLITE_ROW {
                 activeSeconds = sqlite3_column_double(actStmt, 0)
                 idleSeconds = sqlite3_column_double(actStmt, 1)
@@ -330,8 +294,8 @@ public class DatabaseReader {
         var screenshotCount: Int = 0
 
         if sqlite3_prepare_v2(db, ssSql, -1, &ssStmt, nil) == SQLITE_OK {
-            sqlite3_bind_text(ssStmt, 1, (range.start as NSString).utf8String, -1, nil)
-            sqlite3_bind_text(ssStmt, 2, (range.end as NSString).utf8String, -1, nil)
+            sqliteBindText(ssStmt, 1, range.start)
+            sqliteBindText(ssStmt, 2, range.end)
             if sqlite3_step(ssStmt) == SQLITE_ROW {
                 screenshotCount = Int(sqlite3_column_int(ssStmt, 0))
             }
@@ -365,7 +329,9 @@ public class DatabaseReader {
     private func dateRange(for date: Date) -> (start: String, end: String) {
         let cal = Calendar.current
         let startOfDay = cal.startOfDay(for: date)
-        let endOfDay = cal.date(byAdding: .day, value: 1, to: startOfDay)!
-        return (Self.iso8601.string(from: startOfDay), Self.iso8601.string(from: endOfDay))
+        guard let endOfDay = cal.date(byAdding: .day, value: 1, to: startOfDay) else {
+            return (SharedFormatters.iso8601.string(from: startOfDay), SharedFormatters.iso8601.string(from: startOfDay))
+        }
+        return (SharedFormatters.iso8601.string(from: startOfDay), SharedFormatters.iso8601.string(from: endOfDay))
     }
 }

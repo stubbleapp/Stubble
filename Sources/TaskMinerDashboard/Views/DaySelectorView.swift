@@ -8,16 +8,20 @@ struct DaySelectorView: View {
 
     private let dayCount = 30
 
+    private static let dayDateFmt: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "yyyy-MM-dd"
+        return f
+    }()
+
     private var days: [DayItem] {
         let cal = Calendar.current
         let today = cal.startOfDay(for: Date())
-        let dateFmt = DateFormatter()
-        dateFmt.dateFormat = "yyyy-MM-dd"
         let availableSet = Set(viewModel.availableDates)
 
-        return (0..<dayCount).reversed().map { offset in
-            let date = cal.date(byAdding: .day, value: -offset, to: today)!
-            let dateStr = dateFmt.string(from: date)
+        return (0..<dayCount).reversed().compactMap { offset in
+            guard let date = cal.date(byAdding: .day, value: -offset, to: today) else { return nil }
+            let dateStr = Self.dayDateFmt.string(from: date)
             let dayNum = cal.component(.day, from: date)
             let isToday = offset == 0
             let hasData = availableSet.contains(dateStr)

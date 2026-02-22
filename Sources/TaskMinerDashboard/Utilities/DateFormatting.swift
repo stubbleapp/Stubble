@@ -14,19 +14,17 @@ func formatDuration(_ seconds: TimeInterval) -> String {
     }
 }
 
-func formatTimeRange(start: Date?, end: Date?) -> String {
-    guard let start else { return "" }
+private let timeRangeFormatter: DateFormatter = {
     let f = DateFormatter()
     f.dateFormat = "HH:mm"
-    let startStr = f.string(from: start)
+    return f
+}()
+
+func formatTimeRange(start: Date?, end: Date?) -> String {
+    guard let start else { return "" }
+    let startStr = timeRangeFormatter.string(from: start)
     if let end {
-        return "\(startStr) – \(f.string(from: end))"
+        return "\(startStr) – \(timeRangeFormatter.string(from: end))"
     }
     return startStr
 }
-
-let dayFormatter: DateFormatter = {
-    let f = DateFormatter()
-    f.dateFormat = "yyyy-MM-dd"
-    return f
-}()

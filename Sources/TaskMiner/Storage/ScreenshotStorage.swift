@@ -5,6 +5,18 @@ class ScreenshotStorage {
     let directory: URL
     private let maxAgeDays: Int
 
+    private static let dayDirFmt: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "yyyy/MM/dd"
+        return f
+    }()
+
+    private static let fileFmt: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "yyyyMMdd_HHmmss"
+        return f
+    }()
+
     init(directory: URL, maxAgeDays: Int) throws {
         self.directory = directory
         self.maxAgeDays = maxAgeDays
@@ -12,15 +24,11 @@ class ScreenshotStorage {
     }
 
     func generatePath(for date: Date) -> URL {
-        let dayFormatter = DateFormatter()
-        dayFormatter.dateFormat = "yyyy/MM/dd"
-        let dayDir = directory.appendingPathComponent(dayFormatter.string(from: date))
+        let dayDir = directory.appendingPathComponent(Self.dayDirFmt.string(from: date))
         try? FileManager.default.createDirectory(at: dayDir, withIntermediateDirectories: true)
 
-        let fileFormatter = DateFormatter()
-        fileFormatter.dateFormat = "yyyyMMdd_HHmmss"
         let suffix = UUID().uuidString.prefix(6).lowercased()
-        let filename = "\(fileFormatter.string(from: date))_\(suffix).jpg"
+        let filename = "\(Self.fileFmt.string(from: date))_\(suffix).jpg"
         return dayDir.appendingPathComponent(filename)
     }
 
@@ -42,18 +50,11 @@ class ScreenshotStorage {
     /// Keeps only the current day to limit disk usage.
     func cleanupKeepingOnlyToday() {
         let fm = FileManager.default
-        let cal = Calendar.current
-        let today = cal.startOfDay(for: Date())
-        let todayFormatter = DateFormatter()
-        todayFormatter.dateFormat = "yyyy/MM/dd"
-        let todayStr = todayFormatter.string(from: today)
+        let todayStr = Self.dayDirFmt.string(from: Calendar.current.startOfDay(for: Date()))
 
         guard let yearDirs = try? fm.contentsOfDirectory(
             at: directory, includingPropertiesForKeys: [.isDirectoryKey]
         ) else { return }
-
-        let dateFormatter = DateFormatter()
-        dateFormatter.dateFormat = "yyyy/MM/dd"
 
         for yearDir in yearDirs {
             guard (try? yearDir.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true else { continue }
@@ -86,8 +87,4 @@ class ScreenshotStorage {
         }
     }
 
-    /// Legacy name for compatibility; now keeps only today.
-    func cleanupOldScreenshots() {
-        cleanupKeepingOnlyToday()
-    }
 }
