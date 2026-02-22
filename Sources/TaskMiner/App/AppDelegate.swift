@@ -381,13 +381,13 @@ class AppDelegate {
             return
         }
 
-        // Load custom prompt from shared settings file
-        let customPrompt: String? = {
+        // Load settings from shared settings file
+        let cliSettings: CLISettings? = {
             guard let config = try? SharedConfiguration(),
                   let data = try? Data(contentsOf: config.settingsPath),
                   let settings = try? JSONDecoder().decode(CLISettings.self, from: data)
             else { return nil }
-            return settings.customPrompt
+            return settings
         }()
 
         // Load memory context
@@ -404,8 +404,9 @@ class AppDelegate {
                 let result = try await summarizer.summarize(
                     activities: activityData,
                     date: endTime,
-                    customPrompt: customPrompt,
-                    memoryContext: memoryContext
+                    customPrompt: cliSettings?.customPrompt,
+                    memoryContext: memoryContext,
+                    granularity: cliSettings?.granularity ?? .medium
                 )
                 guard !result.tasks.isEmpty else { return }
                 await MainActor.run {
@@ -445,6 +446,7 @@ class AppDelegate {
     /// Minimal Codable struct to read the shared settings file from the dashboard.
     private struct CLISettings: Codable {
         var customPrompt: String?
+        var granularity: TaskGranularity?
     }
 
     // MARK: - Helpers

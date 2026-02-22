@@ -77,6 +77,11 @@ struct ActivityGroupView: View {
 struct ActivityRowView: View {
     let activity: ActivityRecord
 
+    private var extractedLinks: [ExtractedLink] {
+        guard let title = activity.windowTitle else { return [] }
+        return LinkExtractor.linksFromWindowTitle(title, appName: activity.appName, bundleId: activity.bundleId)
+    }
+
     var body: some View {
         HStack {
             Circle()
@@ -86,6 +91,21 @@ struct ActivityRowView: View {
                 .font(.system(size: 12))
                 .foregroundStyle(Theme.textPrimary)
                 .lineLimit(1)
+
+            if let link = extractedLinks.first {
+                Button {
+                    if let url = link.openableURL {
+                        NSWorkspace.shared.open(url)
+                    }
+                } label: {
+                    Image(systemName: link.kind == .url ? "arrow.up.right.square" : "doc")
+                        .font(.system(size: 9))
+                        .foregroundStyle(Theme.accent)
+                }
+                .buttonStyle(.plain)
+                .help(link.value)
+            }
+
             Spacer()
             Text(formatDuration(activity.duration ?? 0))
                 .font(.system(size: 11).monospacedDigit())

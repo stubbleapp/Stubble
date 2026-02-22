@@ -73,6 +73,41 @@ public class DatabaseReader {
         // Migration 2b: indexes for tasks
         sqlite3_exec(db, "CREATE INDEX IF NOT EXISTS idx_tasks_date ON tasks(date)", nil, nil, nil)
         sqlite3_exec(db, "CREATE INDEX IF NOT EXISTS idx_tasks_start ON tasks(start_time)", nil, nil, nil)
+
+        // Migration 3: add relevant_links column to tasks
+        errMsg = nil
+        let rc3 = sqlite3_exec(db, "ALTER TABLE tasks ADD COLUMN relevant_links TEXT DEFAULT '[]'", nil, nil, &errMsg)
+        if rc3 != SQLITE_OK {
+            let msg = errMsg.map { String(cString: $0) } ?? ""
+            sqlite3_free(errMsg)
+            if !msg.contains("duplicate column") {
+                Logger.error("DatabaseReader relevant_links migration failed: \(msg)")
+            }
+        }
+
+        // Migration 4: create project_activities table
+        errMsg = nil
+        let paSql = """
+        CREATE TABLE IF NOT EXISTS project_activities (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            date        TEXT NOT NULL,
+            name        TEXT NOT NULL,
+            summary     TEXT NOT NULL DEFAULT '',
+            total_duration REAL DEFAULT 0,
+            app_names   TEXT DEFAULT '[]',
+            task_titles TEXT DEFAULT '[]',
+            start_time  TEXT NOT NULL,
+            end_time    TEXT NOT NULL,
+            color_index INTEGER DEFAULT 0
+        )
+        """
+        let rc4 = sqlite3_exec(db, paSql, nil, nil, &errMsg)
+        if rc4 != SQLITE_OK {
+            let msg = errMsg.map { String(cString: $0) } ?? ""
+            sqlite3_free(errMsg)
+            Logger.error("DatabaseReader project_activities migration failed: \(msg)")
+        }
+        sqlite3_exec(db, "CREATE INDEX IF NOT EXISTS idx_pa_date ON project_activities(date)", nil, nil, nil)
     }
 
     deinit {
@@ -153,7 +188,7 @@ public class DatabaseReader {
         let dateStr = SharedFormatters.dayFormatter.string(from: date)
 
         let sql = """
-        SELECT id, date, start_time, end_time, title, description, app_names, confidence
+        SELECT id, date, start_time, end_time, title, description, app_names, confidence, relevant_links
         FROM tasks
         WHERE date = ?
         ORDER BY start_time ASC
@@ -174,7 +209,8 @@ public class DatabaseReader {
                 title: sqlite3_column_text(stmt, 4).map({ String(cString: $0) }) ?? "",
                 description: sqlite3_column_text(stmt, 5).map({ String(cString: $0) }) ?? "",
                 appNames: sqlite3_column_text(stmt, 6).map({ String(cString: $0) }) ?? "[]",
-                confidence: sqlite3_column_double(stmt, 7)
+                confidence: sqlite3_column_double(stmt, 7),
+                relevantLinks: sqlite3_column_text(stmt, 8).map({ String(cString: $0) }) ?? "[]"
             )
             results.append(record)
         }
@@ -212,6 +248,42 @@ public class DatabaseReader {
                 ocrText: sqlite3_column_text(stmt, 6).map { String(cString: $0) }
             )
             results.append(input)
+        }
+        return results
+    }
+
+    // MARK: - Project Activities
+
+    public func projectActivities(for date: Date) -> [ProjectActivityRecord] {
+        let dateStr = SharedFormatters.dayFormatter.string(from: date)
+
+        let sql = """
+        SELECT id, date, name, summary, total_duration, app_names, task_titles, start_time, end_time, color_index
+        FROM project_activities
+        WHERE date = ?
+        ORDER BY total_duration DESC
+        """
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return [] }
+        defer { sqlite3_finalize(stmt) }
+
+        sqliteBindText(stmt, 1, dateStr)
+
+        var results: [ProjectActivityRecord] = []
+        while sqlite3_step(stmt) == SQLITE_ROW {
+            let record = ProjectActivityRecord(
+                id: sqlite3_column_int64(stmt, 0),
+                date: sqlite3_column_text(stmt, 1).map({ String(cString: $0) }) ?? dateStr,
+                name: sqlite3_column_text(stmt, 2).map({ String(cString: $0) }) ?? "",
+                summary: sqlite3_column_text(stmt, 3).map({ String(cString: $0) }) ?? "",
+                totalDuration: sqlite3_column_double(stmt, 4),
+                appNames: sqlite3_column_text(stmt, 5).map({ String(cString: $0) }) ?? "[]",
+                taskTitles: sqlite3_column_text(stmt, 6).map({ String(cString: $0) }) ?? "[]",
+                startTime: sqlite3_column_text(stmt, 7).flatMap({ SharedFormatters.iso8601.date(from: String(cString: $0)) }) ?? Date(),
+                endTime: sqlite3_column_text(stmt, 8).flatMap({ SharedFormatters.iso8601.date(from: String(cString: $0)) }) ?? Date(),
+                colorIndex: Int(sqlite3_column_int(stmt, 9))
+            )
+            results.append(record)
         }
         return results
     }

@@ -165,6 +165,16 @@ struct TaskCardView: View {
                         }
                         .padding(.top, 2)
                     }
+
+                    // Relevant links
+                    if !isEditing && !task.linksList.isEmpty {
+                        FlowLayout(spacing: 4) {
+                            ForEach(Array(task.linksList.prefix(5).enumerated()), id: \.offset) { _, link in
+                                LinkChipView(link: link)
+                            }
+                        }
+                        .padding(.top, 4)
+                    }
                 }
             }
             .padding(.vertical, 10)
@@ -307,6 +317,87 @@ struct TaskCardView: View {
             }
         }
         .frame(width: 10)
+    }
+}
+
+/// Clickable link chip — opens the URL/file when clicked.
+struct LinkChipView: View {
+    let link: ExtractedLink
+
+    private var icon: String {
+        switch link.kind {
+        case .url: return "link"
+        case .filePath: return "doc"
+        }
+    }
+
+    var body: some View {
+        Button {
+            if let url = link.openableURL {
+                NSWorkspace.shared.open(url)
+            }
+        } label: {
+            HStack(spacing: 3) {
+                Image(systemName: icon)
+                    .font(.system(size: 8, weight: .medium))
+                Text(link.label)
+                    .font(.system(size: 10))
+                    .lineLimit(1)
+            }
+            .foregroundStyle(Theme.accent)
+            .padding(.horizontal, 7)
+            .padding(.vertical, 3)
+            .background(Theme.accent.opacity(0.08))
+            .cornerRadius(4)
+        }
+        .buttonStyle(.plain)
+        .help(link.value)
+    }
+}
+
+/// Simple wrapping flow layout for link chips.
+struct FlowLayout: Layout {
+    var spacing: CGFloat = 4
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        let result = computeLayout(proposal: proposal, subviews: subviews)
+        return result.size
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        let result = computeLayout(proposal: proposal, subviews: subviews)
+        for (index, position) in result.positions.enumerated() {
+            subviews[index].place(at: CGPoint(x: bounds.minX + position.x, y: bounds.minY + position.y), proposal: .unspecified)
+        }
+    }
+
+    private struct LayoutResult {
+        var size: CGSize
+        var positions: [CGPoint]
+    }
+
+    private func computeLayout(proposal: ProposedViewSize, subviews: Subviews) -> LayoutResult {
+        let maxWidth = proposal.width ?? .infinity
+        var positions: [CGPoint] = []
+        var x: CGFloat = 0
+        var y: CGFloat = 0
+        var rowHeight: CGFloat = 0
+        var totalHeight: CGFloat = 0
+
+        for subview in subviews {
+            let size = subview.sizeThatFits(.unspecified)
+            if x + size.width > maxWidth && x > 0 {
+                x = 0
+                y += rowHeight + spacing
+                rowHeight = 0
+            }
+            positions.append(CGPoint(x: x, y: y))
+            rowHeight = max(rowHeight, size.height)
+            x += size.width + spacing
+        }
+
+        totalHeight = y + rowHeight
+        return LayoutResult(size: CGSize(width: maxWidth, height: totalHeight), positions: positions)
     }
 }
 

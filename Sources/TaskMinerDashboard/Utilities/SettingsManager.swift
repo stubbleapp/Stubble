@@ -16,6 +16,7 @@ final class SettingsManager {
 
     struct Settings: Codable {
         var customPrompt: String?
+        var granularity: TaskGranularity?
     }
 
     // MARK: - Read / Write (for future file-based settings)
@@ -54,6 +55,17 @@ final class SettingsManager {
         set {
             var settings = load()
             settings.customPrompt = newValue
+            save(settings)
+        }
+    }
+
+    // MARK: - Task Granularity
+
+    var granularity: TaskGranularity {
+        get { load().granularity ?? .medium }
+        set {
+            var settings = load()
+            settings.granularity = newValue
             save(settings)
         }
     }

@@ -32,8 +32,8 @@ public class TaskWriter {
     @discardableResult
     public func insertTask(_ task: TaskRecord) throws -> Int64 {
         let sql = """
-        INSERT INTO tasks (date, start_time, end_time, title, description, app_names, confidence)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO tasks (date, start_time, end_time, title, description, app_names, confidence, relevant_links)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         """
         var stmt: OpaquePointer?
         guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
@@ -48,6 +48,7 @@ public class TaskWriter {
         sqliteBindText(stmt, 5, task.description)
         sqliteBindText(stmt, 6, task.appNames)
         sqlite3_bind_double(stmt, 7, task.confidence)
+        sqliteBindText(stmt, 8, task.relevantLinks)
 
         guard sqlite3_step(stmt) == SQLITE_DONE else {
             throw DatabaseError.executionFailed(lastError)
@@ -125,6 +126,77 @@ public class TaskWriter {
         defer { sqlite3_finalize(stmt) }
 
         sqlite3_bind_int64(stmt, 1, id)
+
+        guard sqlite3_step(stmt) == SQLITE_DONE else {
+            throw DatabaseError.executionFailed(lastError)
+        }
+    }
+
+    // MARK: - Project Activities
+
+    /// Insert a single project activity record.
+    @discardableResult
+    public func insertProjectActivity(_ record: ProjectActivityRecord) throws -> Int64 {
+        let sql = """
+        INSERT INTO project_activities (date, name, summary, total_duration, app_names, task_titles, start_time, end_time, color_index)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
+            throw DatabaseError.executionFailed(lastError)
+        }
+        defer { sqlite3_finalize(stmt) }
+
+        sqliteBindText(stmt, 1, record.date)
+        sqliteBindText(stmt, 2, record.name)
+        sqliteBindText(stmt, 3, record.summary)
+        sqlite3_bind_double(stmt, 4, record.totalDuration)
+        sqliteBindText(stmt, 5, record.appNames)
+        sqliteBindText(stmt, 6, record.taskTitles)
+        sqliteBindText(stmt, 7, SharedFormatters.iso8601.string(from: record.startTime))
+        sqliteBindText(stmt, 8, SharedFormatters.iso8601.string(from: record.endTime))
+        sqlite3_bind_int(stmt, 9, Int32(record.colorIndex))
+
+        guard sqlite3_step(stmt) == SQLITE_DONE else {
+            throw DatabaseError.executionFailed(lastError)
+        }
+        return sqlite3_last_insert_rowid(db)
+    }
+
+    /// Insert multiple project activities in a transaction.
+    @discardableResult
+    public func insertProjectActivities(_ records: [ProjectActivityRecord]) throws -> Int {
+        guard !records.isEmpty else { return 0 }
+
+        guard sqlite3_exec(db, "BEGIN TRANSACTION", nil, nil, nil) == SQLITE_OK else {
+            throw DatabaseError.executionFailed("BEGIN TRANSACTION failed: \(lastError)")
+        }
+        do {
+            var inserted = 0
+            for record in records {
+                _ = try insertProjectActivity(record)
+                inserted += 1
+            }
+            guard sqlite3_exec(db, "COMMIT", nil, nil, nil) == SQLITE_OK else {
+                throw DatabaseError.executionFailed("COMMIT failed: \(lastError)")
+            }
+            return inserted
+        } catch {
+            sqlite3_exec(db, "ROLLBACK", nil, nil, nil)
+            throw error
+        }
+    }
+
+    /// Delete all project activities for a given date.
+    public func deleteProjectActivities(for dateString: String) throws {
+        let sql = "DELETE FROM project_activities WHERE date = ?"
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
+            throw DatabaseError.executionFailed(lastError)
+        }
+        defer { sqlite3_finalize(stmt) }
+
+        sqliteBindText(stmt, 1, dateString)
 
         guard sqlite3_step(stmt) == SQLITE_DONE else {
             throw DatabaseError.executionFailed(lastError)

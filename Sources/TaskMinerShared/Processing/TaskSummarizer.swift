@@ -56,11 +56,12 @@ public final class TaskSummarizer: Sendable {
         activities: [SummarizationInput],
         date: Date,
         customPrompt: String? = nil,
-        memoryContext: String? = nil
+        memoryContext: String? = nil,
+        granularity: TaskGranularity = .medium
     ) async throws -> SummarizationResult {
         guard !activities.isEmpty else { return SummarizationResult(tasks: [], daySummary: nil, newMemoryEntries: []) }
 
-        let prompt = buildPrompt(from: activities)
+        let prompt = buildPrompt(from: activities, granularity: granularity)
 
         let userRules: String
         if let custom = customPrompt?.trimmingCharacters(in: .whitespacesAndNewlines), !custom.isEmpty {
@@ -249,7 +250,7 @@ public final class TaskSummarizer: Sendable {
     /// Shorter blocks are likely accidental clicks, closing apps, or brief tab switches.
     private static let minBlockDuration: TimeInterval = 5
 
-    private func buildPrompt(from activities: [SummarizationInput]) -> String {
+    private func buildPrompt(from activities: [SummarizationInput], granularity: TaskGranularity = .medium) -> String {
         let blocks = aggregateActivities(activities)
             .filter { $0.totalDuration >= Self.minBlockDuration }
 
@@ -298,13 +299,14 @@ public final class TaskSummarizer: Sendable {
               "start_time": "HH:mm:ss",
               "end_time": "HH:mm:ss",
               "app_names": ["Xcode"],
-              "confidence": 0.85
+              "confidence": 0.85,
+              "relevant_links": ["https://github.com/user/repo", "/Users/name/project/file.swift"]
             }
           ]
         }
 
         Rules:
-        - Aggressively merge related activity into coarser tasks — aim for roughly 3–8 tasks per full day
+        - \(granularity.promptInstruction)
         - If the same project or topic appears in multiple blocks (even separated by short breaks or other apps), merge them into ONE task that spans the full time range
         - Every task title MUST be unique — never produce two tasks with the same or near-identical title
         - Titles MUST start with a present participle verb (e.g., Developing, Browsing, Watching, Reviewing, Debugging)
@@ -314,6 +316,7 @@ public final class TaskSummarizer: Sendable {
         - Times should be based on the activity timestamps — use the earliest start and latest end for merged tasks
         - Ignore idle periods
         - Silently skip any activity involving adult, explicit, or NSFW content — never include it in tasks or the day summary
+        - relevant_links: extract any URLs (https://...) or local file paths (/Users/...) visible in the OCR text or window titles that relate to this task. Include website URLs, document links, repository URLs, and file paths. Return [] if none found. Only include real URLs/paths seen in the data, never fabricate them.
         - If there's not enough information, return {"tasks": [], "day_summary": null}
         """)
 
@@ -394,6 +397,9 @@ public final class TaskSummarizer: Sendable {
             let appNames = dict["app_names"] as? [String] ?? []
             let appNamesJSON = (try? JSONSerialization.data(withJSONObject: appNames))
                 .flatMap { String(data: $0, encoding: .utf8) } ?? "[]"
+            let links = dict["relevant_links"] as? [String] ?? []
+            let linksJSON = (try? JSONSerialization.data(withJSONObject: links))
+                .flatMap { String(data: $0, encoding: .utf8) } ?? "[]"
 
             return TaskRecord(
                 date: dateStr,
@@ -402,7 +408,8 @@ public final class TaskSummarizer: Sendable {
                 title: title,
                 description: description,
                 appNames: appNamesJSON,
-                confidence: confidence
+                confidence: confidence,
+                relevantLinks: linksJSON
             )
         }
 
@@ -447,6 +454,17 @@ public final class TaskSummarizer: Sendable {
             let appNamesJSON = (try? JSONSerialization.data(withJSONObject: appList))
                 .flatMap { String(data: $0, encoding: .utf8) } ?? "[]"
 
+            // Merge links (deduplicate)
+            var linkSet = Set<String>()
+            var linkList: [String] = []
+            for t in group {
+                for link in t.linksList where linkSet.insert(link.value).inserted {
+                    linkList.append(link.value)
+                }
+            }
+            let linksJSON = (try? JSONSerialization.data(withJSONObject: linkList))
+                .flatMap { String(data: $0, encoding: .utf8) } ?? "[]"
+
             return TaskRecord(
                 date: first.date,
                 startTime: startTime,
@@ -454,7 +472,8 @@ public final class TaskSummarizer: Sendable {
                 title: first.title,
                 description: mergedDesc,
                 appNames: appNamesJSON,
-                confidence: confidence
+                confidence: confidence,
+                relevantLinks: linksJSON
             )
         }
     }

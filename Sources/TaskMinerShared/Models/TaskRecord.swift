@@ -9,6 +9,8 @@ public struct TaskRecord: Identifiable, Hashable, Sendable {
     public let description: String
     public let appNames: String
     public let confidence: Double
+    /// JSON array of URL/path strings extracted by AI from OCR/activity data.
+    public let relevantLinks: String
 
     public init(
         id: Int64? = nil,
@@ -18,7 +20,8 @@ public struct TaskRecord: Identifiable, Hashable, Sendable {
         title: String,
         description: String,
         appNames: String = "[]",
-        confidence: Double = 0.0
+        confidence: Double = 0.0,
+        relevantLinks: String = "[]"
     ) {
         self.id = id
         self.date = date
@@ -28,6 +31,7 @@ public struct TaskRecord: Identifiable, Hashable, Sendable {
         self.description = description
         self.appNames = appNames
         self.confidence = confidence
+        self.relevantLinks = relevantLinks
     }
 
     public var appNamesList: [String] {
@@ -35,5 +39,10 @@ public struct TaskRecord: Identifiable, Hashable, Sendable {
               let arr = try? JSONDecoder().decode([String].self, from: data)
         else { return [] }
         return arr
+    }
+
+    /// Parsed links from the relevantLinks JSON.
+    public var linksList: [ExtractedLink] {
+        LinkExtractor.linksFromJSON(relevantLinks)
     }
 }

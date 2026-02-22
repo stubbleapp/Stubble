@@ -8,6 +8,7 @@ final class MenuBarDelegate: NSObject, NSApplicationDelegate {
     private var statusItem: NSStatusItem?
     private var pauseController: PauseController?
     private var pollTimer: Timer?
+    private var daemonProcess: Process?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         // When launched via `swift run` or from an IDE (Cursor, Xcode, etc.) the process
@@ -21,6 +22,9 @@ final class MenuBarDelegate: NSObject, NSApplicationDelegate {
         if let config = try? SharedConfiguration() {
             self.pauseController = PauseController(dataDirectory: config.dataDirectory)
         }
+
+        // Start the monitoring daemon (bundled alongside the dashboard binary)
+        startDaemon()
 
         // Create the status item
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
@@ -39,6 +43,53 @@ final class MenuBarDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+    func applicationWillTerminate(_ notification: Notification) {
+        stopDaemon()
+    }
+
+    // MARK: - Daemon Lifecycle
+
+    /// Starts the TaskMinerDaemon process bundled inside the .app.
+    /// If running from `swift run` (no bundle), this is a no-op — the user runs the CLI manually.
+    private func startDaemon() {
+        // Look for the daemon binary next to the dashboard binary
+        let dashboardPath = ProcessInfo.processInfo.arguments[0]
+        let dashboardDir = (dashboardPath as NSString).deletingLastPathComponent
+        let daemonPath = (dashboardDir as NSString).appendingPathComponent("TaskMinerDaemon")
+
+        guard FileManager.default.isExecutableFile(atPath: daemonPath) else {
+            // Not bundled (e.g. running via `swift run`) — skip
+            return
+        }
+
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: daemonPath)
+        process.arguments = []
+        // Inherit the environment so Gemini key etc. are available
+        process.environment = ProcessInfo.processInfo.environment
+
+        // Don't let stdout/stderr from the daemon pollute the dashboard
+        process.standardOutput = FileHandle.nullDevice
+        process.standardError = FileHandle.nullDevice
+
+        do {
+            try process.run()
+            daemonProcess = process
+            Logger.info("Started TaskMinerDaemon (PID \(process.processIdentifier))")
+        } catch {
+            Logger.error("Failed to start TaskMinerDaemon: \(error.localizedDescription)")
+        }
+    }
+
+    /// Gracefully stops the daemon when the dashboard quits.
+    private func stopDaemon() {
+        guard let process = daemonProcess, process.isRunning else { return }
+        // Send SIGTERM for graceful shutdown (the daemon handles this)
+        process.terminate()
+        Logger.info("Stopped TaskMinerDaemon")
+        daemonProcess = nil
+    }
+
     /// Rebuild the menu to reflect current pause state.
     private func rebuildMenu() {
         let menu = NSMenu()
@@ -47,6 +98,23 @@ final class MenuBarDelegate: NSObject, NSApplicationDelegate {
         let openItem = NSMenuItem(title: "Open TaskMiner", action: #selector(openApp), keyEquivalent: "o")
         openItem.target = self
         menu.addItem(openItem)
+
+        menu.addItem(NSMenuItem.separator())
+
+        // Daemon status
+        let daemonRunning = daemonProcess?.isRunning ?? false
+        let statusTitle = daemonRunning ? "Monitoring Active" : "Monitoring Stopped"
+        let statusItem = NSMenuItem(title: statusTitle, action: nil, keyEquivalent: "")
+        statusItem.isEnabled = false
+        statusItem.image = NSImage(
+            systemSymbolName: daemonRunning ? "circle.fill" : "circle",
+            accessibilityDescription: nil
+        )
+        // Tint the dot green/red
+        if daemonRunning {
+            statusItem.image?.isTemplate = false
+        }
+        menu.addItem(statusItem)
 
         menu.addItem(NSMenuItem.separator())
 
@@ -100,7 +168,7 @@ final class MenuBarDelegate: NSObject, NSApplicationDelegate {
         quitItem.target = self
         menu.addItem(quitItem)
 
-        statusItem?.menu = menu
+        self.statusItem?.menu = menu
     }
 
     // MARK: - Actions

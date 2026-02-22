@@ -42,6 +42,8 @@ struct ContentView: View {
                     TaskTimelineView()
                     ChatOverlayView()
                 }
+            case 1:
+                ActivitiesView()
             default:
                 ScreenshotBrowserView()
             }
@@ -51,10 +53,10 @@ struct ContentView: View {
         .toolbar {
             ToolbarItem(placement: .principal) {
                 SegmentedPicker(
-                    items: ["Tasks", "Screens"],
+                    items: ["Tasks", "Activities", "Screens"],
                     selection: $selectedTab
                 )
-                .frame(maxWidth: 320)
+                .frame(maxWidth: 400)
             }
 
             ToolbarItem(placement: .primaryAction) {
