@@ -38,7 +38,10 @@ struct ContentView: View {
 
             switch selectedTab {
             case 0:
-                TaskTimelineView()
+                ZStack(alignment: .bottom) {
+                    TaskTimelineView()
+                    ChatOverlayView()
+                }
             default:
                 ScreenshotBrowserView()
             }

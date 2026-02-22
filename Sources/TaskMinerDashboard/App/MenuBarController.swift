@@ -10,6 +10,13 @@ final class MenuBarDelegate: NSObject, NSApplicationDelegate {
     private var pollTimer: Timer?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        // When launched via `swift run` or from an IDE (Cursor, Xcode, etc.) the process
+        // has no .app bundle, so macOS defaults it to an activation policy that does NOT
+        // grant keyboard focus. Setting .regular tells macOS this is a normal foreground
+        // app that should receive key events, appear in the Dock, and own the menu bar.
+        NSApp.setActivationPolicy(.regular)
+        NSApp.activate(ignoringOtherApps: true)
+
         // Create the pause controller (same data directory as the dashboard)
         if let config = try? SharedConfiguration() {
             self.pauseController = PauseController(dataDirectory: config.dataDirectory)
@@ -99,6 +106,7 @@ final class MenuBarDelegate: NSObject, NSApplicationDelegate {
     // MARK: - Actions
 
     @objc private func openApp() {
+        NSApp.setActivationPolicy(.regular)
         NSApp.activate(ignoringOtherApps: true)
         // Open or bring the main window to front
         if let window = NSApp.windows.first(where: { $0.canBecomeMain }) {

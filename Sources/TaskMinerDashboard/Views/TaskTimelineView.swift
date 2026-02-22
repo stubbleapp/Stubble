@@ -70,19 +70,18 @@ struct TaskTimelineView: View {
 
                 Spacer()
 
-                if viewModel.isToday && viewModel.hasGeminiKey {
-                    Button(action: { viewModel.generateSummary() }) {
-                        Image(systemName: "arrow.clockwise")
-                            .font(.system(size: 14, weight: .medium))
-                            .foregroundStyle(Theme.accent)
-                            .symbolEffect(.bounce, value: viewModel.isGeneratingSummary)
-                            .frame(width: 32, height: 32)
-                            .background(Theme.accent.opacity(0.08))
-                            .clipShape(Circle())
-                    }
-                    .buttonStyle(.plain)
-                    .disabled(viewModel.isGeneratingSummary)
+                Button(action: { viewModel.generateSummary() }) {
+                    Image(systemName: "arrow.clockwise")
+                        .font(.system(size: 14, weight: .medium))
+                        .foregroundStyle(Theme.accent)
+                        .symbolEffect(.bounce, value: viewModel.isGeneratingSummary)
+                        .frame(width: 32, height: 32)
+                        .background(Theme.accent.opacity(0.08))
+                        .clipShape(Circle())
                 }
+                .buttonStyle(.plain)
+                .disabled(viewModel.isGeneratingSummary)
+                .help("Regenerate tasks")
             }
             .padding(.horizontal, 20)
             .padding(.top, 16)
@@ -128,21 +127,13 @@ struct TaskTimelineView: View {
                         .font(.title3.weight(.medium))
                         .foregroundStyle(Theme.textSecondary)
 
-                    if viewModel.isToday {
-                        if viewModel.hasGeminiKey {
-                            Button(action: { viewModel.generateSummary() }) {
-                                Label("Generate Summary", systemImage: "sparkles")
-                                    .font(.system(size: 13, weight: .medium))
-                            }
-                            .buttonStyle(.borderless)
-                            .foregroundStyle(Theme.accent)
-                            .padding(.top, 4)
-                        } else {
-                            Text("Add your API key in Settings to enable")
-                                .font(.caption)
-                                .foregroundStyle(Theme.textMuted)
-                        }
+                    Button(action: { viewModel.generateSummary() }) {
+                        Label("Generate Summary", systemImage: "sparkles")
+                            .font(.system(size: 13, weight: .medium))
                     }
+                    .buttonStyle(.borderless)
+                    .foregroundStyle(Theme.accent)
+                    .padding(.top, 4)
                 }
                 Spacer()
             } else if viewModel.tasks.isEmpty && viewModel.isGeneratingSummary {
@@ -207,8 +198,9 @@ struct TaskTimelineView: View {
                     .animation(.easeInOut(duration: 0.2), value: viewModel.isGeneratingSummary)
                     .padding(.horizontal, 20)
 
+                    // Extra space so content isn't hidden behind the floating chat bar
                     Spacer()
-                        .frame(height: 24)
+                        .frame(height: 64)
                 }
             }
         }

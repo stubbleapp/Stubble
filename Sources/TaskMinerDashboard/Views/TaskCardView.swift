@@ -9,10 +9,16 @@ struct TaskCardView: View {
     @State private var isEditing = false
     @State private var editTitle = ""
     @State private var editDescription = ""
+    @State private var swipeOffset: CGFloat = 0
     @State private var showDeleteConfirmation = false
     @FocusState private var titleFocused: Bool
     @FocusState private var descriptionFocused: Bool
     @Environment(DashboardViewModel.self) var viewModel
+
+    /// How far the user must drag to reveal the delete action.
+    private let deleteThreshold: CGFloat = -70
+    /// How far a full swipe triggers immediate deletion.
+    private let fullSwipeThreshold: CGFloat = -200
 
     private static let timeFmt: DateFormatter = {
         let f = DateFormatter()
@@ -21,6 +27,77 @@ struct TaskCardView: View {
     }()
 
     var body: some View {
+        ZStack(alignment: .trailing) {
+            // Delete background — revealed on swipe
+            if swipeOffset < 0 {
+                HStack(spacing: 0) {
+                    Spacer()
+                    Button {
+                        showDeleteConfirmation = true
+                    } label: {
+                        Image(systemName: "trash.fill")
+                            .font(.system(size: 14, weight: .medium))
+                            .foregroundStyle(.white)
+                            .frame(width: 60)
+                            .frame(maxHeight: .infinity)
+                    }
+                    .buttonStyle(.plain)
+                    .background(Theme.statusError)
+                }
+            }
+
+            // Foreground content
+            cardContent
+                .background(Theme.primaryBackground)
+                .offset(x: swipeOffset)
+                .gesture(swipeGesture)
+        }
+        .clipped()
+        .contextMenu {
+            Button {
+                startEditing()
+            } label: {
+                Label("Edit Task", systemImage: "pencil")
+            }
+        }
+        .onChange(of: titleFocused) { _, focused in
+            if !focused && !descriptionFocused && isEditing {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+                    if !titleFocused && !descriptionFocused && isEditing {
+                        commitEdit()
+                    }
+                }
+            }
+        }
+        .onChange(of: descriptionFocused) { _, focused in
+            if !focused && !titleFocused && isEditing {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+                    if !titleFocused && !descriptionFocused && isEditing {
+                        commitEdit()
+                    }
+                }
+            }
+        }
+        .alert("Delete Task?", isPresented: $showDeleteConfirmation) {
+            Button("Delete", role: .destructive) {
+                guard let id = task.id else { return }
+                withAnimation(.easeInOut(duration: 0.25)) {
+                    viewModel.deleteTask(id: id)
+                }
+            }
+            Button("Cancel", role: .cancel) {
+                withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
+                    swipeOffset = 0
+                }
+            }
+        } message: {
+            Text("This will permanently remove \"\(task.title)\".")
+        }
+    }
+
+    // MARK: - Card content
+
+    private var cardContent: some View {
         HStack(alignment: .top, spacing: 12) {
             // Timeline spine
             timelineSpine
@@ -68,7 +145,7 @@ struct TaskCardView: View {
                         Text(formatTimeRange(start: task.startTime, end: task.endTime))
                             .font(.system(size: 11).monospacedDigit())
                             .foregroundStyle(Theme.textMuted)
-                        Text("·")
+                        Text("\u{00B7}")
                             .foregroundStyle(Theme.textQuaternary)
                         Text(formatDuration(task.endTime.timeIntervalSince(task.startTime)))
                             .font(.system(size: 11, weight: .medium).monospacedDigit())
@@ -88,22 +165,6 @@ struct TaskCardView: View {
                         }
                         .padding(.top, 2)
                     }
-
-                    // Delete action
-                    HStack(spacing: 8) {
-                        Spacer()
-
-                        Button {
-                            showDeleteConfirmation = true
-                        } label: {
-                            Image(systemName: "trash")
-                                .font(.system(size: 11))
-                                .foregroundStyle(Theme.statusError.opacity(0.7))
-                        }
-                        .buttonStyle(.borderless)
-                        .help("Delete task")
-                    }
-                    .padding(.top, 4)
                 }
             }
             .padding(.vertical, 10)
@@ -135,54 +196,59 @@ struct TaskCardView: View {
                 Color.clear
                     .contentShape(Rectangle())
                     .onTapGesture {
-                        withAnimation(.easeInOut(duration: 0.2)) {
-                            isExpanded.toggle()
+                        if swipeOffset < 0 {
+                            // Tap to dismiss swipe
+                            withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
+                                swipeOffset = 0
+                            }
+                        } else {
+                            withAnimation(.easeInOut(duration: 0.2)) {
+                                isExpanded.toggle()
+                            }
                         }
                     }
             }
         }
-        .contextMenu {
-            Button {
-                startEditing()
-            } label: {
-                Label("Edit Task", systemImage: "pencil")
-            }
+    }
 
-            Divider()
+    // MARK: - Swipe gesture
 
-            Button(role: .destructive) {
-                showDeleteConfirmation = true
-            } label: {
-                Label("Delete Task", systemImage: "trash")
+    private var swipeGesture: some Gesture {
+        DragGesture(minimumDistance: 12)
+            .onChanged { value in
+                guard !isEditing else { return }
+                let horizontal = value.translation.width
+                // Only allow left swipe (negative)
+                if horizontal < 0 {
+                    // Rubber-band effect past the delete threshold
+                    swipeOffset = horizontal * (horizontal < fullSwipeThreshold ? 0.3 : 1.0)
+                } else if swipeOffset < 0 {
+                    // Allow dragging back to reset
+                    swipeOffset = min(0, swipeOffset + horizontal)
+                }
             }
-        }
-        .onChange(of: titleFocused) { _, focused in
-            if !focused && !descriptionFocused && isEditing {
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
-                    if !titleFocused && !descriptionFocused && isEditing {
-                        commitEdit()
+            .onEnded { value in
+                guard !isEditing else { return }
+                let horizontal = value.translation.width
+
+                if horizontal < fullSwipeThreshold {
+                    // Full swipe — trigger delete immediately
+                    showDeleteConfirmation = true
+                    withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
+                        swipeOffset = deleteThreshold
+                    }
+                } else if horizontal < deleteThreshold {
+                    // Past threshold — snap to reveal delete button
+                    withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
+                        swipeOffset = deleteThreshold
+                    }
+                } else {
+                    // Not enough — snap back
+                    withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
+                        swipeOffset = 0
                     }
                 }
             }
-        }
-        .onChange(of: descriptionFocused) { _, focused in
-            if !focused && !titleFocused && isEditing {
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
-                    if !titleFocused && !descriptionFocused && isEditing {
-                        commitEdit()
-                    }
-                }
-            }
-        }
-        .alert("Delete Task?", isPresented: $showDeleteConfirmation) {
-            Button("Delete", role: .destructive) {
-                guard let id = task.id else { return }
-                viewModel.deleteTask(id: id)
-            }
-            Button("Cancel", role: .cancel) {}
-        } message: {
-            Text("This will permanently remove \"\(task.title)\". This cannot be undone.")
-        }
     }
 
     // MARK: - Inline editing helpers
@@ -193,6 +259,7 @@ struct TaskCardView: View {
         withAnimation(.easeInOut(duration: 0.2)) {
             isEditing = true
             isExpanded = true
+            swipeOffset = 0
         }
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
             titleFocused = true

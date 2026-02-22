@@ -1,16 +1,29 @@
 import Foundation
+import AppKit
 import CoreGraphics
+import TaskMinerShared
 
 class IdleDetector {
     private let threshold: TimeInterval
     private(set) var wasIdle: Bool = false
+
+    /// Forced idle/active state from system events (screen lock, sleep, etc.)
+    /// When non-nil, overrides the HID-based idle detection.
+    private var systemForcedIdle: Bool?
+
+    /// Called on the main thread when a system event forces an idle transition.
+    /// The AppDelegate can hook this to react instantly rather than waiting
+    /// for the next periodic poll.
+    var onSystemIdleTransition: ((IdleTransition) -> Void)?
 
     init(threshold: TimeInterval) {
         self.threshold = threshold
     }
 
     var isIdle: Bool {
-        idleTime >= threshold
+        // System events (screen lock, sleep) take precedence
+        if let forced = systemForcedIdle { return forced }
+        return idleTime >= threshold
     }
 
     var idleTime: TimeInterval {
@@ -43,7 +56,111 @@ class IdleDetector {
         return .noChange
     }
 
-    enum IdleTransition {
+    // MARK: - System Event Observers
+
+    /// Start observing macOS system events that indicate the user is AFK.
+    /// Call once from AppDelegate.start().
+    func startSystemEventObservers() {
+        let ws = NSWorkspace.shared.notificationCenter
+        let dnc = DistributedNotificationCenter.default()
+
+        // Sleep / Wake
+        ws.addObserver(self, selector: #selector(handleSystemSleep),
+                       name: NSWorkspace.willSleepNotification, object: nil)
+        ws.addObserver(self, selector: #selector(handleSystemWake),
+                       name: NSWorkspace.didWakeNotification, object: nil)
+
+        // Session resign / activate (fast user switching, logout)
+        ws.addObserver(self, selector: #selector(handleSessionResign),
+                       name: NSWorkspace.sessionDidResignActiveNotification, object: nil)
+        ws.addObserver(self, selector: #selector(handleSessionActivate),
+                       name: NSWorkspace.sessionDidBecomeActiveNotification, object: nil)
+
+        // Screen lock / unlock
+        dnc.addObserver(self, selector: #selector(handleScreenLocked),
+                        name: NSNotification.Name("com.apple.screenIsLocked"), object: nil)
+        dnc.addObserver(self, selector: #selector(handleScreenUnlocked),
+                        name: NSNotification.Name("com.apple.screenIsUnlocked"), object: nil)
+
+        // Screensaver start / stop
+        dnc.addObserver(self, selector: #selector(handleScreensaverStart),
+                        name: NSNotification.Name("com.apple.screensaver.didStart"), object: nil)
+        dnc.addObserver(self, selector: #selector(handleScreensaverStop),
+                        name: NSNotification.Name("com.apple.screensaver.didStop"), object: nil)
+
+        Logger.info("System event observers started (sleep/wake, lock/unlock, session, screensaver)")
+    }
+
+    /// Remove all observers. Call from AppDelegate.shutdown().
+    func stopSystemEventObservers() {
+        NSWorkspace.shared.notificationCenter.removeObserver(self)
+        DistributedNotificationCenter.default().removeObserver(self)
+    }
+
+    // MARK: - System Idle (AFK)
+
+    @objc private func handleSystemSleep(_ notification: Notification) {
+        Logger.info("System going to sleep — marking user idle")
+        forceIdle()
+    }
+
+    @objc private func handleSessionResign(_ notification: Notification) {
+        Logger.info("Session resigned (fast user switch / logout) — marking user idle")
+        forceIdle()
+    }
+
+    @objc private func handleScreenLocked(_ notification: Notification) {
+        Logger.info("Screen locked — marking user idle")
+        forceIdle()
+    }
+
+    @objc private func handleScreensaverStart(_ notification: Notification) {
+        Logger.info("Screensaver started — marking user idle")
+        forceIdle()
+    }
+
+    // MARK: - System Active (returned)
+
+    @objc private func handleSystemWake(_ notification: Notification) {
+        Logger.info("System woke up — marking user active")
+        forceActive()
+    }
+
+    @objc private func handleSessionActivate(_ notification: Notification) {
+        Logger.info("Session became active — marking user active")
+        forceActive()
+    }
+
+    @objc private func handleScreenUnlocked(_ notification: Notification) {
+        Logger.info("Screen unlocked — marking user active")
+        forceActive()
+    }
+
+    @objc private func handleScreensaverStop(_ notification: Notification) {
+        Logger.info("Screensaver stopped — marking user active")
+        forceActive()
+    }
+
+    // MARK: - Force Helpers
+
+    private func forceIdle() {
+        guard systemForcedIdle != true else { return }
+        systemForcedIdle = true
+        let transition = checkTransition()
+        if transition == .becameIdle {
+            onSystemIdleTransition?(transition)
+        }
+    }
+
+    private func forceActive() {
+        systemForcedIdle = nil // clear override, let HID polling take over
+        let transition = checkTransition()
+        if transition == .becameActive {
+            onSystemIdleTransition?(transition)
+        }
+    }
+
+    enum IdleTransition: Equatable {
         case becameIdle
         case becameActive
         case noChange

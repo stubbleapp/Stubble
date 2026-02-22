@@ -57,6 +57,13 @@ class AppDelegate {
             self?.handleTitleChange(newTitle: title)
         }
 
+        // Start system event observers for instant AFK detection
+        // (screen lock, sleep, session switch, screensaver)
+        idleDetector.startSystemEventObservers()
+        idleDetector.onSystemIdleTransition = { [weak self] transition in
+            self?.handleIdleTransition(transition)
+        }
+
         // Start monitoring
         activityMonitor.start()
 
@@ -110,6 +117,7 @@ class AppDelegate {
         // Stop monitors
         activityMonitor.stop()
         windowTitleMonitor.stop()
+        idleDetector.stopSystemEventObservers()
 
         // Finalize current activity
         finalizeCurrentActivity()
@@ -199,31 +207,9 @@ class AppDelegate {
             }
         }
 
-        // 1. Check idle transitions
+        // 1. Check idle transitions (HID-based polling)
         let transition = idleDetector.checkTransition()
-        switch transition {
-        case .becameIdle:
-            Logger.info("User became idle (\(Int(idleDetector.idleTime))s)")
-            finalizeCurrentActivity()
-            startNewActivity(appName: "Idle", bundleId: nil, pid: 0, isIdle: true)
-
-        case .becameActive:
-            Logger.info("User became active")
-            finalizeCurrentActivity()
-            // Re-read current frontmost app
-            if let frontApp = activityMonitor.currentApp() {
-                startNewActivity(
-                    appName: frontApp.localizedName ?? "Unknown",
-                    bundleId: frontApp.bundleIdentifier,
-                    pid: frontApp.processIdentifier,
-                    isIdle: false
-                )
-                takeScreenshot(trigger: .appSwitch)
-            }
-
-        case .noChange:
-            break
-        }
+        handleIdleTransition(transition)
 
         // 2. Poll window title (catches missed AX notifications)
         if !idleDetector.isIdle {
@@ -250,6 +236,35 @@ class AppDelegate {
             db.deleteScreenshots(before: startOfToday)
             screenshotStorage.cleanupKeepingOnlyToday()
             lastSummaryDate = today
+        }
+    }
+
+    // MARK: - Idle Transition Handling
+
+    /// Shared handler for idle transitions from both HID polling and system events.
+    private func handleIdleTransition(_ transition: IdleDetector.IdleTransition) {
+        switch transition {
+        case .becameIdle:
+            Logger.info("User became idle (\(Int(idleDetector.idleTime))s)")
+            finalizeCurrentActivity()
+            startNewActivity(appName: "Idle", bundleId: nil, pid: 0, isIdle: true)
+
+        case .becameActive:
+            Logger.info("User became active")
+            finalizeCurrentActivity()
+            // Re-read current frontmost app
+            if let frontApp = activityMonitor.currentApp() {
+                startNewActivity(
+                    appName: frontApp.localizedName ?? "Unknown",
+                    bundleId: frontApp.bundleIdentifier,
+                    pid: frontApp.processIdentifier,
+                    isIdle: false
+                )
+                takeScreenshot(trigger: .appSwitch)
+            }
+
+        case .noChange:
+            break
         }
     }
 

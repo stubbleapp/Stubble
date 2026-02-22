@@ -111,6 +111,84 @@ public final class GeminiClient: Sendable {
 
         return resultText
     }
+
+    /// Send a conversational prompt to Gemini and return a plain-text response.
+    /// Unlike `generateContent()` which forces JSON, this returns natural language.
+    public func generateText(
+        prompt: String,
+        systemInstruction: String? = nil,
+        conversationHistory: [[String: Any]]? = nil
+    ) async throws -> String {
+        var components = URLComponents(string: baseURL)
+        components?.path = "/v1beta/models/\(model):generateContent"
+        components?.queryItems = [URLQueryItem(name: "key", value: apiKey)]
+        guard let url = components?.url else {
+            throw GeminiError.invalidURL
+        }
+
+        // Build contents: optional conversation history + current user message
+        var contents: [[String: Any]] = conversationHistory ?? []
+        contents.append([
+            "role": "user",
+            "parts": [["text": prompt]]
+        ])
+
+        var body: [String: Any] = [
+            "contents": contents
+        ]
+
+        if let system = systemInstruction {
+            body["systemInstruction"] = [
+                "parts": [["text": system]]
+            ]
+        }
+
+        body["generationConfig"] = [
+            "temperature": 0.5,
+            "maxOutputTokens": 4096,
+            "responseMimeType": "text/plain",
+            "thinkingConfig": ["thinkingBudget": 1024]
+        ] as [String: Any]
+
+        let jsonData = try JSONSerialization.data(withJSONObject: body)
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = jsonData
+        request.timeoutInterval = 60
+
+        let (data, response) = try await URLSession.shared.data(for: request)
+
+        guard let httpResponse = response as? HTTPURLResponse else {
+            throw GeminiError.invalidResponse
+        }
+
+        guard httpResponse.statusCode == 200 else {
+            let errorBody = String(data: data, encoding: .utf8) ?? "unknown"
+            throw GeminiError.apiError(statusCode: httpResponse.statusCode, message: errorBody)
+        }
+
+        guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let candidates = json["candidates"] as? [[String: Any]],
+              let firstCandidate = candidates.first,
+              let content = firstCandidate["content"] as? [String: Any],
+              let parts = content["parts"] as? [[String: Any]]
+        else {
+            let preview = String(data: data.prefix(500), encoding: .utf8) ?? "?"
+            throw GeminiError.parseError("Could not parse response structure: \(preview)")
+        }
+
+        let text = parts.reversed()
+            .first(where: { $0["thought"] == nil && $0["text"] != nil })?["text"] as? String
+            ?? parts.last?["text"] as? String
+
+        guard let resultText = text else {
+            throw GeminiError.parseError("No text found in \(parts.count) response parts")
+        }
+
+        return resultText
+    }
 }
 
 public enum GeminiError: Error, LocalizedError {
