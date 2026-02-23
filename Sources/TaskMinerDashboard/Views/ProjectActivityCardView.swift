@@ -24,7 +24,7 @@ struct ProjectActivityCardView: View {
 
                     Spacer()
 
-                    Text(formatDuration(activity.totalDuration))
+                    Text(formatDuration(activity.totalDuration * viewModel.activityDurationScale))
                         .font(.system(size: 12, weight: .medium).monospacedDigit())
                         .foregroundStyle(Theme.textSecondary)
                         .padding(.horizontal, 8)

@@ -13,6 +13,13 @@ struct ContentView: View {
     @Environment(DashboardViewModel.self) var viewModel
     @State private var selectedTab = 0
     @State private var showSettings = false
+    @State private var showScreensTab = SettingsManager.shared.showScreensTab
+
+    private var tabItems: [String] {
+        var items = ["Timeline", "Activities"]
+        if showScreensTab { items.append("Screens") }
+        return items
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -53,7 +60,7 @@ struct ContentView: View {
         .toolbar {
             ToolbarItem(placement: .principal) {
                 SegmentedPicker(
-                    items: ["Tasks", "Activities", "Screens"],
+                    items: tabItems,
                     selection: $selectedTab
                 )
                 .frame(maxWidth: 400)
@@ -98,7 +105,13 @@ struct ContentView: View {
                 .padding(.trailing, ToolbarLayout.toolbarTrailingPadding)
             }
         }
-        .sheet(isPresented: $showSettings) {
+        .sheet(isPresented: $showSettings, onDismiss: {
+            showScreensTab = SettingsManager.shared.showScreensTab
+            // If Screens tab was hidden while selected, reset to first tab
+            if !showScreensTab && selectedTab >= tabItems.count {
+                selectedTab = 0
+            }
+        }) {
             SettingsView()
                 .environment(viewModel)
         }

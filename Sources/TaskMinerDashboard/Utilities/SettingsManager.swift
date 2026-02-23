@@ -17,6 +17,9 @@ final class SettingsManager {
     struct Settings: Codable {
         var customPrompt: String?
         var granularity: TaskGranularity?
+        var showScreensTab: Bool?
+        var hasCompletedSetup: Bool?
+        var launchAtLogin: Bool?
     }
 
     // MARK: - Read / Write (for future file-based settings)
@@ -66,6 +69,39 @@ final class SettingsManager {
         set {
             var settings = load()
             settings.granularity = newValue
+            save(settings)
+        }
+    }
+
+    // MARK: - Show Screens Tab
+
+    var showScreensTab: Bool {
+        get { load().showScreensTab ?? false }
+        set {
+            var settings = load()
+            settings.showScreensTab = newValue
+            save(settings)
+        }
+    }
+
+    // MARK: - Setup Wizard
+
+    var hasCompletedSetup: Bool {
+        get { load().hasCompletedSetup ?? false }
+        set {
+            var settings = load()
+            settings.hasCompletedSetup = newValue
+            save(settings)
+        }
+    }
+
+    // MARK: - Launch at Login
+
+    var launchAtLogin: Bool {
+        get { load().launchAtLogin ?? false }
+        set {
+            var settings = load()
+            settings.launchAtLogin = newValue
             save(settings)
         }
     }

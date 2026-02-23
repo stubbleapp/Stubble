@@ -16,7 +16,7 @@ extension DashboardViewModel {
             let date = task.date
             let start = SharedFormatters.timeSecondsFormatter.string(from: task.startTime)
             let end = SharedFormatters.timeSecondsFormatter.string(from: task.endTime)
-            let duration = Int(task.endTime.timeIntervalSince(task.startTime))
+            let duration = Int(task.duration)
             let mins = duration / 60
             let secs = duration % 60
             let durStr = String(format: "%d:%02d", mins, secs)

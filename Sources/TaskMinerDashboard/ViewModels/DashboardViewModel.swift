@@ -78,10 +78,10 @@ final class DashboardViewModel {
         self.taskWriter = config.flatMap { try? TaskWriter(path: $0.databasePath) }
         self.memoryStore = UserMemoryStore(filePath: config?.memoryPath ?? baseDir.appendingPathComponent("memory.json"))
 
-        // Initialize AI summarization: Keychain first, then env (same as CLI)
-        let geminiClient = GeminiClient.resolvedClient()
-
-        if let client = geminiClient {
+        // Initialize AI summarization: Keychain first, then env (same as CLI).
+        // Skip Keychain access if setup wizard hasn't completed yet — avoids an
+        // immediate Keychain permission prompt on first launch.
+        if SettingsManager.shared.hasCompletedSetup, let client = GeminiClient.resolvedClient() {
             self.geminiClient = client
             self.taskSummarizer = TaskSummarizer(geminiClient: client)
             self.activityGenerator = ProjectActivityGenerator(geminiClient: client)
@@ -254,6 +254,74 @@ final class DashboardViewModel {
     func resumeMonitoring() {
         pauseController.resume()
         pauseState = nil
+    }
+
+    // MARK: - Task ↔ Activity Color Mapping
+
+    /// Resolves colors for the top-3 activities, ensuring no two share the same color.
+    /// If a hash collision occurs, the later activity gets the next available palette slot.
+    private var resolvedTop3: [(activity: ProjectActivity, color: Color)] {
+        let sorted = projectActivities.sorted { $0.totalDuration > $1.totalDuration }
+        let palette = Theme.barPalette
+        var usedIndices = Set<Int>()
+        var result: [(ProjectActivity, Color)] = []
+
+        for activity in sorted.prefix(3) {
+            var idx = activity.colorIndex % palette.count
+            // If this index is already taken, find the next free one
+            while usedIndices.contains(idx) {
+                idx = (idx + 1) % palette.count
+            }
+            usedIndices.insert(idx)
+            result.append((activity, palette[idx]))
+        }
+        return result
+    }
+
+    /// Global top-3 activities ordered by duration (stable column positions).
+    var top3Activities: [(name: String, color: Color)] {
+        resolvedTop3.map { ($0.activity.name, $0.color) }
+    }
+
+    /// Top-3 activities formatted for the day summary legend.
+    /// Durations are normalized so the total across all project activities
+    /// never exceeds the actual active time for the day.
+    var topActivityLegendItems: [ActivityLegendItem] {
+        let rawTotal = projectActivities.reduce(0.0) { $0 + $1.totalDuration }
+        let activeCap = activeSeconds > 0 ? activeSeconds : rawTotal
+        let scale = rawTotal > activeCap && rawTotal > 0 ? activeCap / rawTotal : 1.0
+
+        return resolvedTop3.map { item in
+            ActivityLegendItem(
+                name: item.activity.name,
+                color: item.color,
+                duration: item.activity.totalDuration * scale
+            )
+        }
+    }
+
+    /// Returns all top-3 activity colors whose time range overlaps the given task.
+    func overlappingActivities(for task: TaskRecord) -> [(color: Color, name: String)] {
+        resolvedTop3.compactMap { item in
+            guard task.startTime < item.activity.endTime && task.endTime > item.activity.startTime else {
+                return nil
+            }
+            return (item.color, item.activity.name)
+        }
+    }
+
+    /// Scale factor to normalize project activity durations so they don't exceed active time.
+    /// When the raw sum of task durations exceeds activeSeconds (due to overlapping tasks
+    /// or span-time fallback), this factor brings them in line.
+    var activityDurationScale: Double {
+        let rawTotal = projectActivities.reduce(0.0) { $0 + $1.totalDuration }
+        let activeCap = activeSeconds > 0 ? activeSeconds : rawTotal
+        return rawTotal > activeCap && rawTotal > 0 ? activeCap / rawTotal : 1.0
+    }
+
+    /// Returns a set of top-3 activity names that overlap the given task.
+    func overlappingActivityNames(for task: TaskRecord) -> Set<String> {
+        Set(overlappingActivities(for: task).map(\.name))
     }
 
     // MARK: - Helpers

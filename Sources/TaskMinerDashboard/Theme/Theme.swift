@@ -114,19 +114,19 @@ enum Theme {
     static let statusPaused = Color(red: 0.90, green: 0.70, blue: 0.35)
     static let statusError = Color(red: 0.91, green: 0.36, blue: 0.29)
 
-    // MARK: - Activity bar palette (distinct but muted)
+    // MARK: - Activity bar palette (maximally distinct, evenly spaced hues)
 
     static let barPalette: [Color] = [
-        Color(red: 0.40, green: 0.56, blue: 0.78),
-        Color(red: 0.35, green: 0.72, blue: 0.55),
-        Color(red: 0.90, green: 0.68, blue: 0.35),
-        Color(red: 0.62, green: 0.48, blue: 0.75),
-        Color(red: 0.88, green: 0.45, blue: 0.38),
-        Color(red: 0.38, green: 0.68, blue: 0.68),
-        Color(red: 0.72, green: 0.52, blue: 0.48),
-        Color(red: 0.52, green: 0.62, blue: 0.48),
-        Color(red: 0.68, green: 0.42, blue: 0.58),
-        Color(red: 0.48, green: 0.64, blue: 0.58),
+        Color(red: 0.35, green: 0.55, blue: 0.82),   // 0 — Blue
+        Color(red: 0.90, green: 0.55, blue: 0.30),   // 1 — Orange
+        Color(red: 0.35, green: 0.72, blue: 0.50),   // 2 — Green
+        Color(red: 0.78, green: 0.38, blue: 0.62),   // 3 — Rose
+        Color(red: 0.55, green: 0.45, blue: 0.78),   // 4 — Purple
+        Color(red: 0.85, green: 0.72, blue: 0.30),   // 5 — Gold
+        Color(red: 0.35, green: 0.65, blue: 0.68),   // 6 — Teal
+        Color(red: 0.88, green: 0.42, blue: 0.38),   // 7 — Red
+        Color(red: 0.50, green: 0.68, blue: 0.40),   // 8 — Olive
+        Color(red: 0.65, green: 0.50, blue: 0.70),   // 9 — Lavender
     ]
 
     // MARK: - Screenshot trigger badges

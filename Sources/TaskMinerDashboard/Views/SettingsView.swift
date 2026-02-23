@@ -1,14 +1,18 @@
 import SwiftUI
+import ServiceManagement
 import TaskMinerShared
 
 struct SettingsView: View {
     @Environment(DashboardViewModel.self) var viewModel
+    @EnvironmentObject var updater: SoftwareUpdater
     @Environment(\.dismiss) var dismiss
     @State private var apiKey: String = ""
     @State private var showKey = false
     @State private var saved = false
     @State private var customPrompt: String = ""
     @State private var granularity: TaskGranularity = .medium
+    @State private var showScreensTab: Bool = false
+    @State private var launchAtLogin: Bool = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -132,6 +136,62 @@ struct SettingsView: View {
                             .foregroundStyle(Theme.textMuted)
                     }
 
+                    // General
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("General")
+                            .font(.subheadline.weight(.medium))
+                            .foregroundStyle(Theme.textPrimary)
+
+                        Toggle(isOn: $launchAtLogin) {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("Launch at login")
+                                    .font(.system(size: 13))
+                                    .foregroundStyle(Theme.textPrimary)
+                                Text("Start TaskMiner automatically when you log in.")
+                                    .font(.caption2)
+                                    .foregroundStyle(Theme.textMuted)
+                            }
+                        }
+                        .toggleStyle(.switch)
+                        .tint(Theme.accent)
+                        .onChange(of: launchAtLogin) { _, enabled in
+                            SettingsManager.shared.launchAtLogin = enabled
+                            if #available(macOS 13.0, *) {
+                                do {
+                                    if enabled {
+                                        try SMAppService.mainApp.register()
+                                    } else {
+                                        try SMAppService.mainApp.unregister()
+                                    }
+                                } catch {
+                                    Logger.error("Failed to update login item: \(error.localizedDescription)")
+                                }
+                            }
+                        }
+
+                        CheckForUpdatesView(updater: updater)
+                    }
+
+                    // Views
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Views")
+                            .font(.subheadline.weight(.medium))
+                            .foregroundStyle(Theme.textPrimary)
+
+                        Toggle(isOn: $showScreensTab) {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("Show Screens tab")
+                                    .font(.system(size: 13))
+                                    .foregroundStyle(Theme.textPrimary)
+                                Text("Browse captured screenshots in a separate tab.")
+                                    .font(.caption2)
+                                    .foregroundStyle(Theme.textMuted)
+                            }
+                        }
+                        .toggleStyle(.switch)
+                        .tint(Theme.accent)
+                    }
+
                     // Status + Save
                     HStack(spacing: 12) {
                         HStack(spacing: 6) {
@@ -162,6 +222,7 @@ struct SettingsView: View {
                             let trimmed = customPrompt.trimmingCharacters(in: .whitespacesAndNewlines)
                             SettingsManager.shared.customPrompt = trimmed.isEmpty ? nil : trimmed
                             SettingsManager.shared.granularity = granularity
+                            SettingsManager.shared.showScreensTab = showScreensTab
                             saved = true
                             hideSavedAfterDelay()
                         } label: {
@@ -186,13 +247,15 @@ struct SettingsView: View {
                 .padding()
             }
         }
-        .frame(width: 480, height: 460)
+        .frame(width: 480, height: 600)
         .background(.ultraThinMaterial)
         .onAppear {
             apiKey = GeminiKeychain.get() ?? ""
             showKey = !apiKey.isEmpty
             customPrompt = SettingsManager.shared.customPrompt ?? ""
             granularity = SettingsManager.shared.granularity
+            showScreensTab = SettingsManager.shared.showScreensTab
+            launchAtLogin = SettingsManager.shared.launchAtLogin
         }
     }
 

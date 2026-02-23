@@ -18,6 +18,10 @@ final class MenuBarDelegate: NSObject, NSApplicationDelegate {
         NSApp.setActivationPolicy(.regular)
         NSApp.activate(ignoringOtherApps: true)
 
+        // Set app icon — when running from .app bundle it's in Resources/;
+        // when running via `swift run` we look relative to the package root.
+        setAppIcon()
+
         // Create the pause controller (same data directory as the dashboard)
         if let config = try? SharedConfiguration() {
             self.pauseController = PauseController(dataDirectory: config.dataDirectory)
@@ -26,12 +30,10 @@ final class MenuBarDelegate: NSObject, NSApplicationDelegate {
         // Start the monitoring daemon (bundled alongside the dashboard binary)
         startDaemon()
 
-        // Create the status item
+        // Create the status item with our orange gradient icon
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
         if let button = statusItem?.button {
-            let image = NSImage(systemSymbolName: "hammer.fill", accessibilityDescription: "TaskMiner")
-            image?.isTemplate = true
-            button.image = image
+            button.image = makeMenuBarIcon()
         }
         rebuildMenu()
 
@@ -45,6 +47,66 @@ final class MenuBarDelegate: NSObject, NSApplicationDelegate {
 
     func applicationWillTerminate(_ notification: Notification) {
         stopDaemon()
+    }
+
+    // MARK: - App Icon
+
+    /// Set the Dock / app switcher icon from the bundled .icns file.
+    private func setAppIcon() {
+        // 1) .app bundle — standard location
+        if let bundlePath = Bundle.main.path(forResource: "AppIcon", ofType: "icns"),
+           let icon = NSImage(contentsOfFile: bundlePath) {
+            NSApp.applicationIconImage = icon
+            return
+        }
+
+        // 2) Development — look relative to the binary's package checkout
+        //    e.g. <repo>/.build/debug/TaskMinerDashboard → <repo>/Resources/AppIcon.icns
+        let binaryPath = ProcessInfo.processInfo.arguments[0]
+        let binaryDir = (binaryPath as NSString).deletingLastPathComponent
+        // Walk up from .build/arm64-apple-macosx/debug to the package root
+        for ancestor in ["../../..", "../../../.."] {
+            let candidate = (binaryDir as NSString).appendingPathComponent("\(ancestor)/Resources/AppIcon.icns")
+            let resolved = (candidate as NSString).standardizingPath
+            if FileManager.default.fileExists(atPath: resolved),
+               let icon = NSImage(contentsOfFile: resolved) {
+                NSApp.applicationIconImage = icon
+                return
+            }
+        }
+    }
+
+    // MARK: - Menu Bar Icon
+
+    /// Draw a small orange radial gradient circle for the menu bar.
+    private func makeMenuBarIcon() -> NSImage {
+        let size: CGFloat = 18
+        let image = NSImage(size: NSSize(width: size, height: size), flipped: false) { rect in
+            guard let ctx = NSGraphicsContext.current?.cgContext else { return false }
+
+            let center = CGPoint(x: rect.midX, y: rect.midY)
+            let radius = size / 2
+
+            // Orange radial gradient matching the app icon
+            let colors = [
+                CGColor(red: 0.91, green: 0.36, blue: 0.18, alpha: 1.0),
+                CGColor(red: 0.95, green: 0.55, blue: 0.35, alpha: 0.6),
+                CGColor(red: 1.0, green: 0.75, blue: 0.55, alpha: 0.0),
+            ] as CFArray
+            let locations: [CGFloat] = [0.0, 0.55, 1.0]
+
+            guard let gradient = CGGradient(colorsSpace: CGColorSpaceCreateDeviceRGB(),
+                                            colors: colors,
+                                            locations: locations) else { return false }
+
+            ctx.drawRadialGradient(gradient,
+                                   startCenter: center, startRadius: 0,
+                                   endCenter: center, endRadius: radius,
+                                   options: [])
+            return true
+        }
+        image.isTemplate = false
+        return image
     }
 
     // MARK: - Daemon Lifecycle
@@ -98,23 +160,6 @@ final class MenuBarDelegate: NSObject, NSApplicationDelegate {
         let openItem = NSMenuItem(title: "Open TaskMiner", action: #selector(openApp), keyEquivalent: "o")
         openItem.target = self
         menu.addItem(openItem)
-
-        menu.addItem(NSMenuItem.separator())
-
-        // Daemon status
-        let daemonRunning = daemonProcess?.isRunning ?? false
-        let statusTitle = daemonRunning ? "Monitoring Active" : "Monitoring Stopped"
-        let statusItem = NSMenuItem(title: statusTitle, action: nil, keyEquivalent: "")
-        statusItem.isEnabled = false
-        statusItem.image = NSImage(
-            systemSymbolName: daemonRunning ? "circle.fill" : "circle",
-            accessibilityDescription: nil
-        )
-        // Tint the dot green/red
-        if daemonRunning {
-            statusItem.image?.isTemplate = false
-        }
-        menu.addItem(statusItem)
 
         menu.addItem(NSMenuItem.separator())
 

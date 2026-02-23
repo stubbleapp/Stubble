@@ -5,20 +5,24 @@ final class AppIconResolver {
     static let shared = AppIconResolver()
 
     private var cache: [String: NSImage] = [:]
-    private let fallbackIcon: NSImage = NSImage(systemSymbolName: "app.badge", accessibilityDescription: nil) ?? NSImage()
 
     private init() {}
 
-    func icon(for bundleId: String?, size: CGFloat = 32) -> NSImage {
-        guard let bundleId else { return sized(fallbackIcon, size) }
+    /// Returns the app icon for the given bundle ID.
+    /// When `bundleId` is nil or the app can't be found, returns `nil`
+    /// so the view layer can show an appropriate fallback.
+    func icon(for bundleId: String?, size: CGFloat = 32) -> NSImage? {
+        guard let bundleId else { return nil }
 
         if let cached = cache[bundleId] { return cached }
 
-        var result = fallbackIcon
-        if let appURL = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleId) {
-            result = NSWorkspace.shared.icon(forFile: appURL.path)
+        guard let appURL = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleId) else {
+            cache[bundleId] = nil
+            return nil
         }
-        let sizedResult = sized(result, size)
+
+        let icon = NSWorkspace.shared.icon(forFile: appURL.path)
+        let sizedResult = sized(icon, size)
         cache[bundleId] = sizedResult
         return sizedResult
     }

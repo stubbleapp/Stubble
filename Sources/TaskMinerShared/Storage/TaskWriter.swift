@@ -32,8 +32,8 @@ public class TaskWriter {
     @discardableResult
     public func insertTask(_ task: TaskRecord) throws -> Int64 {
         let sql = """
-        INSERT INTO tasks (date, start_time, end_time, title, description, app_names, confidence, relevant_links)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO tasks (date, start_time, end_time, title, description, app_names, confidence, relevant_links, active_duration)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         """
         var stmt: OpaquePointer?
         guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
@@ -49,6 +49,11 @@ public class TaskWriter {
         sqliteBindText(stmt, 6, task.appNames)
         sqlite3_bind_double(stmt, 7, task.confidence)
         sqliteBindText(stmt, 8, task.relevantLinks)
+        if let activeDuration = task.activeDuration {
+            sqlite3_bind_double(stmt, 9, activeDuration)
+        } else {
+            sqlite3_bind_null(stmt, 9)
+        }
 
         guard sqlite3_step(stmt) == SQLITE_DONE else {
             throw DatabaseError.executionFailed(lastError)

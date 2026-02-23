@@ -136,9 +136,34 @@ class AppDelegate {
 
     // MARK: - Event Handlers
 
+    /// Bundle IDs of system apps that indicate the screen is locked or the user is away.
+    /// These should never be recorded as real user activity.
+    private static let systemIdleBundleIds: Set<String> = [
+        "com.apple.loginwindow",
+        "com.apple.ScreenSaver.Engine",
+        "com.apple.UserNotificationCenter",
+        "com.apple.screencaptureui",
+    ]
+
     private func handleAppChange(app: NSRunningApplication) {
         let appName = app.localizedName ?? "Unknown"
         let bundleId = app.bundleIdentifier
+
+        // If the frontmost app is the login window, screensaver, etc., treat as idle.
+        // This catches the case where the lock screen activates before (or without)
+        // the screenIsLocked notification, preventing a long false activity.
+        if let bid = bundleId, Self.systemIdleBundleIds.contains(bid) {
+            if currentActivity?.isIdle != true {
+                finalizeCurrentActivity()
+                startNewActivity(appName: "Idle", bundleId: nil, pid: 0, isIdle: true)
+                Logger.info("System app '\(appName)' activated — treating as idle")
+            }
+            return
+        }
+
+        // Skip if currently idle (e.g. screen locked) — the becameActive handler
+        // will pick up the correct frontmost app when the user returns.
+        if idleDetector.isIdle { return }
 
         // Finalize previous activity
         finalizeCurrentActivity()
@@ -256,8 +281,10 @@ class AppDelegate {
         case .becameActive:
             Logger.info("User became active")
             finalizeCurrentActivity()
-            // Re-read current frontmost app
-            if let frontApp = activityMonitor.currentApp() {
+            // Re-read current frontmost app — but skip system idle apps
+            // (loginwindow may be briefly frontmost during unlock animation)
+            if let frontApp = activityMonitor.currentApp(),
+               !(frontApp.bundleIdentifier.map { Self.systemIdleBundleIds.contains($0) } ?? false) {
                 startNewActivity(
                     appName: frontApp.localizedName ?? "Unknown",
                     bundleId: frontApp.bundleIdentifier,

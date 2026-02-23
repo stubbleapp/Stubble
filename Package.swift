@@ -4,6 +4,9 @@ import PackageDescription
 let package = Package(
     name: "TaskMiner",
     platforms: [.macOS(.v14)],
+    dependencies: [
+        .package(url: "https://github.com/sparkle-project/Sparkle", from: "2.6.0"),
+    ],
     targets: [
         .target(
             name: "TaskMinerShared",
@@ -23,7 +26,10 @@ let package = Package(
         ),
         .executableTarget(
             name: "TaskMinerDashboard",
-            dependencies: ["TaskMinerShared"],
+            dependencies: [
+                "TaskMinerShared",
+                "Sparkle",
+            ],
             path: "Sources/TaskMinerDashboard",
             linkerSettings: [
                 .linkedLibrary("sqlite3")

@@ -91,7 +91,7 @@ extension DashboardViewModel {
         for task in tasks {
             let start = SharedFormatters.timeFormatter.string(from: task.startTime)
             let end = SharedFormatters.timeFormatter.string(from: task.endTime)
-            let duration = Int(task.endTime.timeIntervalSince(task.startTime))
+            let duration = Int(task.duration)
             let durMins = duration / 60
             let apps = task.appNamesList.joined(separator: ", ")
             lines.append("- [\(start)–\(end)] (\(durMins)m) \(task.title)")

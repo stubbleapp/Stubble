@@ -37,7 +37,7 @@ public class DatabaseReader {
     }
 
     /// Current schema version. Bump this when adding new migrations.
-    private static let schemaVersion = 4
+    private static let schemaVersion = 5
 
     /// Apply schema migrations so the dashboard works even if the CLI hasn't run yet.
     /// Uses PRAGMA user_version to track which migrations have already run.
@@ -93,6 +93,12 @@ public class DatabaseReader {
             """
             execMigration(paSql, label: "4: create project_activities table")
             sqlite3_exec(db, "CREATE INDEX IF NOT EXISTS idx_pa_date ON project_activities(date)", nil, nil, nil)
+        }
+
+        if currentVersion < 5 {
+            // Migration 5: add active_duration column to tasks (actual active seconds)
+            execMigration("ALTER TABLE tasks ADD COLUMN active_duration REAL",
+                         label: "5: add active_duration", ignoreDuplicate: true)
         }
 
         // Update stored version
@@ -204,7 +210,7 @@ public class DatabaseReader {
         let dateStr = SharedFormatters.dayFormatter.string(from: date)
 
         let sql = """
-        SELECT id, date, start_time, end_time, title, description, app_names, confidence, relevant_links
+        SELECT id, date, start_time, end_time, title, description, app_names, confidence, relevant_links, active_duration
         FROM tasks
         WHERE date = ?
         ORDER BY start_time ASC
@@ -217,6 +223,8 @@ public class DatabaseReader {
 
         var results: [TaskRecord] = []
         while sqlite3_step(stmt) == SQLITE_ROW {
+            let activeDuration: TimeInterval? = sqlite3_column_type(stmt, 9) != SQLITE_NULL
+                ? sqlite3_column_double(stmt, 9) : nil
             let record = TaskRecord(
                 id: sqlite3_column_int64(stmt, 0),
                 date: sqlite3_column_text(stmt, 1).map({ String(cString: $0) }) ?? dateStr,
@@ -226,7 +234,8 @@ public class DatabaseReader {
                 description: sqlite3_column_text(stmt, 5).map({ String(cString: $0) }) ?? "",
                 appNames: sqlite3_column_text(stmt, 6).map({ String(cString: $0) }) ?? "[]",
                 confidence: sqlite3_column_double(stmt, 7),
-                relevantLinks: sqlite3_column_text(stmt, 8).map({ String(cString: $0) }) ?? "[]"
+                relevantLinks: sqlite3_column_text(stmt, 8).map({ String(cString: $0) }) ?? "[]",
+                activeDuration: activeDuration
             )
             results.append(record)
         }

@@ -90,20 +90,44 @@ public final class TaskSummarizer: Sendable {
         Respond with a JSON object containing "tasks" and "day_summary". Do not include any text outside the JSON.\(memorySection)\(userRules)
         """
 
-        let response = try await geminiClient.generateContent(
-            prompt: prompt,
-            systemInstruction: systemInstruction
-        )
+        var result: SummarizationResult?
+        var lastParseError: Error?
 
-        #if DEBUG
-        if let debugDir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first {
-            let debugFile = debugDir.appendingPathComponent("TaskMiner").appendingPathComponent("last_gemini_response.txt")
-            try? response.write(to: debugFile, atomically: true, encoding: .utf8)
-            Logger.debug("Gemini raw response written to \(debugFile.path)")
+        // Attempt up to 2 times — retry once if JSON parsing fails
+        for attempt in 0..<2 {
+            let response: String
+            do {
+                response = try await geminiClient.generateContent(
+                    prompt: prompt,
+                    systemInstruction: systemInstruction
+                )
+            } catch {
+                // Network/API error — don't retry, propagate immediately
+                throw error
+            }
+
+            #if DEBUG
+            if let debugDir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first {
+                let debugFile = debugDir.appendingPathComponent("TaskMiner").appendingPathComponent("last_gemini_response.txt")
+                try? response.write(to: debugFile, atomically: true, encoding: .utf8)
+                Logger.debug("Gemini raw response written to \(debugFile.path)")
+            }
+            #endif
+
+            do {
+                result = try parseResponse(response, date: date)
+                break  // Success — exit retry loop
+            } catch {
+                lastParseError = error
+                if attempt == 0 {
+                    Logger.warning("TaskSummarizer: JSON parse failed (attempt 1), retrying. Error: \(error.localizedDescription)")
+                }
+            }
         }
-        #endif
 
-        var result = try parseResponse(response, date: date)
+        guard var result = result else {
+            throw lastParseError ?? GeminiError.parseError("Failed to parse response after retries")
+        }
 
         // Second call: extract memory updates from what was just observed
         let memoryEntries = await extractMemory(from: activities, existingMemory: memoryContext)
@@ -161,21 +185,19 @@ public final class TaskSummarizer: Sendable {
                 systemInstruction: systemInstruction
             )
 
-            var jsonStr = response.trimmingCharacters(in: .whitespacesAndNewlines)
-            if jsonStr.hasPrefix("```json") { jsonStr = String(jsonStr.dropFirst(7)) }
-            else if jsonStr.hasPrefix("```") { jsonStr = String(jsonStr.dropFirst(3)) }
-            if jsonStr.hasSuffix("```") { jsonStr = String(jsonStr.dropLast(3)) }
-            jsonStr = jsonStr.trimmingCharacters(in: .whitespacesAndNewlines)
-
-            // Find array in response
-            if !jsonStr.hasPrefix("["), let idx = jsonStr.firstIndex(of: "[") {
-                jsonStr = String(jsonStr[idx...])
-            }
-
-            guard let data = jsonStr.data(using: .utf8),
-                  let arr = try? JSONSerialization.jsonObject(with: data) as? [String]
-            else {
+            guard let parsed = JSONSanitizer.parse(response) else {
                 Logger.debug("Memory extraction: could not parse response")
+                return []
+            }
+            // Response should be a JSON array of strings, but handle object wrapper too
+            let arr: [String]
+            if let direct = parsed as? [String] {
+                arr = direct
+            } else if let obj = parsed as? [String: Any],
+                      let nested = obj.values.first(where: { $0 is [String] }) as? [String] {
+                arr = nested
+            } else {
+                Logger.debug("Memory extraction: unexpected JSON structure")
                 return []
             }
 
@@ -293,6 +315,7 @@ public final class TaskSummarizer: Sendable {
               "description": "Iterating on login validation logic across multiple Swift files.",
               "start_time": "HH:mm:ss",
               "end_time": "HH:mm:ss",
+              "active_seconds": 1800,
               "app_names": ["Xcode"],
               "confidence": 0.85,
               "relevant_links": ["https://github.com/user/repo", "/Users/name/project/file.swift"]
@@ -302,13 +325,15 @@ public final class TaskSummarizer: Sendable {
 
         Rules:
         - \(granularity.promptInstruction)
-        - If the same project or topic appears in multiple blocks (even separated by short breaks or other apps), merge them into ONE task that spans the full time range
+        - Each task must represent ONE discrete activity — never combine unrelated activities into a single task. For example, "Watching YouTube videos and checking email" must be split into two separate tasks: "Watching YouTube videos" and "Checking email"
+        - If the same project or topic appears in multiple blocks (even separated by short breaks or other apps), merge them into ONE task that spans the full time range — but only merge activities that are genuinely the same activity or project
         - Every task title MUST be unique — never produce two tasks with the same or near-identical title
         - Titles MUST start with a present participle verb (e.g., Developing, Browsing, Watching, Reviewing, Debugging)
         - Descriptions must be impersonal — never write "the user", "you", or "they". Describe the activity directly.
         - day_summary should be written in a direct, impersonal style — describe what was worked on and where the bulk of time went. Never say "the user" or "you".
         - confidence should be 0.0-1.0 based on how certain you are
-        - Times should be based on the activity timestamps — use the earliest start and latest end for merged tasks
+        - start_time/end_time: use the earliest start and latest end from the constituent activity blocks
+        - active_seconds: the SUM of the durations (in seconds) shown in parentheses for each constituent activity block. Do NOT use end_time minus start_time — that would incorrectly include idle gaps between blocks. For example, if a task merges a 300s block and a 180s block separated by a break, active_seconds should be 480, not the full time span.
         - Ignore idle periods
         - Silently skip any activity involving adult, explicit, or NSFW content — never include it in tasks or the day summary
         - relevant_links: extract any URLs (https://...) or local file paths (/Users/...) visible in the OCR text or window titles that relate to this task. Include website URLs, document links, repository URLs, and file paths. Return [] if none found. Only include real URLs/paths seen in the data, never fabricate them.
@@ -321,26 +346,7 @@ public final class TaskSummarizer: Sendable {
     // MARK: - Response Parsing
 
     private func parseResponse(_ response: String, date: Date) throws -> SummarizationResult {
-        var jsonStr = response.trimmingCharacters(in: .whitespacesAndNewlines)
-        if jsonStr.hasPrefix("```json") {
-            jsonStr = String(jsonStr.dropFirst(7))
-        } else if jsonStr.hasPrefix("```") {
-            jsonStr = String(jsonStr.dropFirst(3))
-        }
-        if jsonStr.hasSuffix("```") {
-            jsonStr = String(jsonStr.dropLast(3))
-        }
-        jsonStr = jsonStr.trimmingCharacters(in: .whitespacesAndNewlines)
-
-        // If the response doesn't start with { or [, try to find the first JSON structure
-        if !jsonStr.hasPrefix("{") && !jsonStr.hasPrefix("[") {
-            if let braceIdx = jsonStr.firstIndex(of: "{") {
-                jsonStr = String(jsonStr[braceIdx...])
-            } else if let bracketIdx = jsonStr.firstIndex(of: "[") {
-                jsonStr = String(jsonStr[bracketIdx...])
-            }
-        }
-
+        let jsonStr = JSONSanitizer.sanitize(response)
         Logger.debug("Gemini response (\(jsonStr.count) chars): \(String(jsonStr.prefix(500)))")
 
         guard let data = jsonStr.data(using: .utf8) else {
@@ -395,6 +401,8 @@ public final class TaskSummarizer: Sendable {
             let links = dict["relevant_links"] as? [String] ?? []
             let linksJSON = (try? JSONSerialization.data(withJSONObject: links))
                 .flatMap { String(data: $0, encoding: .utf8) } ?? "[]"
+            // AI reports active seconds (sum of constituent block durations, excluding gaps)
+            let activeSeconds = dict["active_seconds"] as? Double
 
             return TaskRecord(
                 date: dateStr,
@@ -404,7 +412,8 @@ public final class TaskSummarizer: Sendable {
                 description: description,
                 appNames: appNamesJSON,
                 confidence: confidence,
-                relevantLinks: linksJSON
+                relevantLinks: linksJSON,
+                activeDuration: activeSeconds
             )
         }
 
@@ -460,6 +469,10 @@ public final class TaskSummarizer: Sendable {
             let linksJSON = (try? JSONSerialization.data(withJSONObject: linkList))
                 .flatMap { String(data: $0, encoding: .utf8) } ?? "[]"
 
+            // Merge active durations — sum them if any are present
+            let durations = group.compactMap(\.activeDuration)
+            let mergedDuration: TimeInterval? = durations.isEmpty ? nil : durations.reduce(0, +)
+
             return TaskRecord(
                 date: first.date,
                 startTime: startTime,
@@ -468,7 +481,8 @@ public final class TaskSummarizer: Sendable {
                 description: mergedDesc,
                 appNames: appNamesJSON,
                 confidence: confidence,
-                relevantLinks: linksJSON
+                relevantLinks: linksJSON,
+                activeDuration: mergedDuration
             )
         }
     }

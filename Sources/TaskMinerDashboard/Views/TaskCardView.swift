@@ -1,10 +1,21 @@
 import SwiftUI
 import TaskMinerShared
 
+/// Per-column bar info for a single task card. Each column corresponds to one of
+/// the global top-3 activities and maintains a fixed horizontal position.
+struct ActivityColumn: Equatable {
+    let name: String
+    let color: Color
+    let active: Bool       // Whether this activity overlaps this task
+    let continuesUp: Bool  // Same activity is also active in the previous task
+    let continuesDown: Bool // Same activity is also active in the next task
+}
+
 struct TaskCardView: View {
     let task: TaskRecord
-    let isFirst: Bool
-    let isLast: Bool
+    /// Fixed-column activity bars. Always has the same count (0–3) and ordering
+    /// across all task cards, so bars maintain stable horizontal positions.
+    let activityColumns: [ActivityColumn]
     @State private var isExpanded = false
     @State private var isEditing = false
     @State private var editTitle = ""
@@ -89,12 +100,43 @@ struct TaskCardView: View {
         }
     }
 
+    /// Whether any activity column is active for this task.
+    private var hasActiveColumns: Bool {
+        activityColumns.contains { $0.active }
+    }
+
     // MARK: - Card content
 
     private var cardContent: some View {
-        HStack(alignment: .top, spacing: 12) {
-            // Timeline spine
-            timelineSpine
+        HStack(alignment: .top, spacing: 0) {
+            // Activity color flags — fixed columns so each activity keeps its
+            // horizontal position across all task cards. Inactive columns render
+            // as transparent spacers to maintain alignment.
+            if !activityColumns.isEmpty {
+                HStack(spacing: 2) {
+                    ForEach(Array(activityColumns.enumerated()), id: \.offset) { _, col in
+                        if col.active {
+                            ActivityBarSegment(
+                                color: col.color,
+                                continuesUp: col.continuesUp,
+                                continuesDown: col.continuesDown
+                            )
+                            .frame(width: 4)
+                            .help(col.name)
+                        } else {
+                            // Invisible spacer keeps the column position stable
+                            Color.clear
+                                .frame(width: 4)
+                        }
+                    }
+                }
+                .padding(.trailing, 6)
+                .padding(.leading, 4)
+            } else {
+                // When no activity columns, add a small left inset
+                Spacer()
+                    .frame(width: 4)
+            }
 
             // Task content
             VStack(alignment: .leading, spacing: 4) {
@@ -141,7 +183,7 @@ struct TaskCardView: View {
                             .foregroundStyle(Theme.textMuted)
                         Text("\u{00B7}")
                             .foregroundStyle(Theme.textQuaternary)
-                        Text(formatDuration(task.endTime.timeIntervalSince(task.startTime)))
+                        Text(formatDuration(task.duration))
                             .font(.system(size: 11, weight: .medium).monospacedDigit())
                             .foregroundStyle(Theme.textMuted)
                     }
@@ -158,6 +200,26 @@ struct TaskCardView: View {
                             }
                         }
                         .padding(.top, 2)
+                    }
+
+                    // Project/activity associations
+                    if !isEditing {
+                        let activities = viewModel.overlappingActivities(for: task)
+                        if !activities.isEmpty {
+                            HStack(spacing: 6) {
+                                ForEach(Array(activities.enumerated()), id: \.offset) { _, activity in
+                                    HStack(spacing: 4) {
+                                        Circle()
+                                            .fill(activity.color)
+                                            .frame(width: 7, height: 7)
+                                        Text(activity.name)
+                                            .font(.system(size: 11, weight: .medium))
+                                            .foregroundStyle(Theme.textSecondary)
+                                    }
+                                }
+                            }
+                            .padding(.top, 2)
+                        }
                     }
 
                     // Relevant links
@@ -280,37 +342,33 @@ struct TaskCardView: View {
         }
     }
 
-    private var timelineSpine: some View {
+}
+
+/// A single vertical color bar segment that connects to adjacent cards.
+/// Rounded caps appear only at the start/end of a continuous run.
+struct ActivityBarSegment: View {
+    let color: Color
+    let continuesUp: Bool
+    let continuesDown: Bool
+
+    private let capRadius: CGFloat = 1.5
+    private let inset: CGFloat = 4 // visual breathing room at start/end of a run
+
+    var body: some View {
         GeometryReader { geo in
-            let midX = geo.size.width / 2
-            let dotY: CGFloat = 14
-            let r: CGFloat = 4.5
+            let top: CGFloat = continuesUp ? 0 : inset
+            let bottom = continuesDown ? geo.size.height : geo.size.height - inset
 
-            // Line above dot
-            if !isFirst {
-                Path { p in
-                    p.move(to: CGPoint(x: midX, y: 0))
-                    p.addLine(to: CGPoint(x: midX, y: dotY - r))
-                }
-                .stroke(Theme.spineLine, lineWidth: 1.5)
-            }
-
-            // Dot
-            Circle()
-                .fill(Theme.accent)
-                .frame(width: r * 2, height: r * 2)
-                .position(x: midX, y: dotY)
-
-            // Line below dot
-            if !isLast {
-                Path { p in
-                    p.move(to: CGPoint(x: midX, y: dotY + r))
-                    p.addLine(to: CGPoint(x: midX, y: geo.size.height))
-                }
-                .stroke(Theme.spineLine, lineWidth: 1.5)
-            }
+            UnevenRoundedRectangle(
+                topLeadingRadius: continuesUp ? 0 : capRadius,
+                bottomLeadingRadius: continuesDown ? 0 : capRadius,
+                bottomTrailingRadius: continuesDown ? 0 : capRadius,
+                topTrailingRadius: continuesUp ? 0 : capRadius
+            )
+            .fill(color)
+            .frame(height: bottom - top)
+            .offset(y: top)
         }
-        .frame(width: 10)
     }
 }
 
@@ -402,7 +460,7 @@ struct AppIconStackView: View {
 
     var body: some View {
         HStack(spacing: -5) {
-            ForEach(Array(appNames.prefix(4).enumerated()), id: \.offset) { index, name in
+            ForEach(Array(appNames.prefix(3).enumerated()), id: \.offset) { index, name in
                 AppIconView(bundleId: bundleIdResolver(name), size: 20)
                     .clipShape(Circle())
                     .overlay(
@@ -411,8 +469,8 @@ struct AppIconStackView: View {
                     )
                     .zIndex(Double(appNames.count - index))
             }
-            if appNames.count > 4 {
-                Text("+\(appNames.count - 4)")
+            if appNames.count > 3 {
+                Text("+\(appNames.count - 3)")
                     .font(.system(size: 9, weight: .medium))
                     .foregroundStyle(Theme.textMuted)
                     .frame(width: 20, height: 20)

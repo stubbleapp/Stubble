@@ -18,6 +18,7 @@ final class ProjectActivityGenerator: Sendable {
     func cluster(
         todayTasks: [TaskRecord],
         recentHistory: [String: [TaskRecord]],
+        recentProjectNames: [String] = [],
         memoryContext: String?
     ) async throws -> [ProjectActivity] {
         guard !todayTasks.isEmpty else { return [] }
@@ -25,6 +26,7 @@ final class ProjectActivityGenerator: Sendable {
         let prompt = buildClusterPrompt(
             todayTasks: todayTasks,
             recentHistory: recentHistory,
+            recentProjectNames: recentProjectNames,
             memoryContext: memoryContext
         )
 
@@ -38,12 +40,33 @@ final class ProjectActivityGenerator: Sendable {
         Respond with a JSON object. Do not include any text outside the JSON.
         """
 
-        let response = try await geminiClient.generateContent(
-            prompt: prompt,
-            systemInstruction: systemInstruction
-        )
+        // Attempt up to 2 times — retry once if JSON parsing fails
+        for attempt in 0..<2 {
+            let response: String
+            do {
+                response = try await geminiClient.generateContent(
+                    prompt: prompt,
+                    systemInstruction: systemInstruction
+                )
+            } catch {
+                // Network/API error — don't retry here (GeminiClient has its own retries)
+                throw error
+            }
 
-        return try parseClusterResponse(response, todayTasks: todayTasks)
+            let activities = try parseClusterResponse(response, todayTasks: todayTasks)
+
+            // parseClusterResponse falls back to ungrouped tasks on parse failure.
+            // If we got real grouped activities (or only 1 task), accept the result.
+            // If all tasks ended up ungrouped as fallback and we have more tasks, retry.
+            let looksLikeFallback = activities.count == todayTasks.count && todayTasks.count > 1
+            if !looksLikeFallback || attempt == 1 {
+                return activities
+            }
+
+            Logger.warning("ProjectActivityGenerator: response looks like fallback (attempt \(attempt + 1)), retrying")
+        }
+
+        return Self.fallbackActivities(from: todayTasks)
     }
 
     /// Fallback when AI is unavailable: one ProjectActivity per task.
@@ -55,7 +78,7 @@ final class ProjectActivityGenerator: Sendable {
                     id: UUID(),
                     name: task.title,
                     summary: task.description,
-                    totalDuration: task.endTime.timeIntervalSince(task.startTime),
+                    totalDuration: task.duration,
                     appNames: task.appNamesList,
                     taskTitles: [task.title],
                     startTime: task.startTime,
@@ -71,6 +94,7 @@ final class ProjectActivityGenerator: Sendable {
     private func buildClusterPrompt(
         todayTasks: [TaskRecord],
         recentHistory: [String: [TaskRecord]],
+        recentProjectNames: [String] = [],
         memoryContext: String?
     ) -> String {
         var lines: [String] = []
@@ -85,7 +109,7 @@ final class ProjectActivityGenerator: Sendable {
         for (index, task) in todayTasks.enumerated() {
             let start = SharedFormatters.timeFormatter.string(from: task.startTime)
             let end = SharedFormatters.timeFormatter.string(from: task.endTime)
-            let dur = Int(task.endTime.timeIntervalSince(task.startTime) / 60)
+            let dur = Int(task.duration / 60)
             let apps = task.appNamesList.joined(separator: ", ")
             lines.append("[\(index)] \(start)-\(end) (\(dur)m) \"\(task.title)\" — \(apps)")
             if !task.description.isEmpty {
@@ -102,11 +126,19 @@ final class ProjectActivityGenerator: Sendable {
             for dateStr in sortedDates.prefix(7) {
                 guard let tasks = recentHistory[dateStr] else { continue }
                 let summaries = tasks.prefix(8).map { task in
-                    let dur = Int(task.endTime.timeIntervalSince(task.startTime) / 60)
+                    let dur = Int(task.duration / 60)
                     return "\"\(task.title)\" (\(dur)m)"
                 }
                 lines.append("\(dateStr): \(summaries.joined(separator: ", "))")
             }
+        }
+
+        // Recent project names for consistent reuse
+        if !recentProjectNames.isEmpty {
+            lines.append("")
+            lines.append("## Previously Used Project Names (reuse these when applicable)")
+            lines.append("")
+            lines.append(recentProjectNames.joined(separator: ", "))
         }
 
         // Memory context
@@ -136,7 +168,7 @@ final class ProjectActivityGenerator: Sendable {
         - Every task index (0 to \(todayTasks.count - 1)) must appear in exactly one project
         - Order projects by total time spent (most time first)
         - Project names should be concise (3-6 words) and recognisable
-        - If a task from today matches a pattern from recent history, use a consistent project name
+        - IMPORTANT: If today's tasks relate to a previously used project name, you MUST reuse that exact name. This ensures consistent color coding across days. Only create a new name if the work is genuinely new.
         - Summaries describe what was accomplished, not just list task titles
         - A single task that doesn't relate to others can be its own project
         - apps should be the union of apps from constituent tasks
@@ -148,24 +180,10 @@ final class ProjectActivityGenerator: Sendable {
     // MARK: - Response Parsing
 
     private func parseClusterResponse(_ response: String, todayTasks: [TaskRecord]) throws -> [ProjectActivity] {
-        var jsonStr = response.trimmingCharacters(in: .whitespacesAndNewlines)
-
-        // Strip markdown fences
-        if jsonStr.hasPrefix("```json") { jsonStr = String(jsonStr.dropFirst(7)) }
-        else if jsonStr.hasPrefix("```") { jsonStr = String(jsonStr.dropFirst(3)) }
-        if jsonStr.hasSuffix("```") { jsonStr = String(jsonStr.dropLast(3)) }
-        jsonStr = jsonStr.trimmingCharacters(in: .whitespacesAndNewlines)
-
-        // Find first JSON object
-        if !jsonStr.hasPrefix("{"), let idx = jsonStr.firstIndex(of: "{") {
-            jsonStr = String(jsonStr[idx...])
-        }
-
-        guard let data = jsonStr.data(using: .utf8),
-              let parsed = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+        guard let parsed = JSONSanitizer.parse(response) as? [String: Any],
               let projects = parsed["projects"] as? [[String: Any]]
         else {
-            Logger.error("ProjectActivityGenerator: failed to parse response")
+            Logger.error("ProjectActivityGenerator: failed to parse response. Preview: \(String(response.prefix(300)))")
             return Self.fallbackActivities(from: todayTasks)
         }
 
@@ -186,7 +204,7 @@ final class ProjectActivityGenerator: Sendable {
             for idx in validIndices { assignedIndices.insert(idx) }
 
             let tasks = validIndices.map { todayTasks[$0] }
-            let totalDuration = tasks.reduce(0.0) { $0 + $1.endTime.timeIntervalSince($1.startTime) }
+            let totalDuration = tasks.reduce(0.0) { $0 + $1.duration }
 
             // Union of apps
             var appSet = Set<String>()
@@ -224,7 +242,7 @@ final class ProjectActivityGenerator: Sendable {
         let unassigned = todayTasks.indices.filter { !assignedIndices.contains($0) }
         if !unassigned.isEmpty {
             let tasks = unassigned.map { todayTasks[$0] }
-            let totalDuration = tasks.reduce(0.0) { $0 + $1.endTime.timeIntervalSince($1.startTime) }
+            let totalDuration = tasks.reduce(0.0) { $0 + $1.duration }
             var appSet = Set<String>()
             var appList: [String] = []
             for task in tasks {

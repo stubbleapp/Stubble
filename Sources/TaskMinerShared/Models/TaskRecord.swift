@@ -11,6 +11,9 @@ public struct TaskRecord: Identifiable, Hashable, Sendable {
     public let confidence: Double
     /// JSON array of URL/path strings extracted by AI from OCR/activity data.
     public let relevantLinks: String
+    /// Actual active time in seconds (sum of constituent activity block durations).
+    /// When nil, falls back to endTime - startTime.
+    public let activeDuration: TimeInterval?
 
     public init(
         id: Int64? = nil,
@@ -21,7 +24,8 @@ public struct TaskRecord: Identifiable, Hashable, Sendable {
         description: String,
         appNames: String = "[]",
         confidence: Double = 0.0,
-        relevantLinks: String = "[]"
+        relevantLinks: String = "[]",
+        activeDuration: TimeInterval? = nil
     ) {
         self.id = id
         self.date = date
@@ -32,6 +36,13 @@ public struct TaskRecord: Identifiable, Hashable, Sendable {
         self.appNames = appNames
         self.confidence = confidence
         self.relevantLinks = relevantLinks
+        self.activeDuration = activeDuration
+    }
+
+    /// The best available duration for this task.
+    /// Uses AI-reported active duration when available, otherwise span time.
+    public var duration: TimeInterval {
+        activeDuration ?? endTime.timeIntervalSince(startTime)
     }
 
     public var appNamesList: [String] {

@@ -51,6 +51,98 @@ enum TimelineItem: Identifiable {
     }
 }
 
+@MainActor
+extension Array where Element == TimelineItem {
+    /// Activity names overlapping the nearest task before `index`.
+    /// When a gap separates tasks, still returns the current task's own names
+    /// so the bar extends continuously into the gap's dotted segment.
+    func prevTaskActivityNames(before index: Int, viewModel: DashboardViewModel) -> Set<String> {
+        let prevIndex = index - 1
+        guard prevIndex >= 0 else { return [] }
+        if case .gap = self[prevIndex] {
+            // A gap is adjacent — report the current task's own activities
+            // so the bar connects into the gap's dotted line.
+            if case .task(let record, _, _) = self[index] {
+                return viewModel.overlappingActivityNames(for: record)
+            }
+            return []
+        }
+        if case .task(let record, _, _) = self[prevIndex] {
+            return viewModel.overlappingActivityNames(for: record)
+        }
+        return []
+    }
+
+    /// Activity names overlapping the nearest task after `index`.
+    /// When a gap separates tasks, still returns the current task's own names
+    /// so the bar extends continuously into the gap's dotted segment.
+    func nextTaskActivityNames(after index: Int, viewModel: DashboardViewModel) -> Set<String> {
+        let nextIndex = index + 1
+        guard nextIndex < count else { return [] }
+        if case .gap = self[nextIndex] {
+            // A gap is adjacent — report the current task's own activities
+            // so the bar connects into the gap's dotted line.
+            if case .task(let record, _, _) = self[index] {
+                return viewModel.overlappingActivityNames(for: record)
+            }
+            return []
+        }
+        if case .task(let record, _, _) = self[nextIndex] {
+            return viewModel.overlappingActivityNames(for: record)
+        }
+        return []
+    }
+
+    /// Build activity columns for a gap at `index`.
+    /// An activity is shown as a dotted bar if it was active in the task
+    /// immediately before the gap.
+    func gapColumns(at index: Int, viewModel: DashboardViewModel) -> [ActivityColumn] {
+        let top3 = viewModel.top3Activities
+        guard !top3.isEmpty else { return [] }
+
+        // Find the task before this gap
+        let prevIndex = index - 1
+        guard prevIndex >= 0, case .task(let record, _, _) = self[prevIndex] else { return [] }
+
+        let prevNames = viewModel.overlappingActivityNames(for: record)
+
+        return top3.map { activity in
+            let wasActive = prevNames.contains(activity.name)
+            return ActivityColumn(
+                name: activity.name,
+                color: activity.color,
+                active: wasActive,
+                continuesUp: true,
+                continuesDown: true
+            )
+        }
+    }
+
+    /// Build fixed-column activity bars for a task at `index`.
+    /// Each of the global top-3 activities gets a stable column; inactive columns
+    /// become transparent spacers so bars stay aligned across cards.
+    func activityColumns(at index: Int, viewModel: DashboardViewModel) -> [ActivityColumn] {
+        guard case .task(let task, _, _) = self[index] else { return [] }
+        let top3 = viewModel.top3Activities
+        guard !top3.isEmpty else { return [] }
+
+        let currentNames = viewModel.overlappingActivityNames(for: task)
+        let prevNames = prevTaskActivityNames(before: index, viewModel: viewModel)
+        let nextNames = nextTaskActivityNames(after: index, viewModel: viewModel)
+
+        return top3.map { activity in
+            let active = currentNames.contains(activity.name)
+            return ActivityColumn(
+                name: activity.name,
+                color: activity.color,
+                active: active,
+                continuesUp: active && prevNames.contains(activity.name),
+                continuesDown: active && nextNames.contains(activity.name)
+            )
+        }
+    }
+}
+
 struct TaskTimelineView: View {
     @Environment(DashboardViewModel.self) var viewModel
 
@@ -163,7 +255,8 @@ struct TaskTimelineView: View {
                     // Day summary card
                     DaySummaryCardView(
                         tasks: viewModel.tasks,
-                        aiSummary: viewModel.daySummaryText
+                        aiSummary: viewModel.daySummaryText,
+                        topActivities: viewModel.topActivityLegendItems
                     )
                     .padding(.horizontal, 20)
                     .padding(.top, 16)
@@ -171,19 +264,19 @@ struct TaskTimelineView: View {
 
                     let timelineItems = TimelineItem.build(from: viewModel.tasks)
                     LazyVStack(spacing: 0) {
-                        ForEach(timelineItems) { item in
+                        ForEach(Array(timelineItems.enumerated()), id: \.element.id) { index, item in
                             switch item {
-                            case .task(let task, let isFirst, let isLast):
+                            case .task(let task, _, _):
                                 TaskCardView(
                                     task: task,
-                                    isFirst: isFirst,
-                                    isLast: isLast
+                                    activityColumns: timelineItems.activityColumns(at: index, viewModel: viewModel)
                                 )
                             case .gap(_, let startTime, let endTime, let duration):
                                 IdleGapView(
                                     startTime: startTime,
                                     endTime: endTime,
-                                    duration: duration
+                                    duration: duration,
+                                    gapColumns: timelineItems.gapColumns(at: index, viewModel: viewModel)
                                 )
                             }
                         }
@@ -206,11 +299,31 @@ struct IdleGapView: View {
     let startTime: Date
     let endTime: Date
     let duration: TimeInterval
+    /// Activity columns carried through the gap as dotted lines.
+    var gapColumns: [ActivityColumn]
 
     var body: some View {
-        HStack(alignment: .center, spacing: 12) {
-            // Timeline spine with dashed line
-            gapSpine
+        HStack(alignment: .center, spacing: 0) {
+            // Dotted activity bars during the gap
+            if !gapColumns.isEmpty {
+                HStack(spacing: 2) {
+                    ForEach(Array(gapColumns.enumerated()), id: \.offset) { _, col in
+                        if col.active {
+                            // Dotted line — continuous but visually distinct
+                            DottedBarSegment(color: col.color)
+                                .frame(width: 4)
+                        } else {
+                            Color.clear
+                                .frame(width: 4)
+                        }
+                    }
+                }
+                .padding(.trailing, 6)
+                .padding(.leading, 4)
+            } else {
+                Spacer()
+                    .frame(width: 4)
+            }
 
             // Gap content
             HStack(spacing: 4) {
@@ -227,33 +340,20 @@ struct IdleGapView: View {
         .padding(.trailing, 4)
         .frame(height: 32)
     }
+}
 
-    private var gapSpine: some View {
+/// A dotted vertical bar for activity columns during away gaps.
+private struct DottedBarSegment: View {
+    let color: Color
+
+    var body: some View {
         GeometryReader { geo in
-            let midX = geo.size.width / 2
-            let midY = geo.size.height / 2
-            let dotR: CGFloat = 2.5
-
-            // Dashed line above
             Path { p in
+                let midX = geo.size.width / 2
                 p.move(to: CGPoint(x: midX, y: 0))
-                p.addLine(to: CGPoint(x: midX, y: midY - dotR - 2))
-            }
-            .stroke(Theme.spineLine, style: StrokeStyle(lineWidth: 1.5, dash: [3, 3]))
-
-            // Small diamond/dot
-            Circle()
-                .fill(Theme.gapDot)
-                .frame(width: dotR * 2, height: dotR * 2)
-                .position(x: midX, y: midY)
-
-            // Dashed line below
-            Path { p in
-                p.move(to: CGPoint(x: midX, y: midY + dotR + 2))
                 p.addLine(to: CGPoint(x: midX, y: geo.size.height))
             }
-            .stroke(Theme.spineLine, style: StrokeStyle(lineWidth: 1.5, dash: [3, 3]))
+            .stroke(color, style: StrokeStyle(lineWidth: 4, lineCap: .round, dash: [0.01, 6]))
         }
-        .frame(width: 10)
     }
 }

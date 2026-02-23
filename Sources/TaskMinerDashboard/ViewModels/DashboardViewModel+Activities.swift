@@ -29,6 +29,7 @@ extension DashboardViewModel {
 
         let todayTasks = tasks
         let recentTasks = loadRecentTasks(excluding: selectedDate, days: 7)
+        let recentProjectNames = loadRecentProjectNames(excluding: selectedDate, days: 7)
         let memoryContext = memoryStore.contextString()
 
         Task {
@@ -36,6 +37,7 @@ extension DashboardViewModel {
                 let activities = try await generator.cluster(
                     todayTasks: todayTasks,
                     recentHistory: recentTasks,
+                    recentProjectNames: recentProjectNames,
                     memoryContext: memoryContext
                 )
                 self.projectActivities = activities
@@ -78,6 +80,21 @@ extension DashboardViewModel {
             }
         }
         return result
+    }
+
+    /// Load project activity names from recent days (for consistent naming across days).
+    func loadRecentProjectNames(excluding currentDate: Date, days: Int) -> [String] {
+        guard let db = dbReader else { return [] }
+        let cal = Calendar.current
+        var names = Set<String>()
+        for offset in 1...days {
+            guard let date = cal.date(byAdding: .day, value: -offset, to: currentDate) else { continue }
+            let records = db.projectActivities(for: date)
+            for record in records {
+                names.insert(record.name)
+            }
+        }
+        return Array(names).sorted()
     }
 
     /// Reload project activities from the database.
