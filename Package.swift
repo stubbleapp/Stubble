@@ -16,18 +16,27 @@ let package = Package(
                 .linkedFramework("Security")
             ]
         ),
-        .executableTarget(
-            name: "TaskMiner",
+        // Background monitoring daemon (library so both Dashboard and CLI can embed it)
+        .target(
+            name: "TaskMinerDaemon",
             dependencies: ["TaskMinerShared"],
             path: "Sources/TaskMiner",
             linkerSettings: [
                 .linkedLibrary("sqlite3")
             ]
         ),
+        // Standalone CLI wrapper (for `swift run TaskMiner`)
+        .executableTarget(
+            name: "TaskMiner",
+            dependencies: ["TaskMinerDaemon"],
+            path: "Sources/TaskMinerCLI"
+        ),
+        // SwiftUI dashboard (also embeds the daemon — single binary for permissions)
         .executableTarget(
             name: "TaskMinerDashboard",
             dependencies: [
                 "TaskMinerShared",
+                "TaskMinerDaemon",
                 "Sparkle",
             ],
             path: "Sources/TaskMinerDashboard",

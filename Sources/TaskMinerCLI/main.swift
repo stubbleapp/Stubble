@@ -1,0 +1,3 @@
+import TaskMinerDaemon
+
+DaemonMain.run()

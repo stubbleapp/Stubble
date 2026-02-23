@@ -3,7 +3,6 @@ import AppKit
 import Sparkle
 import TaskMinerShared
 
-@main
 struct DashboardApp: App {
     @NSApplicationDelegateAdaptor(MenuBarDelegate.self) var appDelegate
     @State private var viewModel = DashboardViewModel()

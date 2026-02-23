@@ -21,14 +21,9 @@ cd "$BUILD_DIR"
 swift build -c release 2>&1
 
 DASHBOARD_BINARY="$BUILD_DIR/.build/release/TaskMinerDashboard"
-DAEMON_BINARY="$BUILD_DIR/.build/release/TaskMiner"
 
 if [ ! -f "$DASHBOARD_BINARY" ]; then
     echo "❌ Dashboard build failed — binary not found"
-    exit 1
-fi
-if [ ! -f "$DAEMON_BINARY" ]; then
-    echo "❌ Daemon build failed — binary not found"
     exit 1
 fi
 
@@ -42,14 +37,12 @@ mkdir -p "$APP_BUNDLE/Contents/MacOS"
 mkdir -p "$APP_BUNDLE/Contents/Resources"
 mkdir -p "$APP_BUNDLE/Contents/Frameworks"
 
-# Copy both binaries
+# Copy dashboard binary (it also contains the daemon code — single binary for permissions)
 cp "$DASHBOARD_BINARY" "$APP_BUNDLE/Contents/MacOS/$APP_NAME"
-cp "$DAEMON_BINARY" "$APP_BUNDLE/Contents/MacOS/StubbleDaemon"
 
-# Strip the linker-applied ad-hoc signatures; we'll re-sign the whole
+# Strip the linker-applied ad-hoc signature; we'll re-sign the whole
 # bundle at the end so every build has the same identity ("-").
 codesign --remove-signature "$APP_BUNDLE/Contents/MacOS/$APP_NAME" 2>/dev/null || true
-codesign --remove-signature "$APP_BUNDLE/Contents/MacOS/StubbleDaemon" 2>/dev/null || true
 
 # Copy app icon
 ICON_SRC="$BUILD_DIR/Resources/AppIcon.icns"
@@ -132,13 +125,17 @@ echo -n "APPL????" > "$APP_BUNDLE/Contents/PkgInfo"
 #   2) Every build uses the same signing identity ("-"), so Sparkle
 #      won't reject updates due to identity mismatches.
 codesign --force --deep --sign - "$APP_BUNDLE" 2>/dev/null || true
+
+# Create StubbleDaemon as a hard-link to the signed Stubble binary.
+# This MUST be after codesign because signing replaces the file and breaks links.
+# Same inode = same binary = same macOS permission grant for both processes.
+ln -f "$APP_BUNDLE/Contents/MacOS/$APP_NAME" "$APP_BUNDLE/Contents/MacOS/StubbleDaemon"
 echo "🔏 Ad-hoc signed"
 
 echo ""
 echo "✅ Built: $APP_BUNDLE"
 echo "   Version:   $VERSION"
-echo "   Dashboard: $(du -sh "$APP_BUNDLE/Contents/MacOS/$APP_NAME" | cut -f1)"
-echo "   Daemon:    $(du -sh "$APP_BUNDLE/Contents/MacOS/StubbleDaemon" | cut -f1)"
+echo "   Binary:    $(du -sh "$APP_BUNDLE/Contents/MacOS/$APP_NAME" | cut -f1)"
 echo "   Total:     $(du -sh "$APP_BUNDLE" | cut -f1)"
 echo ""
 echo "To run:  open $APP_BUNDLE"
