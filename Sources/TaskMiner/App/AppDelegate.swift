@@ -26,6 +26,11 @@ class AppDelegate {
         }
     }()
 
+    // MARK: - Mutable State (main-thread only)
+    // All callbacks (activityMonitor, windowTitleMonitor, idleDetector, timers)
+    // run on CFRunLoopGetMain / DispatchQueue.main, so these properties are safe
+    // to access without locks. startNewActivity/finalizeCurrentActivity assert this.
+
     private var currentActivity: ActivityRecord?
     private var currentActivityId: Int64?
     private var periodicTimer: Timer?
@@ -305,6 +310,7 @@ class AppDelegate {
     // MARK: - Activity Lifecycle
 
     private func startNewActivity(appName: String, bundleId: String?, pid: pid_t, isIdle: Bool) {
+        dispatchPrecondition(condition: .onQueue(.main))
         var record = ActivityRecord(
             appName: appName,
             bundleId: bundleId,
@@ -331,6 +337,7 @@ class AppDelegate {
     }
 
     private func finalizeCurrentActivity() {
+        dispatchPrecondition(condition: .onQueue(.main))
         guard let activity = currentActivity, let id = currentActivityId else { return }
 
         let now = Date()
@@ -357,6 +364,14 @@ class AppDelegate {
 
         guard let image = screenshotCapture.captureFullScreen() else {
             Logger.error("Screenshot capture failed (check Screen Recording permission)")
+            return
+        }
+
+        // Validate the captured image has real content (width & height > 0).
+        // macOS can return a valid CGImage of just the wallpaper when Screen
+        // Recording permission is missing — but never a zero-size image.
+        guard image.width > 0 && image.height > 0 else {
+            Logger.warning("Screenshot captured but has zero dimensions — skipping")
             return
         }
 

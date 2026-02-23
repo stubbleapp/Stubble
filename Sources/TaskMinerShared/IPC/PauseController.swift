@@ -45,13 +45,23 @@ public class PauseController {
             pausedAt: Date(),
             resumeAt: duration.map { Date().addingTimeInterval($0) }
         )
-        if let data = try? JSONEncoder().encode(state) {
-            try? data.write(to: pauseFileURL, options: .atomic)
+        do {
+            let data = try JSONEncoder().encode(state)
+            try data.write(to: pauseFileURL, options: .atomic)
+        } catch {
+            Logger.warning("PauseController: failed to write pause state: \(error.localizedDescription)")
         }
     }
 
     public func resume() {
-        try? FileManager.default.removeItem(at: pauseFileURL)
+        do {
+            try FileManager.default.removeItem(at: pauseFileURL)
+        } catch {
+            // File may not exist if already resumed — only warn for unexpected errors
+            if (error as NSError).domain != NSCocoaErrorDomain || (error as NSError).code != NSFileNoSuchFileError {
+                Logger.warning("PauseController: failed to remove pause file: \(error.localizedDescription)")
+            }
+        }
     }
 
     public var isPaused: Bool {

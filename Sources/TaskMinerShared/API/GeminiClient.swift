@@ -136,7 +136,7 @@ public final class GeminiClient: Sendable {
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = jsonData
-        request.timeoutInterval = 60
+        request.timeoutInterval = 120
 
         // Retry loop for transient failures
         var lastError: Error = GeminiError.invalidResponse

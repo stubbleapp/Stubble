@@ -19,7 +19,10 @@ public enum GeminiKeychain {
         // One-time migration: read from the legacy service and copy to the new one
         if let legacyKey = read(service: legacyService) {
             set(legacyKey)
-            deleteLegacy()
+            // Only delete legacy entry if the new one was written successfully
+            if read(service: service) != nil {
+                deleteLegacy()
+            }
             return legacyKey
         }
         return nil

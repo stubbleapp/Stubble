@@ -55,9 +55,10 @@ class WindowTitleMonitor {
             appElement, kAXFocusedWindowAttribute as CFString, &focusedWindow
         )
         guard err1 == .success, let ref = focusedWindow else { return nil }
-        // CFTypeRef is type-erased; the type ID check guarantees it's an AXUIElement.
+        // CFTypeRef is type-erased; cast safely via the type-ID check.
         guard CFGetTypeID(ref) == AXUIElementGetTypeID() else { return nil }
-        let windowElement = ref as! AXUIElement  // safe: guarded by type-ID check above
+        // swiftlint:disable:next force_cast — CFTypeRef bridging requires as!; guarded by type-ID check above
+        let windowElement = unsafeBitCast(ref, to: AXUIElement.self)
 
         var titleValue: CFTypeRef?
         let err2 = AXUIElementCopyAttributeValue(

@@ -23,8 +23,12 @@ final class SettingsManager {
             var settings = load()
             settings.geminiApiKey = keychainKey
             save(settings)
-            // Clean up Keychain entries so no future prompts occur
-            GeminiKeychain.set(nil)
+            // Only clean up Keychain after confirming the key was persisted to settings.json
+            if load().geminiApiKey != nil {
+                GeminiKeychain.set(nil)
+            } else {
+                Logger.warning("SettingsManager: keychain migration — save failed, keeping keychain entry")
+            }
         }
     }
 
@@ -43,21 +47,32 @@ final class SettingsManager {
 
     func load() -> Settings {
         guard let filePath,
-              FileManager.default.fileExists(atPath: filePath.path),
-              let data = try? Data(contentsOf: filePath),
-              let settings = try? JSONDecoder().decode(Settings.self, from: data)
+              FileManager.default.fileExists(atPath: filePath.path)
         else {
             return Settings()
         }
-        return settings
+        do {
+            let data = try Data(contentsOf: filePath)
+            return try JSONDecoder().decode(Settings.self, from: data)
+        } catch {
+            Logger.warning("SettingsManager: failed to load settings: \(error.localizedDescription)")
+            return Settings()
+        }
     }
 
     func save(_ settings: Settings) {
         guard let filePath else { return }
         let dir = filePath.deletingLastPathComponent()
-        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        if let data = try? JSONEncoder().encode(settings) {
-            try? data.write(to: filePath, options: .atomic)
+        do {
+            try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        } catch {
+            Logger.warning("SettingsManager: failed to create directory: \(error.localizedDescription)")
+        }
+        do {
+            let data = try JSONEncoder().encode(settings)
+            try data.write(to: filePath, options: .atomic)
+        } catch {
+            Logger.warning("SettingsManager: failed to save settings: \(error.localizedDescription)")
         }
     }
 

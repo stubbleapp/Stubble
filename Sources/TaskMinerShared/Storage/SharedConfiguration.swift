@@ -20,17 +20,31 @@ public struct SharedConfiguration: Sendable {
         self.settingsPath = base.appendingPathComponent("settings.json")
         self.memoryPath = base.appendingPathComponent("memory.json")
 
-        // One-time migration: rename legacy database file
+        // One-time migration: rename legacy database file.
+        // Uses an exclusive file lock to prevent a race if Dashboard and Daemon
+        // both initialize at the same instant.
         let legacyDb = base.appendingPathComponent("taskminer.db")
         let fm = FileManager.default
         if fm.fileExists(atPath: legacyDb.path) && !fm.fileExists(atPath: databasePath.path) {
-            try? fm.moveItem(at: legacyDb, to: databasePath)
-            // Also move WAL and SHM sidecar files
-            for suffix in ["-wal", "-shm"] {
-                let old = base.appendingPathComponent("taskminer.db\(suffix)")
-                let new = base.appendingPathComponent("stubble.db\(suffix)")
-                if fm.fileExists(atPath: old.path) {
-                    try? fm.moveItem(at: old, to: new)
+            let lockPath = base.appendingPathComponent(".migration.lock")
+            fm.createFile(atPath: lockPath.path, contents: nil)
+            if let lockFd = FileHandle(forWritingAtPath: lockPath.path) {
+                flock(lockFd.fileDescriptor, LOCK_EX)
+                defer {
+                    flock(lockFd.fileDescriptor, LOCK_UN)
+                    lockFd.closeFile()
+                    try? fm.removeItem(at: lockPath)
+                }
+                // Re-check after acquiring lock (another process may have already migrated)
+                if fm.fileExists(atPath: legacyDb.path) && !fm.fileExists(atPath: databasePath.path) {
+                    try? fm.moveItem(at: legacyDb, to: databasePath)
+                    for suffix in ["-wal", "-shm"] {
+                        let old = base.appendingPathComponent("taskminer.db\(suffix)")
+                        let new = base.appendingPathComponent("stubble.db\(suffix)")
+                        if fm.fileExists(atPath: old.path) {
+                            try? fm.moveItem(at: old, to: new)
+                        }
+                    }
                 }
             }
         }
