@@ -67,7 +67,7 @@ struct ContentView: View {
             }
 
             ToolbarItem(placement: .primaryAction) {
-                HStack(spacing: ToolbarLayout.trailingGroupSpacing) {
+                HStack(spacing: 2) {
                     Button {
                         viewModel.exportTasksCSV()
                     } label: {
@@ -76,8 +76,6 @@ struct ContentView: View {
                             .foregroundStyle(Theme.textSecondary)
                             .frame(width: ToolbarLayout.iconButtonSize, height: ToolbarLayout.iconButtonSize)
                             .contentShape(Rectangle())
-                            .background(Theme.selectedSurface)
-                            .clipShape(Circle())
                     }
                     .buttonStyle(.plain)
                     .accessibilityLabel("Export Tasks")
@@ -88,14 +86,11 @@ struct ContentView: View {
                     Button {
                         showSettings = true
                     } label: {
-                        Image(systemName: "gearshape")
+                        Image(systemName: "gearshape.fill")
                             .font(.system(size: 13, weight: .medium))
                             .foregroundStyle(Theme.textSecondary)
-                            .symbolVariant(.fill)
                             .frame(width: ToolbarLayout.iconButtonSize, height: ToolbarLayout.iconButtonSize)
                             .contentShape(Rectangle())
-                            .background(Theme.selectedSurface)
-                            .clipShape(Circle())
                     }
                     .buttonStyle(.plain)
                     .accessibilityLabel("Settings")

@@ -198,7 +198,7 @@ private struct ApiKeyPage: View {
                     .buttonStyle(.plain)
 
                     Button {
-                        GeminiKeychain.set(apiKey)
+                        SettingsManager.shared.geminiApiKey = apiKey
                         saved = true
                         DispatchQueue.main.asyncAfter(deadline: .now() + 2) { saved = false }
                     } label: {
@@ -237,16 +237,17 @@ private struct ApiKeyPage: View {
                 }
                 .buttonStyle(.plain)
 
-                Text("You can also set this later in Settings.")
+                Text("Without an API key, activity tracking still works but task summaries, project grouping, and chat will be unavailable. You can add a key later in Settings.")
                     .font(.caption2)
                     .foregroundStyle(Theme.textMuted)
+                    .lineSpacing(2)
             }
             .padding(.horizontal, 60)
 
             Spacer()
         }
         .onAppear {
-            apiKey = GeminiKeychain.get() ?? ""
+            apiKey = SettingsManager.shared.geminiApiKey ?? ""
         }
     }
 }

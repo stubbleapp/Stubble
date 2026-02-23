@@ -32,12 +32,24 @@ public final class GeminiClient: Sendable {
         return GeminiClient(apiKey: key)
     }
 
-    /// Resolve client: Keychain first, then GEMINI_API_KEY. Use from both Dashboard and CLI.
+    /// Resolve client: settings file first, then GEMINI_API_KEY env var.
+    /// Both the Dashboard and CLI/daemon share the same settings.json file.
     public static func resolvedClient() -> GeminiClient? {
-        if let key = GeminiKeychain.get(), let client = GeminiClient.fromAPIKey(key) {
+        if let key = readKeyFromSettings(), let client = GeminiClient.fromAPIKey(key) {
             return client
         }
         return GeminiClient.fromEnvironment()
+    }
+
+    /// Read the Gemini API key from the shared settings.json file.
+    private static func readKeyFromSettings() -> String? {
+        guard let config = try? SharedConfiguration(),
+              let data = try? Data(contentsOf: config.settingsPath),
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let key = json["geminiApiKey"] as? String,
+              !key.isEmpty
+        else { return nil }
+        return key
     }
 
     /// Send a text prompt to Gemini and return the response text.

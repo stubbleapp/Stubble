@@ -1,7 +1,7 @@
 import Foundation
 import TaskMinerShared
 
-/// Persists dashboard settings. Gemini API key is stored in Keychain; other settings in JSON.
+/// Persists dashboard settings in a shared JSON file (~/Library/Application Support/Stubble/settings.json).
 @MainActor
 final class SettingsManager {
     static let shared = SettingsManager()
@@ -10,11 +10,28 @@ final class SettingsManager {
 
     private init() {
         self.filePath = (try? SharedConfiguration())?.settingsPath
+        migrateKeychainKeyIfNeeded()
     }
 
-    // MARK: - Settings Model (non-secret settings only; key is in Keychain)
+    /// One-time migration: move the API key from macOS Keychain to settings.json.
+    /// After this, Keychain is never accessed again, eliminating permission prompts.
+    private func migrateKeychainKeyIfNeeded() {
+        // Skip if we already have a key in settings
+        guard load().geminiApiKey == nil else { return }
+        // Try to read from Keychain (covers both "Stubble" and legacy "TaskMiner" service names)
+        if let keychainKey = GeminiKeychain.get(), !keychainKey.isEmpty {
+            var settings = load()
+            settings.geminiApiKey = keychainKey
+            save(settings)
+            // Clean up Keychain entries so no future prompts occur
+            GeminiKeychain.set(nil)
+        }
+    }
+
+    // MARK: - Settings Model
 
     struct Settings: Codable {
+        var geminiApiKey: String?
         var customPrompt: String?
         var granularity: TaskGranularity?
         var showScreensTab: Bool?
@@ -44,11 +61,15 @@ final class SettingsManager {
         }
     }
 
-    // MARK: - Gemini API key (Keychain)
+    // MARK: - Gemini API key (stored in settings.json alongside other settings)
 
     var geminiApiKey: String? {
-        get { GeminiKeychain.get() }
-        set { GeminiKeychain.set(newValue) }
+        get { load().geminiApiKey }
+        set {
+            var settings = load()
+            settings.geminiApiKey = newValue
+            save(settings)
+        }
     }
 
     // MARK: - Custom prompt

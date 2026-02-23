@@ -2,6 +2,10 @@ import Foundation
 import AppKit
 import TaskMinerShared
 
+// MARK: - Logging
+
+Logger.enableFileLogging()
+
 // MARK: - Configuration
 
 var config: Configuration
@@ -23,21 +27,12 @@ do {
     exit(1)
 }
 
-// MARK: - Check permissions
-
-let hasAccessibility = Permissions.checkAccessibility(promptIfNeeded: true)
-let hasScreenRecording = Permissions.checkScreenRecording()
-
-if !hasAccessibility {
-    Logger.error("Accessibility permission not granted")
-    Permissions.printGuidance()
-    exit(1)
-}
-
-if !hasScreenRecording {
-    Logger.warning("Screen Recording permission not granted — screenshots will be disabled")
-    Logger.warning("Grant permission in System Settings → Privacy & Security → Screen Recording")
-}
+// NOTE: No permission checks here. The Dashboard's setup wizard handles prompting.
+// Calling CGWindowListCreateImage or AXIsProcessTrustedWithOptions from the daemon
+// triggers macOS permission dialogs after every Sparkle update (binary hash changes).
+// The daemon gracefully handles missing permissions at runtime:
+//   - No accessibility → window titles will be empty
+//   - No screen recording → screenshots return nil (handled in takeScreenshot)
 
 // MARK: - Open database
 

@@ -19,7 +19,7 @@ struct DashboardApp: App {
                 } else {
                     SetupWizardView {
                         // Re-initialize Gemini client now that the key may have been saved
-                        if let key = GeminiKeychain.get() {
+                        if let key = SettingsManager.shared.geminiApiKey {
                             viewModel.updateGeminiKey(key)
                         }
                         viewModel.loadDataForSelectedDate()

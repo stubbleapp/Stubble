@@ -11,6 +11,8 @@ final class MenuBarDelegate: NSObject, NSApplicationDelegate {
     private var daemonProcess: Process?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        Logger.enableFileLogging()
+
         // When launched via `swift run` or from an IDE (Cursor, Xcode, etc.) the process
         // has no .app bundle, so macOS defaults it to an activation policy that does NOT
         // grant keyboard focus. Setting .regular tells macOS this is a normal foreground

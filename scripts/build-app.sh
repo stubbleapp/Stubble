@@ -46,6 +46,11 @@ mkdir -p "$APP_BUNDLE/Contents/Frameworks"
 cp "$DASHBOARD_BINARY" "$APP_BUNDLE/Contents/MacOS/$APP_NAME"
 cp "$DAEMON_BINARY" "$APP_BUNDLE/Contents/MacOS/StubbleDaemon"
 
+# Strip the linker-applied ad-hoc signatures; we'll re-sign the whole
+# bundle at the end so every build has the same identity ("-").
+codesign --remove-signature "$APP_BUNDLE/Contents/MacOS/$APP_NAME" 2>/dev/null || true
+codesign --remove-signature "$APP_BUNDLE/Contents/MacOS/StubbleDaemon" 2>/dev/null || true
+
 # Copy app icon
 ICON_SRC="$BUILD_DIR/Resources/AppIcon.icns"
 if [ -f "$ICON_SRC" ]; then
@@ -108,6 +113,8 @@ cat > "$APP_BUNDLE/Contents/Info.plist" << PLIST
     <false/>
     <key>NSAppleEventsUsageDescription</key>
     <string>Stubble needs to observe which apps you use to track your activity.</string>
+    <key>NSAccessibilityUsageDescription</key>
+    <string>Stubble uses Accessibility to read window titles so it can describe what you're working on.</string>
     <key>NSScreenCaptureUsageDescription</key>
     <string>Stubble captures periodic screenshots to understand what you're working on. Screenshots are stored locally and never uploaded.</string>
 $SPARKLE_PLIST_ENTRIES
@@ -117,6 +124,15 @@ PLIST
 
 # Create PkgInfo
 echo -n "APPL????" > "$APP_BUNDLE/Contents/PkgInfo"
+
+# ─── Ad-hoc code-sign the whole bundle ────────────────────────────
+# We stripped the per-binary linker signatures above. Now re-sign the
+# entire .app with an explicit ad-hoc identity so that:
+#   1) macOS will actually launch the app (unsigned binaries are blocked)
+#   2) Every build uses the same signing identity ("-"), so Sparkle
+#      won't reject updates due to identity mismatches.
+codesign --force --deep --sign - "$APP_BUNDLE" 2>/dev/null || true
+echo "🔏 Ad-hoc signed"
 
 echo ""
 echo "✅ Built: $APP_BUNDLE"

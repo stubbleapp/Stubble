@@ -18,8 +18,6 @@ struct PauseControlView: View {
                     .foregroundStyle(Theme.textPrimary)
                     .frame(width: iconSize, height: iconSize)
                     .contentShape(Rectangle())
-                    .background(Theme.selectedSurface)
-                    .clipShape(Circle())
             }
             .buttonStyle(.plain)
             .accessibilityLabel("Resume monitoring")
@@ -36,8 +34,6 @@ struct PauseControlView: View {
                     .foregroundStyle(Theme.textSecondary)
                     .frame(width: iconSize, height: iconSize)
                     .contentShape(Rectangle())
-                    .background(Theme.selectedSurface)
-                    .clipShape(Circle())
             }
             .menuStyle(.borderlessButton)
             .menuIndicator(.hidden)

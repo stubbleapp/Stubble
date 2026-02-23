@@ -12,7 +12,19 @@ class AppDelegate {
     private let screenshotCapture: ScreenshotCapture
     private let screenshotStorage: ScreenshotStorage
     private let ocrEngine: OCREngine
-    private let taskSummarizer: TaskSummarizer?
+    /// Lazy-initialized so the daemon doesn't hit the Keychain on startup.
+    /// The Dashboard prompts for Keychain access first; by the time the daemon
+    /// needs it (15 min later for the first summarization), the user has already
+    /// approved once and macOS remembers the decision.
+    private lazy var taskSummarizer: TaskSummarizer? = {
+        if let geminiClient = GeminiClient.resolvedClient() {
+            Logger.info("Gemini AI summarization enabled")
+            return TaskSummarizer(geminiClient: geminiClient)
+        } else {
+            Logger.info("No Gemini API key — AI summarization disabled (OCR still active)")
+            return nil
+        }
+    }()
 
     private var currentActivity: ActivityRecord?
     private var currentActivityId: Int64?
@@ -36,15 +48,6 @@ class AppDelegate {
             maxAgeDays: config.maxScreenshotAgeDays
         )
         self.ocrEngine = OCREngine()
-
-        // Initialize AI summarization: Keychain first (Dashboard-saved key), then env
-        if let geminiClient = GeminiClient.resolvedClient() {
-            self.taskSummarizer = TaskSummarizer(geminiClient: geminiClient)
-            Logger.info("Gemini AI summarization enabled")
-        } else {
-            self.taskSummarizer = nil
-            Logger.info("No Gemini API key (Keychain or GEMINI_API_KEY) — AI summarization disabled (OCR still active)")
-        }
     }
 
     func start() {
@@ -90,16 +93,16 @@ class AppDelegate {
         // Track today's date for daily summary generation
         lastSummaryDate = todayString()
 
-        // Start 15-minute AI summarization timer (if Gemini is configured)
-        if taskSummarizer != nil {
-            lastSummarizationTime = Date()
-            summarizationTimer = Timer.scheduledTimer(
-                withTimeInterval: 60, // Check every 60s, run every 15 min
-                repeats: true
-            ) { [weak self] _ in
-                self?.checkSummarization()
-            }
-            Logger.info("AI summarization timer started (every 15 minutes)")
+        // Start the summarization check timer unconditionally.
+        // The actual Gemini client (and Keychain access) is deferred until
+        // the first summarization runs (~15 min), avoiding a Keychain prompt
+        // at launch that would duplicate the Dashboard's prompt.
+        lastSummarizationTime = Date()
+        summarizationTimer = Timer.scheduledTimer(
+            withTimeInterval: 60, // Check every 60s, run every 15 min
+            repeats: true
+        ) { [weak self] _ in
+            self?.checkSummarization()
         }
 
         Logger.info("Stubble started - monitoring desktop activity")

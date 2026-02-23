@@ -4,7 +4,6 @@ import TaskMinerShared
 
 struct SettingsView: View {
     @Environment(DashboardViewModel.self) var viewModel
-    @EnvironmentObject var updater: SoftwareUpdater
     @Environment(\.dismiss) var dismiss
     @State private var apiKey: String = ""
     @State private var showKey = false
@@ -168,8 +167,6 @@ struct SettingsView: View {
                                 }
                             }
                         }
-
-                        CheckForUpdatesView(updater: updater)
                     }
 
                     // Views
@@ -192,19 +189,8 @@ struct SettingsView: View {
                         .tint(Theme.accent)
                     }
 
-                    // Status + Save
+                    // Save
                     HStack(spacing: 12) {
-                        HStack(spacing: 6) {
-                            Circle()
-                                .fill(viewModel.hasGeminiKey ? Theme.statusActive : Theme.textQuaternary)
-                                .frame(width: 6, height: 6)
-                            Text(viewModel.hasGeminiKey ? "API key configured" : "No API key set")
-                                .font(.caption)
-                                .foregroundStyle(viewModel.hasGeminiKey ? Theme.textSecondary : Theme.textMuted)
-                        }
-
-                        Spacer()
-
                         if !apiKey.isEmpty {
                             Button("Clear Key") {
                                 apiKey = ""
@@ -216,6 +202,8 @@ struct SettingsView: View {
                             .font(.system(size: 12, weight: .medium))
                             .foregroundStyle(Theme.textMuted)
                         }
+
+                        Spacer()
 
                         Button {
                             viewModel.updateGeminiKey(apiKey)
@@ -250,7 +238,7 @@ struct SettingsView: View {
         .frame(width: 480, height: 600)
         .background(.ultraThinMaterial)
         .onAppear {
-            apiKey = GeminiKeychain.get() ?? ""
+            apiKey = SettingsManager.shared.geminiApiKey ?? ""
             showKey = !apiKey.isEmpty
             customPrompt = SettingsManager.shared.customPrompt ?? ""
             granularity = SettingsManager.shared.granularity
