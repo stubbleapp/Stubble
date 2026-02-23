@@ -1,4 +1,5 @@
 import SwiftUI
+import AppKit
 import Sparkle
 import TaskMinerShared
 
@@ -37,7 +38,11 @@ struct DashboardApp: App {
         .windowStyle(.titleBar)
         .windowToolbarStyle(.unified(showsTitle: false))
         .commands {
-            CommandGroup(after: .appInfo) {
+            CommandGroup(replacing: .appInfo) {
+                Button("About Stubble") {
+                    showAboutPanel()
+                }
+                Divider()
                 if updater.isAvailable {
                     Button("Check for Updates…") {
                         updater.checkForUpdates()
@@ -46,5 +51,22 @@ struct DashboardApp: App {
                 }
             }
         }
+    }
+
+    private func showAboutPanel() {
+        let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "?"
+        let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "?"
+        NSApplication.shared.orderFrontStandardAboutPanel(options: [
+            .applicationName: "Stubble",
+            .applicationVersion: version,
+            .version: build,
+            .credits: NSAttributedString(
+                string: "A quiet desktop activity tracker.\nhttps://github.com/samattias",
+                attributes: [
+                    .font: NSFont.systemFont(ofSize: 11),
+                    .foregroundColor: NSColor.secondaryLabelColor
+                ]
+            )
+        ])
     }
 }

@@ -60,7 +60,7 @@ public enum LinkExtractor {
         var seen = Set<String>()
 
         // HTTP(S) URLs
-        let urlPattern = try! NSRegularExpression(pattern: #"https?://[^\s<>\"\)\]\}]+"#, options: [])
+        guard let urlPattern = try? NSRegularExpression(pattern: #"https?://[^\s<>\"\)\]\}]+"#, options: []) else { return links }
         let matches = urlPattern.matches(in: text, range: NSRange(text.startIndex..., in: text))
         for match in matches.prefix(10) {
             guard let range = Range(match.range, in: text) else { continue }
@@ -75,7 +75,7 @@ public enum LinkExtractor {
         }
 
         // Absolute file paths
-        let pathPattern = try! NSRegularExpression(pattern: #"(?:^|\s)(/(?:Users|home|tmp|var|opt|etc)/[^\s:\"]+)"#, options: .anchorsMatchLines)
+        guard let pathPattern = try? NSRegularExpression(pattern: #"(?:^|\s)(/(?:Users|home|tmp|var|opt|etc)/[^\s:\"]+)"#, options: .anchorsMatchLines) else { return links }
         let pathMatches = pathPattern.matches(in: text, range: NSRange(text.startIndex..., in: text))
         for match in pathMatches.prefix(5) {
             guard match.numberOfRanges > 1, let range = Range(match.range(at: 1), in: text) else { continue }
@@ -180,7 +180,7 @@ public enum LinkExtractor {
     /// We can't get the actual URL, but if the title contains a URL, we grab it.
     private static func extractURLFromBrowserTitle(_ title: String) -> ExtractedLink? {
         // Some browser titles literally contain URLs
-        let urlPattern = try! NSRegularExpression(pattern: #"https?://[^\s]+"#, options: [])
+        guard let urlPattern = try? NSRegularExpression(pattern: #"https?://[^\s]+"#, options: []) else { return nil }
         if let match = urlPattern.firstMatch(in: title, range: NSRange(title.startIndex..., in: title)),
            let range = Range(match.range, in: title) {
             let url = String(title[range])

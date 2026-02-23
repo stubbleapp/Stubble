@@ -12,6 +12,7 @@ struct SetupWizardView: View {
     var onComplete: () -> Void
 
     @State private var currentPage = 0
+    @State private var permissionsGranted = false
     private let totalPages = 4
 
     var body: some View {
@@ -21,7 +22,7 @@ struct SetupWizardView: View {
                 switch currentPage {
                 case 0: WelcomePage()
                 case 1: ApiKeyPage()
-                case 2: PermissionsPage()
+                case 2: PermissionsPage(allGranted: $permissionsGranted)
                 case 3: PreferencesPage(onComplete: finish)
                 default: EmptyView()
                 }
@@ -55,6 +56,7 @@ struct SetupWizardView: View {
                     Spacer()
 
                     if currentPage < totalPages - 1 {
+                        let canAdvance = currentPage != 2 || permissionsGranted
                         Button {
                             withAnimation(.easeInOut(duration: 0.25)) {
                                 currentPage += 1
@@ -69,10 +71,11 @@ struct SetupWizardView: View {
                             .foregroundStyle(.white)
                             .padding(.horizontal, 20)
                             .padding(.vertical, 8)
-                            .background(Theme.accent)
+                            .background(canAdvance ? Theme.accent : Theme.accent.opacity(0.35))
                             .clipShape(Capsule())
                         }
                         .buttonStyle(.plain)
+                        .disabled(!canAdvance)
                     }
                 }
             }
@@ -251,6 +254,7 @@ private struct ApiKeyPage: View {
 // MARK: - Page 3: Permissions
 
 private struct PermissionsPage: View {
+    @Binding var allGranted: Bool
     @State private var accessibilityGranted = false
     @State private var screenRecordingGranted = false
     @State private var pollTimer: Timer?
@@ -339,6 +343,7 @@ private struct PermissionsPage: View {
     private func checkPermissions() {
         accessibilityGranted = PermissionChecker.checkAccessibility(promptIfNeeded: false)
         screenRecordingGranted = PermissionChecker.checkScreenRecording()
+        allGranted = accessibilityGranted && screenRecordingGranted
     }
 }
 

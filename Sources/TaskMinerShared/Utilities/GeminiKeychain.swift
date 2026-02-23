@@ -7,11 +7,29 @@ public enum GeminiKeychain {
     private static let service = "Stubble.GeminiAPI"
     private static let account = "apiKey"
 
+    /// Previous service name — used for one-time migration from the old "TaskMiner" keychain entry.
+    private static let legacyService = "TaskMiner.GeminiAPI"
+
     /// Returns the stored API key, or nil if not set or on error.
+    /// On first call after rename, migrates the key from the old "TaskMiner" service.
     public static func get() -> String? {
+        if let key = read(service: service) {
+            return key
+        }
+        // One-time migration: read from the legacy service and copy to the new one
+        if let legacyKey = read(service: legacyService) {
+            set(legacyKey)
+            deleteLegacy()
+            return legacyKey
+        }
+        return nil
+    }
+
+    /// Read a key from a specific keychain service.
+    private static func read(service svc: String) -> String? {
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: service,
+            kSecAttrService as String: svc,
             kSecAttrAccount as String: account,
             kSecReturnData as String: true,
             kSecMatchLimit as String: kSecMatchLimitOne
@@ -52,6 +70,16 @@ public enum GeminiKeychain {
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
+            kSecAttrAccount as String: account
+        ]
+        SecItemDelete(query as CFDictionary)
+    }
+
+    /// Remove the legacy "TaskMiner" keychain entry after migration.
+    private static func deleteLegacy() {
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: legacyService,
             kSecAttrAccount as String: account
         ]
         SecItemDelete(query as CFDictionary)
