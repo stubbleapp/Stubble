@@ -27,17 +27,17 @@ enum Permissions {
     static func printGuidance() {
         let msg = """
 
-        ⚠️  TaskMiner requires macOS permissions to function:
+        ⚠️  Stubble requires macOS permissions to function:
 
         1. ACCESSIBILITY (required for reading window titles):
            System Settings → Privacy & Security → Accessibility
-           → Add Terminal.app (or the TaskMiner binary)
+           → Add Terminal.app (or the Stubble binary)
 
         2. SCREEN RECORDING (required for screenshots):
            System Settings → Privacy & Security → Screen Recording
-           → Add Terminal.app (or the TaskMiner binary)
+           → Add Terminal.app (or the Stubble binary)
 
-        After granting permissions, restart TaskMiner.
+        After granting permissions, restart Stubble.
 
         """
         fputs(msg, stderr)

@@ -59,9 +59,9 @@ struct Configuration {
 
     static func printUsage() {
         let usage = """
-        TaskMiner - macOS Desktop Activity Monitor
+        Stubble - macOS Desktop Activity Monitor
 
-        Usage: TaskMiner [options]
+        Usage: Stubble [options]
 
         Options:
           --screenshot-interval <seconds>  Screenshot interval (default: 300)

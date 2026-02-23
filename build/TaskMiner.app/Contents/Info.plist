@@ -29,7 +29,7 @@
     <key>NSScreenCaptureUsageDescription</key>
     <string>TaskMiner captures periodic screenshots to understand what you're working on. Screenshots are stored locally and never uploaded.</string>
     <key>SUFeedURL</key>
-    <string>https://github.com/samattias/TM/releases/latest/download/appcast.xml</string>
+    <string>https://github.com/samattias/taskminer-releases/releases/latest/download/appcast.xml</string>
     <key>SUPublicEDKey</key>
     <string>u/MzNL3+cpvrO3tQNKRcCbc7Fh0sOLdAOCgKupEdM/o=</string>
 </dict>

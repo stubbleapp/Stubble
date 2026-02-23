@@ -108,7 +108,7 @@ public final class TaskSummarizer: Sendable {
 
             #if DEBUG
             if let debugDir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first {
-                let debugFile = debugDir.appendingPathComponent("TaskMiner").appendingPathComponent("last_gemini_response.txt")
+                let debugFile = debugDir.appendingPathComponent("Stubble").appendingPathComponent("last_gemini_response.txt")
                 try? response.write(to: debugFile, atomically: true, encoding: .utf8)
                 Logger.debug("Gemini raw response written to \(debugFile.path)")
             }
@@ -169,7 +169,7 @@ public final class TaskSummarizer: Sendable {
 
         Respond with a JSON array of short factual strings. Each should be a single concise sentence.
         If there is nothing new to learn, return an empty array [].
-        Example: ["Works on a macOS app called TaskMiner using SwiftUI", "Uses Gemini API for AI features"]
+        Example: ["Works on a macOS app called Stubble using SwiftUI", "Uses Gemini API for AI features"]
         """
 
         let systemInstruction = """
@@ -215,7 +215,7 @@ public final class TaskSummarizer: Sendable {
     /// This prevents the AI from creating a new task per screenshot interval.
     private struct ActivityBlock {
         let appName: String
-        let startTime: Date
+        var startTime: Date
         var endTime: Date
         var windowTitles: [String]
         var totalDuration: TimeInterval
@@ -223,13 +223,14 @@ public final class TaskSummarizer: Sendable {
     }
 
     private func aggregateActivities(_ activities: [SummarizationInput]) -> [ActivityBlock] {
-        var blocks: [ActivityBlock] = []
+        // Phase 1: Merge consecutive entries with the same app name
+        var rawBlocks: [ActivityBlock] = []
 
         for activity in activities where !activity.isIdle {
             let title = activity.windowTitle ?? "(no title)"
             let dur = activity.duration ?? 0
 
-            if var last = blocks.last, last.appName == activity.appName {
+            if var last = rawBlocks.last, last.appName == activity.appName {
                 // Extend the current block
                 last.endTime = activity.timestamp.addingTimeInterval(dur)
                 last.totalDuration += dur
@@ -242,14 +243,14 @@ public final class TaskSummarizer: Sendable {
                         last.ocrSamples.append(trimmed)
                     }
                 }
-                blocks[blocks.count - 1] = last
+                rawBlocks[rawBlocks.count - 1] = last
             } else {
                 // Start a new block
                 var ocrSamples: [String] = []
                 if let ocr = activity.ocrText, !ocr.isEmpty {
                     ocrSamples.append(String(ocr.prefix(400)))
                 }
-                blocks.append(ActivityBlock(
+                rawBlocks.append(ActivityBlock(
                     appName: activity.appName,
                     startTime: activity.timestamp,
                     endTime: activity.timestamp.addingTimeInterval(dur),
@@ -260,7 +261,82 @@ public final class TaskSummarizer: Sendable {
             }
         }
 
-        return blocks
+        // Phase 2: Merge short interleaved blocks that are close together.
+        // When switching rapidly between apps (e.g. IDE ↔ browser ↔ terminal),
+        // each switch creates a tiny block. Merge any block shorter than 60s into
+        // the nearest neighbouring block of the same app (if within 5 minutes).
+        let merged = coalesceShortBlocks(rawBlocks)
+
+        return merged
+    }
+
+    /// Merge short blocks (<60s) with nearby blocks of the same app (within 5 min gap).
+    /// This prevents rapid app-switching from creating dozens of micro-blocks.
+    private func coalesceShortBlocks(_ blocks: [ActivityBlock]) -> [ActivityBlock] {
+        guard blocks.count > 1 else { return blocks }
+        var result = blocks
+        var changed = true
+
+        // Iterate until stable (usually 1-2 passes)
+        while changed {
+            changed = false
+            var i = 0
+            while i < result.count {
+                let block = result[i]
+                // Only merge short blocks (< 60s)
+                guard block.totalDuration < 60 else { i += 1; continue }
+
+                // Look for a nearby block of the same app to merge into
+                var bestIdx: Int?
+                var bestGap = TimeInterval.greatestFiniteMagnitude
+
+                // Search backwards
+                for j in stride(from: i - 1, through: max(0, i - 5), by: -1) {
+                    if result[j].appName == block.appName {
+                        let gap = block.startTime.timeIntervalSince(result[j].endTime)
+                        if gap >= 0 && gap < 300 && gap < bestGap {
+                            bestGap = gap
+                            bestIdx = j
+                        }
+                        break
+                    }
+                }
+
+                // Search forwards
+                for j in (i + 1)..<min(result.count, i + 6) {
+                    if result[j].appName == block.appName {
+                        let gap = result[j].startTime.timeIntervalSince(block.endTime)
+                        if gap >= 0 && gap < 300 && gap < bestGap {
+                            bestGap = gap
+                            bestIdx = j
+                        }
+                        break
+                    }
+                }
+
+                if let target = bestIdx {
+                    // Merge block[i] into block[target]
+                    var merged = result[target]
+                    merged.startTime = min(merged.startTime, block.startTime)
+                    merged.endTime = max(merged.endTime, block.endTime)
+                    merged.totalDuration += block.totalDuration
+                    for title in block.windowTitles where !merged.windowTitles.contains(title) {
+                        merged.windowTitles.append(title)
+                    }
+                    for ocr in block.ocrSamples where merged.ocrSamples.count < 3 {
+                        merged.ocrSamples.append(ocr)
+                    }
+                    result[target] = merged
+                    result.remove(at: i)
+                    changed = true
+                    // Don't increment i since we removed an element
+                } else {
+                    i += 1
+                }
+            }
+        }
+
+        return result
     }
 
     /// Minimum duration (seconds) for an activity block to be included in the prompt.
@@ -271,9 +347,15 @@ public final class TaskSummarizer: Sendable {
         let blocks = aggregateActivities(activities)
             .filter { $0.totalDuration >= Self.minBlockDuration }
 
+        // Calculate the total active hours to set a hard target for the AI
+        let totalActiveSeconds = blocks.reduce(0.0) { $0 + $1.totalDuration }
+        let totalActiveHours = totalActiveSeconds / 3600.0
+        let targetTaskCount = max(1, Int(ceil(totalActiveHours * granularity.tasksPerHour)))
+
         var lines: [String] = []
         lines.append("Analyze the following desktop activity log and identify the high-level tasks.")
-        lines.append("Each entry below is a block of continuous activity in one app — some blocks may belong to the same task.")
+        lines.append("Each entry below is a block of continuous activity in one app — many blocks will belong to the same task.")
+        lines.append("Total active time: \(String(format: "%.1f", totalActiveHours)) hours → produce approximately \(targetTaskCount) tasks.")
         lines.append("")
         lines.append("## Activity Log")
         lines.append("")
@@ -325,8 +407,9 @@ public final class TaskSummarizer: Sendable {
 
         Rules:
         - \(granularity.promptInstruction)
-        - Each task must represent ONE discrete activity — never combine unrelated activities into a single task. For example, "Watching YouTube videos and checking email" must be split into two separate tasks: "Watching YouTube videos" and "Checking email"
-        - If the same project or topic appears in multiple blocks (even separated by short breaks or other apps), merge them into ONE task that spans the full time range — but only merge activities that are genuinely the same activity or project
+        - CRITICAL: You MUST produce approximately \(targetTaskCount) tasks (±2). Many activity blocks belong to the same task — merge aggressively. Using an IDE and consulting AI documentation about the same project is ONE task, not two. Switching between apps frequently is normal workflow, not separate tasks.
+        - If the same project or topic appears in multiple blocks (even separated by short breaks or other apps), merge them into ONE task that spans the full time range
+        - Only split into separate tasks when the TOPIC genuinely changes (e.g., switching from coding to email to video watching)
         - Every task title MUST be unique — never produce two tasks with the same or near-identical title
         - Titles MUST start with a present participle verb (e.g., Developing, Browsing, Watching, Reviewing, Debugging)
         - Descriptions must be impersonal — never write "the user", "you", or "they". Describe the activity directly.

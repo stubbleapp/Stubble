@@ -1,7 +1,7 @@
 #!/bin/bash
 set -euo pipefail
 
-# ─── Publish a TaskMiner update via Sparkle + GitHub Releases ────
+# ─── Publish a Stubble update via Sparkle + GitHub Releases ────
 #
 # Usage:
 #   ./scripts/publish-update.sh
@@ -20,17 +20,16 @@ set -euo pipefail
 #
 # This script will:
 #   - Create a signed .zip of the app bundle
-#   - Generate the appcast.xml with Sparkle's tools
-#   - Patch download URLs to point to GitHub Releases
+#   - Build appcast.xml manually (no code signing required)
 #   - Create a GitHub Release and upload both files
 # ─────────────────────────────────────────────────────────────────
 
-GITHUB_REPO="samattias/TM"
+GITHUB_REPO="samattias/stubble-releases"
 
 BUILD_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 OUTPUT_DIR="$BUILD_DIR/build"
 UPDATES_DIR="$BUILD_DIR/build/updates"
-APP_BUNDLE="$OUTPUT_DIR/TaskMiner.app"
+APP_BUNDLE="$OUTPUT_DIR/Stubble.app"
 
 # ─── Locate Sparkle tools ───────────────────────────────────────
 SPARKLE_BIN=""
@@ -50,7 +49,6 @@ if [ -z "$SPARKLE_BIN" ]; then
 fi
 
 SIGN_UPDATE="$SPARKLE_BIN/sign_update"
-GENERATE_APPCAST="$SPARKLE_BIN/generate_appcast"
 
 # ─── Verify prerequisites ───────────────────────────────────────
 if [ ! -f "$APP_BUNDLE/Contents/Info.plist" ]; then
@@ -65,39 +63,70 @@ fi
 
 # ─── Read version from built app ────────────────────────────────
 VERSION=$(/usr/libexec/PlistBuddy -c "Print CFBundleShortVersionString" "$APP_BUNDLE/Contents/Info.plist")
+MIN_OS=$(/usr/libexec/PlistBuddy -c "Print LSMinimumSystemVersion" "$APP_BUNDLE/Contents/Info.plist" 2>/dev/null || echo "14.0")
 TAG="v$VERSION"
-echo "📦 Publishing TaskMiner $TAG"
+echo "📦 Publishing Stubble $TAG"
 
 # ─── Create signed zip ──────────────────────────────────────────
 mkdir -p "$UPDATES_DIR"
 
 # Clean old archives for this version
-rm -f "$UPDATES_DIR/TaskMiner-$VERSION.zip"
+rm -f "$UPDATES_DIR/Stubble-$VERSION.zip"
 
-ZIP_NAME="TaskMiner-$VERSION.zip"
+ZIP_NAME="Stubble-$VERSION.zip"
 ZIP_PATH="$UPDATES_DIR/$ZIP_NAME"
 echo "🗜  Creating $ZIP_NAME..."
-cd "$OUTPUT_DIR" && zip -r -q "$ZIP_PATH" "TaskMiner.app"
+cd "$OUTPUT_DIR" && zip -r -q "$ZIP_PATH" "Stubble.app"
 
 echo "🔏 Signing update with EdDSA..."
-SIGNATURE=$("$SIGN_UPDATE" "$ZIP_PATH" 2>&1)
-echo "   $SIGNATURE"
+SIGN_OUTPUT=$("$SIGN_UPDATE" "$ZIP_PATH" 2>&1)
+echo "   $SIGN_OUTPUT"
 
-# ─── Generate appcast ───────────────────────────────────────────
-# Sparkle's generate_appcast reads all zips in the folder and builds the XML.
-# We need to tell it the download URL prefix so links point to GitHub Releases.
-DOWNLOAD_URL_PREFIX="https://github.com/$GITHUB_REPO/releases/download/$TAG"
+# Parse signature and length from sign_update output
+# Format: sparkle:edSignature="..." length="..."
+ED_SIGNATURE=$(echo "$SIGN_OUTPUT" | sed -n 's/.*edSignature="\([^"]*\)".*/\1/p')
+ZIP_LENGTH=$(echo "$SIGN_OUTPUT" | sed -n 's/.*length="\([^"]*\)".*/\1/p')
 
-echo "📡 Generating appcast.xml..."
-"$GENERATE_APPCAST" \
-    --download-url-prefix "$DOWNLOAD_URL_PREFIX/" \
-    "$UPDATES_DIR"
-
-APPCAST_PATH="$UPDATES_DIR/appcast.xml"
-if [ ! -f "$APPCAST_PATH" ]; then
-    echo "❌ appcast.xml was not generated"
+if [ -z "$ED_SIGNATURE" ]; then
+    echo "❌ Failed to extract EdDSA signature"
     exit 1
 fi
+
+if [ -z "$ZIP_LENGTH" ]; then
+    ZIP_LENGTH=$(stat -f%z "$ZIP_PATH" 2>/dev/null || stat --printf="%s" "$ZIP_PATH")
+fi
+
+DOWNLOAD_URL="https://github.com/$GITHUB_REPO/releases/download/$TAG/$ZIP_NAME"
+PUB_DATE=$(date -R 2>/dev/null || date "+%a, %d %b %Y %H:%M:%S %z")
+
+# ─── Build appcast.xml manually ─────────────────────────────────
+# We build it by hand because generate_appcast requires Apple code signing
+# which we don't have for an unsigned app.
+APPCAST_PATH="$UPDATES_DIR/appcast.xml"
+
+echo "📡 Building appcast.xml..."
+
+cat > "$APPCAST_PATH" << APPCAST_EOF
+<?xml version="1.0" encoding="utf-8"?>
+<rss version="2.0" xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle" xmlns:dc="http://purl.org/dc/elements/1.1/">
+  <channel>
+    <title>Stubble Updates</title>
+    <description>Most recent changes with links to updates.</description>
+    <language>en</language>
+    <item>
+      <title>Version $VERSION</title>
+      <pubDate>$PUB_DATE</pubDate>
+      <sparkle:version>$VERSION</sparkle:version>
+      <sparkle:shortVersionString>$VERSION</sparkle:shortVersionString>
+      <sparkle:minimumSystemVersion>$MIN_OS</sparkle:minimumSystemVersion>
+      <enclosure url="$DOWNLOAD_URL"
+                 type="application/octet-stream"
+                 sparkle:edSignature="$ED_SIGNATURE"
+                 length="$ZIP_LENGTH" />
+    </item>
+  </channel>
+</rss>
+APPCAST_EOF
 
 echo ""
 echo "── Generated files ─────────────────────────────────────────"
@@ -120,8 +149,8 @@ else
         "$ZIP_PATH" \
         "$APPCAST_PATH" \
         --repo "$GITHUB_REPO" \
-        --title "TaskMiner $TAG" \
-        --notes "TaskMiner $VERSION
+        --title "Stubble $TAG" \
+        --notes "Stubble $VERSION
 
 Download **$ZIP_NAME**, unzip, and drag to Applications.
 
@@ -134,7 +163,7 @@ echo "✅ Published!"
 echo ""
 echo "   Release: https://github.com/$GITHUB_REPO/releases/tag/$TAG"
 echo "   Appcast: https://github.com/$GITHUB_REPO/releases/download/$TAG/appcast.xml"
-echo "   Archive: https://github.com/$GITHUB_REPO/releases/download/$TAG/$ZIP_NAME"
+echo "   Archive: $DOWNLOAD_URL"
 echo ""
 echo "   Sparkle will find updates via SUFeedURL in Info.plist:"
 echo "   https://github.com/$GITHUB_REPO/releases/latest/download/appcast.xml"

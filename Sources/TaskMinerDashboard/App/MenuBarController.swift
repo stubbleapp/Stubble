@@ -111,13 +111,13 @@ final class MenuBarDelegate: NSObject, NSApplicationDelegate {
 
     // MARK: - Daemon Lifecycle
 
-    /// Starts the TaskMinerDaemon process bundled inside the .app.
+    /// Starts the StubbleDaemon process bundled inside the .app.
     /// If running from `swift run` (no bundle), this is a no-op — the user runs the CLI manually.
     private func startDaemon() {
         // Look for the daemon binary next to the dashboard binary
         let dashboardPath = ProcessInfo.processInfo.arguments[0]
         let dashboardDir = (dashboardPath as NSString).deletingLastPathComponent
-        let daemonPath = (dashboardDir as NSString).appendingPathComponent("TaskMinerDaemon")
+        let daemonPath = (dashboardDir as NSString).appendingPathComponent("StubbleDaemon")
 
         guard FileManager.default.isExecutableFile(atPath: daemonPath) else {
             // Not bundled (e.g. running via `swift run`) — skip
@@ -137,9 +137,9 @@ final class MenuBarDelegate: NSObject, NSApplicationDelegate {
         do {
             try process.run()
             daemonProcess = process
-            Logger.info("Started TaskMinerDaemon (PID \(process.processIdentifier))")
+            Logger.info("Started StubbleDaemon (PID \(process.processIdentifier))")
         } catch {
-            Logger.error("Failed to start TaskMinerDaemon: \(error.localizedDescription)")
+            Logger.error("Failed to start StubbleDaemon: \(error.localizedDescription)")
         }
     }
 
@@ -148,7 +148,7 @@ final class MenuBarDelegate: NSObject, NSApplicationDelegate {
         guard let process = daemonProcess, process.isRunning else { return }
         // Send SIGTERM for graceful shutdown (the daemon handles this)
         process.terminate()
-        Logger.info("Stopped TaskMinerDaemon")
+        Logger.info("Stopped StubbleDaemon")
         daemonProcess = nil
     }
 
@@ -157,7 +157,7 @@ final class MenuBarDelegate: NSObject, NSApplicationDelegate {
         let menu = NSMenu()
 
         // Open dashboard
-        let openItem = NSMenuItem(title: "Open TaskMiner", action: #selector(openApp), keyEquivalent: "o")
+        let openItem = NSMenuItem(title: "Open Stubble", action: #selector(openApp), keyEquivalent: "o")
         openItem.target = self
         menu.addItem(openItem)
 
@@ -209,7 +209,7 @@ final class MenuBarDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(NSMenuItem.separator())
 
         // Quit
-        let quitItem = NSMenuItem(title: "Quit TaskMiner", action: #selector(quitApp), keyEquivalent: "q")
+        let quitItem = NSMenuItem(title: "Quit Stubble", action: #selector(quitApp), keyEquivalent: "q")
         quitItem.target = self
         menu.addItem(quitItem)
 

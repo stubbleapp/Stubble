@@ -147,7 +147,7 @@ struct SettingsView: View {
                                 Text("Launch at login")
                                     .font(.system(size: 13))
                                     .foregroundStyle(Theme.textPrimary)
-                                Text("Start TaskMiner automatically when you log in.")
+                                Text("Start Stubble automatically when you log in.")
                                     .font(.caption2)
                                     .foregroundStyle(Theme.textMuted)
                             }

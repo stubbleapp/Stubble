@@ -13,7 +13,7 @@ public struct SharedConfiguration: Sendable {
         ).first else {
             throw ConfigurationError.applicationSupportUnavailable
         }
-        let base = appSupport.appendingPathComponent("TaskMiner")
+        let base = appSupport.appendingPathComponent("Stubble")
         self.dataDirectory = base
         self.databasePath = base.appendingPathComponent("taskminer.db")
         self.screenshotDirectory = base.appendingPathComponent("screenshots")

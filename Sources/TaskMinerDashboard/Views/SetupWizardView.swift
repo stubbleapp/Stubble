@@ -102,7 +102,7 @@ private struct WelcomePage: View {
                 .foregroundStyle(Theme.accent)
                 .padding(.bottom, 16)
 
-            Text("Welcome to TaskMiner")
+            Text("Welcome to Stubble")
                 .font(.system(size: 24, weight: .semibold))
                 .foregroundStyle(Theme.textPrimary)
                 .padding(.bottom, 6)
@@ -158,7 +158,7 @@ private struct ApiKeyPage: View {
                 .foregroundStyle(Theme.textPrimary)
                 .padding(.bottom, 6)
 
-            Text("TaskMiner uses Google Gemini to turn your raw activity into meaningful tasks.\nA free API key is all you need.")
+            Text("Stubble uses Google Gemini to turn your raw activity into meaningful tasks.\nA free API key is all you need.")
                 .font(.system(size: 13))
                 .foregroundStyle(Theme.textSecondary)
                 .multilineTextAlignment(.center)
@@ -269,7 +269,7 @@ private struct PermissionsPage: View {
                 .foregroundStyle(Theme.textPrimary)
                 .padding(.bottom, 6)
 
-            Text("TaskMiner needs two macOS permissions to monitor your activity.\nThese are standard system APIs — no workarounds or hacks.")
+            Text("Stubble needs two macOS permissions to monitor your activity.\nThese are standard system APIs — no workarounds or hacks.")
                 .font(.system(size: 13))
                 .foregroundStyle(Theme.textSecondary)
                 .multilineTextAlignment(.center)
@@ -281,7 +281,7 @@ private struct PermissionsPage: View {
                 PermissionRow(
                     icon: "accessibility",
                     title: "Accessibility",
-                    detail: "Reads window titles so TaskMiner knows which app and document you're working in.",
+                    detail: "Reads window titles so Stubble knows which app and document you're working in.",
                     granted: accessibilityGranted,
                     action: {
                         // Prompt the system trust dialog
@@ -362,7 +362,7 @@ private struct PreferencesPage: View {
                 .foregroundStyle(Theme.textPrimary)
                 .padding(.bottom, 6)
 
-            Text("TaskMiner will run in the background and summarize your day.\nYou can access it from the menu bar icon any time.")
+            Text("Stubble will run in the background and summarize your day.\nYou can access it from the menu bar icon any time.")
                 .font(.system(size: 13))
                 .foregroundStyle(Theme.textSecondary)
                 .multilineTextAlignment(.center)
@@ -377,7 +377,7 @@ private struct PreferencesPage: View {
                         Text("Launch at login")
                             .font(.system(size: 14, weight: .medium))
                             .foregroundStyle(Theme.textPrimary)
-                        Text("Start TaskMiner automatically when you log in to your Mac.")
+                        Text("Start Stubble automatically when you log in to your Mac.")
                             .font(.system(size: 12))
                             .foregroundStyle(Theme.textMuted)
                     }
@@ -395,7 +395,7 @@ private struct PreferencesPage: View {
             Button {
                 onComplete()
             } label: {
-                Text("Open TaskMiner")
+                Text("Open Stubble")
                     .font(.system(size: 14, weight: .semibold))
                     .foregroundStyle(.white)
                     .padding(.horizontal, 28)

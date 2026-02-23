@@ -31,7 +31,7 @@ extension DashboardViewModel {
         Task {
             do {
                 let systemInstruction = """
-                You are a helpful assistant embedded in a desktop activity tracker called TaskMiner. \
+                You are a helpful assistant embedded in a desktop activity tracker called Stubble. \
                 You answer questions about the user's computer activity and tasks for the day. \
                 Be concise and conversational — keep responses short unless asked for detail. \
                 Use the provided task data and activity context to give accurate answers. \

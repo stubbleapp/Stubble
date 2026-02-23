@@ -4,7 +4,7 @@ import Security
 /// Stores and retrieves the Gemini API key in the Keychain (macOS).
 /// Used by both the Dashboard and the CLI so one saved key works everywhere.
 public enum GeminiKeychain {
-    private static let service = "TaskMiner.GeminiAPI"
+    private static let service = "Stubble.GeminiAPI"
     private static let account = "apiKey"
 
     /// Returns the stored API key, or nil if not set or on error.

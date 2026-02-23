@@ -102,7 +102,7 @@ class AppDelegate {
             Logger.info("AI summarization timer started (every 15 minutes)")
         }
 
-        Logger.info("TaskMiner started - monitoring desktop activity")
+        Logger.info("Stubble started - monitoring desktop activity")
         Logger.info("Screenshot interval: \(Int(config.screenshotInterval))s, Idle threshold: \(Int(config.idleThreshold))s")
     }
 
@@ -131,7 +131,7 @@ class AppDelegate {
         // Close database
         db.close()
 
-        Logger.info("TaskMiner stopped gracefully")
+        Logger.info("Stubble stopped gracefully")
     }
 
     // MARK: - Event Handlers
@@ -399,13 +399,16 @@ class AppDelegate {
         guard !pauseController.isPaused else { return }
 
         lastSummarizationTime = Date()
-        runSummarization(from: Date().addingTimeInterval(-900), to: Date())
+        // Summarize the full day each time — the AI sees all activity and produces
+        // a coherent set of tasks. Previous tasks are deleted and replaced.
+        let startOfToday = Calendar.current.startOfDay(for: Date())
+        runSummarization(from: startOfToday, to: Date())
     }
 
     private func runSummarization(from startTime: Date, to endTime: Date) {
         guard let summarizer = taskSummarizer else { return }
 
-        Logger.info("Running AI summarization for last 15 minutes...")
+        Logger.info("Running AI summarization for today's activity...")
 
         // Gather recent activities + OCR text from DB
         let activityData = db.recentActivitiesWithOCR(from: startTime, to: endTime)

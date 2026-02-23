@@ -31,7 +31,7 @@ final class ProjectActivityGenerator: Sendable {
         )
 
         let systemInstruction = """
-        You are a project clustering assistant for a desktop activity tracker called TaskMiner. \
+        You are a project clustering assistant for a desktop activity tracker called Stubble. \
         You group related tasks into higher-level project activities. \
         Use historical task data and user memory to recognise ongoing multi-day projects. \
         Give each project a clear, concise name (3-6 words). \
