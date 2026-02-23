@@ -110,8 +110,18 @@ class AppDelegate {
             self?.checkSummarization()
         }
 
+        // Log permission status at startup so issues are immediately visible
+        let hasScreenRecording = CGPreflightScreenCaptureAccess()
+        let hasAccessibility = Permissions.checkAccessibility(promptIfNeeded: false)
         Logger.info("Stubble started - monitoring desktop activity")
         Logger.info("Screenshot interval: \(Int(config.screenshotInterval))s, Idle threshold: \(Int(config.idleThreshold))s")
+        Logger.info("Permissions — Screen Recording: \(hasScreenRecording ? "✅" : "❌"), Accessibility: \(hasAccessibility ? "✅" : "❌")")
+        if !hasScreenRecording {
+            Logger.warning("Screen Recording permission not granted — screenshots will be skipped. Re-grant in System Settings → Privacy & Security → Screen Recording.")
+        }
+        if !hasAccessibility {
+            Logger.warning("Accessibility permission not granted — window titles will be empty. Re-grant in System Settings → Privacy & Security → Accessibility.")
+        }
     }
 
     func shutdown() {
@@ -359,25 +369,15 @@ class AppDelegate {
     private func takeScreenshot(trigger: ScreenshotTrigger) {
         guard !isShuttingDown else { return }
 
-        // Verify Screen Recording permission is actually working, not just
-        // reported as granted. CGPreflightScreenCaptureAccess can return true
-        // with a stale TCC entry (e.g. after re-signing the binary), but the
-        // capture will only produce the wallpaper. We confirm by checking
-        // whether CGWindowListCopyWindowInfo returns window names — macOS
-        // redacts these when the permission isn't truly effective.
-        guard hasScreenRecordingPermission() else {
-            Logger.debug("Screenshot skipped — Screen Recording permission not effective")
+        // Check Screen Recording permission before attempting capture.
+        // CGPreflightScreenCaptureAccess queries TCC directly without triggering
+        // the system permission dialog (unlike CGWindowListCreateImage itself).
+        guard CGPreflightScreenCaptureAccess() else {
+            Logger.warning("Screenshot skipped — Screen Recording permission not granted (re-grant in System Settings)")
             return
         }
 
-        // Skip if no meaningful windows are on screen (e.g. user is staring at
-        // the desktop wallpaper). Captures in that state just waste disk and OCR.
-        guard hasVisibleWindows() else {
-            Logger.debug("Screenshot skipped — no visible application windows")
-            return
-        }
-
-        Logger.debug("takeScreenshot(trigger: \(trigger.rawValue))")
+        Logger.info("takeScreenshot(trigger: \(trigger.rawValue))")
         let now = Date()
         let path = screenshotStorage.generatePath(for: now)
 
@@ -425,68 +425,6 @@ class AppDelegate {
                 }
             }
         }
-    }
-
-    /// Verify Screen Recording permission is truly effective (not just TCC-reported).
-    /// When permission is stale (e.g. binary was re-signed), CGPreflightScreenCaptureAccess
-    /// may return true but CGWindowListCreateImage only captures the wallpaper.
-    /// The reliable test: macOS redacts window *names* (kCGWindowName) when permission
-    /// isn't effective — owner names are always visible but window names require Screen Recording.
-    private func hasScreenRecordingPermission() -> Bool {
-        // Fast path: if TCC says no, definitely no.
-        guard CGPreflightScreenCaptureAccess() else { return false }
-
-        // Definitive check: query on-screen windows and look for a non-nil window name.
-        // Without Screen Recording, kCGWindowName is omitted from the dictionary entirely.
-        guard let windowList = CGWindowListCopyWindowInfo(
-            [.optionOnScreenOnly, .excludeDesktopElements],
-            kCGNullWindowID
-        ) as? [[CFString: Any]] else {
-            return false
-        }
-
-        for window in windowList {
-            // Skip our own process — its windows are always visible to itself
-            if let pid = window[kCGWindowOwnerPID] as? Int32,
-               pid == ProcessInfo.processInfo.processIdentifier { continue }
-
-            // If ANY window from another process has a name, permission is real
-            if window[kCGWindowName] != nil {
-                return true
-            }
-        }
-
-        // No window names found — permission is stale or not truly granted
-        // (Could also mean literally no other apps have windows, but that's
-        // extremely rare and hasVisibleWindows() handles the capture skip.)
-        return windowList.isEmpty ? true : false
-    }
-
-    /// Check whether any on-screen windows belong to a real application (not the
-    /// desktop wallpaper or Dock). Returns false when the user is just looking at
-    /// the desktop — screenshots in that state have no useful content.
-    private func hasVisibleWindows() -> Bool {
-        guard let windowList = CGWindowListCopyWindowInfo(
-            [.optionOnScreenOnly, .excludeDesktopElements],
-            kCGNullWindowID
-        ) as? [[CFString: Any]] else {
-            return true
-        }
-
-        for window in windowList {
-            // Skip windows that belong to the WindowServer, Dock, or system UI
-            guard let ownerName = window[kCGWindowOwnerName] as? String else { continue }
-            let systemOwners: Set<String> = ["Window Server", "Dock", "SystemUIServer", "Control Center", "Notification Center"]
-            if systemOwners.contains(ownerName) { continue }
-
-            // Skip tiny windows (menu bar items, tooltips, etc.)
-            if let bounds = window[kCGWindowBounds] as? [String: CGFloat],
-               let width = bounds["Width"], let height = bounds["Height"],
-               width > 50, height > 50 {
-                return true
-            }
-        }
-        return false
     }
 
     // MARK: - AI Summarization
