@@ -255,24 +255,17 @@ struct TaskCardView: View {
             }
         }
         .padding(.trailing, 4)
-        .overlay {
-            // Tap target for expand/collapse — removed entirely during editing
-            // so TextFields can receive clicks.
-            if !isEditing {
-                Color.clear
-                    .contentShape(Rectangle())
-                    .onTapGesture {
-                        if swipeOffset < 0 {
-                            // Tap to dismiss swipe
-                            withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
-                                swipeOffset = 0
-                            }
-                        } else {
-                            withAnimation(.easeInOut(duration: 0.2)) {
-                                isExpanded.toggle()
-                            }
-                        }
-                    }
+        .contentShape(Rectangle())
+        .onTapGesture {
+            guard !isEditing else { return }
+            if swipeOffset < 0 {
+                withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
+                    swipeOffset = 0
+                }
+            } else {
+                withAnimation(.easeInOut(duration: 0.2)) {
+                    isExpanded.toggle()
+                }
             }
         }
     }
@@ -373,8 +366,11 @@ struct ActivityBarSegment: View {
 }
 
 /// Clickable link chip — opens the URL/file when clicked.
+/// Uses onTapGesture + gesture blocking so taps don't propagate to the
+/// parent card's expand/collapse gesture.
 struct LinkChipView: View {
     let link: ExtractedLink
+    @State private var isHovered = false
 
     private var icon: String {
         switch link.kind {
@@ -384,26 +380,34 @@ struct LinkChipView: View {
     }
 
     var body: some View {
-        Button {
-            if let url = link.openableURL {
-                NSWorkspace.shared.open(url)
-            }
-        } label: {
-            HStack(spacing: 3) {
-                Image(systemName: icon)
-                    .font(.system(size: 8, weight: .medium))
-                Text(link.label)
-                    .font(.system(size: 10))
-                    .lineLimit(1)
-            }
-            .foregroundStyle(Theme.accent)
-            .padding(.horizontal, 7)
-            .padding(.vertical, 3)
-            .background(Theme.accent.opacity(0.08))
-            .cornerRadius(4)
+        HStack(spacing: 3) {
+            Image(systemName: icon)
+                .font(.system(size: 8, weight: .medium))
+            Text(link.label)
+                .font(.system(size: 10))
+                .lineLimit(1)
         }
-        .buttonStyle(.plain)
+        .foregroundStyle(Theme.accent)
+        .padding(.horizontal, 7)
+        .padding(.vertical, 3)
+        .background(isHovered ? Theme.accent.opacity(0.15) : Theme.accent.opacity(0.08))
+        .cornerRadius(4)
+        .onHover { hovering in
+            isHovered = hovering
+            if hovering {
+                NSCursor.pointingHand.push()
+            } else {
+                NSCursor.pop()
+            }
+        }
         .help(link.value)
+        .highPriorityGesture(
+            TapGesture().onEnded {
+                if let url = link.openableURL {
+                    NSWorkspace.shared.open(url)
+                }
+            }
+        )
     }
 }
 

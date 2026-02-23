@@ -52,9 +52,10 @@ struct ScreenshotDetailView: View {
 
             // Main content: image + metadata sidebar
             HStack(spacing: 0) {
-                // Screenshot image
+                // Screenshot image — uses CGImageSource for efficient loading
+                // instead of NSImage(contentsOf:) which decodes the full resolution
                 Group {
-                    if let image = NSImage(contentsOf: fullPath) {
+                    if let image = Self.loadScreenshotImage(from: fullPath) {
                         ScrollView([.horizontal, .vertical]) {
                             Image(nsImage: image)
                                 .resizable()
@@ -214,6 +215,20 @@ struct ScreenshotDetailView: View {
     }
 
     // MARK: - Helpers
+
+    /// Load a screenshot image efficiently using CGImageSource.
+    /// Caps the decoded size at 3840px (wide enough for most displays) to avoid
+    /// loading the full 5K+ retina resolution into memory (~500 MB).
+    private static func loadScreenshotImage(from url: URL) -> NSImage? {
+        guard let source = CGImageSourceCreateWithURL(url as CFURL, nil) else { return nil }
+        let options: [CFString: Any] = [
+            kCGImageSourceCreateThumbnailFromImageAlways: true,
+            kCGImageSourceThumbnailMaxPixelSize: 3840,
+            kCGImageSourceCreateThumbnailWithTransform: true,
+        ]
+        guard let cgImage = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary) else { return nil }
+        return NSImage(cgImage: cgImage, size: NSSize(width: cgImage.width, height: cgImage.height))
+    }
 
     private func confidenceColor(_ value: Double) -> Color {
         if value >= 0.7 { return Theme.confidenceHigh }

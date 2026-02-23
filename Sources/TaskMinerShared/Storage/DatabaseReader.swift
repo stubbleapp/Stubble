@@ -33,6 +33,7 @@ public class DatabaseReader {
             throw DatabaseError.openFailed(msg)
         }
         self.db = dbPointer
+        sqlite3_busy_timeout(dbPointer, 5000)
         runMigrations()
     }
 

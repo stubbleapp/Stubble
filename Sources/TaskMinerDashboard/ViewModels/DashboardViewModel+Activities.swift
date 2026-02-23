@@ -43,6 +43,7 @@ extension DashboardViewModel {
                 self.projectActivities = activities
                 self.persistProjectActivities(activities, dateStr: dateStr)
                 self.isGeneratingActivities = false
+                Analytics.activitiesGenerated(projectCount: activities.count)
             } catch {
                 self.activitiesError = error.localizedDescription
                 // Fallback to ungrouped

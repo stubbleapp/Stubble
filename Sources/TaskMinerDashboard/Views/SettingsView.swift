@@ -211,6 +211,7 @@ struct SettingsView: View {
                             SettingsManager.shared.customPrompt = trimmed.isEmpty ? nil : trimmed
                             SettingsManager.shared.granularity = granularity
                             SettingsManager.shared.showScreensTab = showScreensTab
+                            Analytics.settingChanged("granularity", value: granularity.displayName)
                             saved = true
                             hideSavedAfterDelay()
                         } label: {

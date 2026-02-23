@@ -31,8 +31,11 @@ public enum SharedFormatters {
     }()
 
     /// "yyyy-MM-dd" — used for task date strings and DB queries.
+    /// Fixed locale prevents non-Gregorian calendars (Buddhist, Japanese) from producing wrong years.
     public static let dayFormatter: DateFormatter = {
         let f = DateFormatter()
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.calendar = Calendar(identifier: .gregorian)
         f.dateFormat = "yyyy-MM-dd"
         return f
     }()
@@ -40,13 +43,15 @@ public enum SharedFormatters {
     /// "HH:mm" — used for time display throughout the UI.
     public static let timeFormatter: DateFormatter = {
         let f = DateFormatter()
+        f.locale = Locale(identifier: "en_US_POSIX")
         f.dateFormat = "HH:mm"
         return f
     }()
 
-    /// "HH:mm:ss" — used for CSV export.
+    /// "HH:mm:ss" — used for CSV export and AI prompt building.
     public static let timeSecondsFormatter: DateFormatter = {
         let f = DateFormatter()
+        f.locale = Locale(identifier: "en_US_POSIX")
         f.dateFormat = "HH:mm:ss"
         return f
     }()

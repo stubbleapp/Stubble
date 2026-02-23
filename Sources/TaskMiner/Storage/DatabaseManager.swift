@@ -82,31 +82,64 @@ class DatabaseManager {
         }
     }
 
-    /// Current schema version. Bump this when adding new migrations.
-    private static let schemaVersion = 1
+    /// Current schema version — kept in sync with DatabaseReader's migrations.
+    private static let schemaVersion = 5
 
     private func runMigrations() {
         let currentVersion = getUserVersion()
 
         if currentVersion < 1 {
-            // Migration 1: add ocr_text column to screenshots
-            var errMsg: UnsafeMutablePointer<CChar>?
-            let rc = sqlite3_exec(db, "ALTER TABLE screenshots ADD COLUMN ocr_text TEXT", nil, nil, &errMsg)
-            if rc != SQLITE_OK {
-                let msg = errMsg.map { String(cString: $0) } ?? ""
-                sqlite3_free(errMsg)
-                if !msg.contains("duplicate column") {
-                    Logger.error("Migration 1 failed: \(msg)")
-                }
-            } else {
-                Logger.info("Migration 1: added ocr_text column to screenshots")
-            }
+            execMigration("ALTER TABLE screenshots ADD COLUMN ocr_text TEXT",
+                         label: "1: add ocr_text", ignoreDuplicate: true)
+        }
+
+        // Migration 2 is CREATE TABLE tasks — already in createSchema()
+
+        if currentVersion < 3 {
+            execMigration("ALTER TABLE tasks ADD COLUMN relevant_links TEXT DEFAULT '[]'",
+                         label: "3: add relevant_links", ignoreDuplicate: true)
+        }
+
+        if currentVersion < 4 {
+            let paSql = """
+            CREATE TABLE IF NOT EXISTS project_activities (
+                id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                date        TEXT NOT NULL,
+                name        TEXT NOT NULL,
+                summary     TEXT NOT NULL DEFAULT '',
+                total_duration REAL DEFAULT 0,
+                app_names   TEXT DEFAULT '[]',
+                task_titles TEXT DEFAULT '[]',
+                start_time  TEXT NOT NULL,
+                end_time    TEXT NOT NULL,
+                color_index INTEGER DEFAULT 0
+            )
+            """
+            execMigration(paSql, label: "4: create project_activities table")
+            sqlite3_exec(db, "CREATE INDEX IF NOT EXISTS idx_pa_date ON project_activities(date)", nil, nil, nil)
+        }
+
+        if currentVersion < 5 {
+            execMigration("ALTER TABLE tasks ADD COLUMN active_duration REAL",
+                         label: "5: add active_duration", ignoreDuplicate: true)
         }
 
         // Always update version to current
         if currentVersion < Self.schemaVersion {
             setUserVersion(Self.schemaVersion)
             Logger.info("Schema version updated: \(currentVersion) → \(Self.schemaVersion)")
+        }
+    }
+
+    private func execMigration(_ sql: String, label: String, ignoreDuplicate: Bool = false) {
+        var errMsg: UnsafeMutablePointer<CChar>?
+        let rc = sqlite3_exec(db, sql, nil, nil, &errMsg)
+        if rc != SQLITE_OK {
+            let msg = errMsg.map { String(cString: $0) } ?? ""
+            sqlite3_free(errMsg)
+            if !(ignoreDuplicate && msg.contains("duplicate column")) {
+                Logger.error("DatabaseManager migration \(label) failed: \(msg)")
+            }
         }
     }
 
@@ -213,7 +246,7 @@ class DatabaseManager {
         sqliteBindText(stmt, 2, record.filePath)
 
         if let size = record.fileSize {
-            sqlite3_bind_int(stmt, 3, Int32(size))
+            sqlite3_bind_int64(stmt, 3, Int64(size))
         } else {
             sqlite3_bind_null(stmt, 3)
         }
@@ -243,8 +276,8 @@ class DatabaseManager {
     func insertTask(_ task: TaskRecord) throws -> Int64 {
         guard db != nil else { throw DatabaseError.closed }
         let sql = """
-        INSERT INTO tasks (date, start_time, end_time, title, description, app_names, confidence)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO tasks (date, start_time, end_time, title, description, app_names, confidence, relevant_links, active_duration)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         """
         var stmt: OpaquePointer?
         guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
@@ -259,6 +292,12 @@ class DatabaseManager {
         sqliteBindText(stmt, 5, task.description)
         sqliteBindText(stmt, 6, task.appNames)
         sqlite3_bind_double(stmt, 7, task.confidence)
+        sqliteBindText(stmt, 8, task.relevantLinks)
+        if let activeDuration = task.activeDuration {
+            sqlite3_bind_double(stmt, 9, activeDuration)
+        } else {
+            sqlite3_bind_null(stmt, 9)
+        }
 
         guard sqlite3_step(stmt) == SQLITE_DONE else {
             throw DatabaseError.executionFailed(lastError)

@@ -9,6 +9,11 @@ struct DashboardApp: App {
     @State private var hasCompletedSetup = SettingsManager.shared.hasCompletedSetup
     @StateObject private var updater = SoftwareUpdater()
 
+    init() {
+        Analytics.initialize()
+        Analytics.appLaunched()
+    }
+
     var body: some Scene {
         WindowGroup {
             Group {
@@ -22,6 +27,7 @@ struct DashboardApp: App {
                             viewModel.updateGeminiKey(key)
                         }
                         viewModel.loadDataForSelectedDate()
+                        Analytics.setupCompleted()
                         withAnimation(.easeInOut(duration: 0.3)) {
                             hasCompletedSetup = true
                         }

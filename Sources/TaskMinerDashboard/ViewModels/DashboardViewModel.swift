@@ -160,11 +160,14 @@ final class DashboardViewModel {
                 self.daySummaryText = result.daySummary
                 self.isGeneratingSummary = false
 
+                Analytics.summaryGenerated(taskCount: result.tasks.count)
+
                 // Also regenerate project activities now that tasks are fresh
                 self.generateProjectActivities(forceRegenerate: true)
             } catch {
                 self.summaryError = error.localizedDescription
                 self.isGeneratingSummary = false
+                Analytics.summaryFailed()
             }
         }
     }
@@ -249,11 +252,19 @@ final class DashboardViewModel {
     func pause(for duration: TimeInterval?) {
         pauseController.pause(for: duration)
         pauseState = pauseController.currentState()
+        let label: String
+        if let d = duration {
+            label = "\(Int(d / 60))m"
+        } else {
+            label = "indefinite"
+        }
+        Analytics.monitoringPaused(duration: label)
     }
 
     func resumeMonitoring() {
         pauseController.resume()
         pauseState = nil
+        Analytics.monitoringResumed()
     }
 
     // MARK: - Task ↔ Activity Color Mapping

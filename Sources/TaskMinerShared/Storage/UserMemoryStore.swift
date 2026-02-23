@@ -67,7 +67,26 @@ public final class UserMemoryStore: Sendable {
     }
 
     /// Merge new AI-generated entries with existing memory, replacing duplicates.
+    /// Uses an exclusive file lock to prevent the Dashboard and Daemon from
+    /// stomping each other's writes during concurrent load-modify-save cycles.
     public func merge(newEntries: [String]) {
+        let lockPath = filePath.deletingLastPathComponent().appendingPathComponent(".memory.lock")
+        FileManager.default.createFile(atPath: lockPath.path, contents: nil)
+        guard let lockFd = FileHandle(forWritingAtPath: lockPath.path) else {
+            // Fall through without lock if we can't create the lock file
+            mergeImpl(newEntries)
+            return
+        }
+        flock(lockFd.fileDescriptor, LOCK_EX)
+        defer {
+            flock(lockFd.fileDescriptor, LOCK_UN)
+            lockFd.closeFile()
+            try? FileManager.default.removeItem(at: lockPath)
+        }
+        mergeImpl(newEntries)
+    }
+
+    private func mergeImpl(_ newEntries: [String]) {
         var existing = load()
         let existingSet = Set(existing.map { $0.content.lowercased() })
 

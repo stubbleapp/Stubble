@@ -7,12 +7,16 @@ class ScreenshotStorage {
 
     private static let dayDirFmt: DateFormatter = {
         let f = DateFormatter()
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.calendar = Calendar(identifier: .gregorian)
         f.dateFormat = "yyyy/MM/dd"
         return f
     }()
 
     private static let fileFmt: DateFormatter = {
         let f = DateFormatter()
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.calendar = Calendar(identifier: .gregorian)
         f.dateFormat = "yyyyMMdd_HHmmss"
         return f
     }()

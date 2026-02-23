@@ -43,6 +43,7 @@ extension DashboardViewModel {
 
         do {
             try tasksCSV().write(to: url, atomically: true, encoding: .utf8)
+            Analytics.csvExported(taskCount: tasks.count)
         } catch {
             summaryError = "Export failed: \(error.localizedDescription)"
         }

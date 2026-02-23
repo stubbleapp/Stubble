@@ -50,7 +50,10 @@ struct ContentView: View {
                     ChatOverlayView()
                 }
             case 1:
-                ActivitiesView()
+                ZStack(alignment: .bottom) {
+                    ActivitiesView()
+                    ChatOverlayView()
+                }
             default:
                 ScreenshotBrowserView()
             }

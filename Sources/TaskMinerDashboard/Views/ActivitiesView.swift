@@ -127,8 +127,9 @@ struct ActivitiesView: View {
                     }
                     .padding(.horizontal, 20)
 
+                    // Extra space so content isn't hidden behind the floating chat bar
                     Spacer()
-                        .frame(height: 32)
+                        .frame(height: 64)
                 }
             } else {
                 // Tasks exist but activities not yet generated — prompt user

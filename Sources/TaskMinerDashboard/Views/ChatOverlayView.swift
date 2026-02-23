@@ -272,26 +272,50 @@ private struct MessageBubble: View {
         HStack {
             if message.role == .user { Spacer(minLength: 48) }
 
-            Text(message.content)
-                .font(.system(size: 13))
-                .foregroundStyle(message.role == .user ? .white : Theme.textPrimary)
-                .textSelection(.enabled)
-                .padding(.horizontal, 12)
-                .padding(.vertical, 8)
-                .background(
-                    message.role == .user
-                        ? AnyShapeStyle(Theme.accent)
-                        : AnyShapeStyle(Theme.cardBackground)
-                )
-                .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-                .overlay(
-                    message.role == .assistant
-                        ? RoundedRectangle(cornerRadius: 14, style: .continuous)
-                            .strokeBorder(Theme.cardBorder, lineWidth: 0.5)
-                        : nil
-                )
+            Group {
+                if message.role == .assistant, let rendered = markdownText(message.content) {
+                    Text(rendered)
+                } else {
+                    Text(message.content)
+                }
+            }
+            .font(.system(size: 13))
+            .foregroundStyle(message.role == .user ? .white : Theme.textPrimary)
+            .textSelection(.enabled)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .background(
+                message.role == .user
+                    ? AnyShapeStyle(Theme.accent)
+                    : AnyShapeStyle(Theme.cardBackground)
+            )
+            .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .overlay(
+                message.role == .assistant
+                    ? RoundedRectangle(cornerRadius: 14, style: .continuous)
+                        .strokeBorder(Theme.cardBorder, lineWidth: 0.5)
+                    : nil
+            )
 
             if message.role == .assistant { Spacer(minLength: 48) }
         }
+    }
+
+    /// Parse markdown into an `AttributedString` for rich text rendering.
+    /// Falls back to nil (plain text) if parsing fails.
+    private func markdownText(_ source: String) -> AttributedString? {
+        var options = AttributedString.MarkdownParsingOptions()
+        options.interpretedSyntax = .inlineOnlyPreservingWhitespace
+        guard var attributed = try? AttributedString(markdown: source, options: options) else {
+            return nil
+        }
+        // Ensure inline code uses a monospaced font at the same size
+        for run in attributed.runs {
+            if run.inlinePresentationIntent?.contains(.code) == true {
+                let range = run.range
+                attributed[range].font = .system(size: 13, design: .monospaced)
+            }
+        }
+        return attributed
     }
 }

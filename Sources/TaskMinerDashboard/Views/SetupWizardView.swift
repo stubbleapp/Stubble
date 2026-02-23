@@ -301,6 +301,8 @@ private struct PermissionsPage: View {
                     detail: "Captures periodic screenshots for OCR. Screenshots stay on your Mac and are never uploaded.",
                     granted: screenRecordingGranted,
                     action: {
+                        // Request via the system API (shows dialog), then open Settings as fallback
+                        CGRequestScreenCaptureAccess()
                         PermissionChecker.openScreenRecordingSettings()
                     }
                 )

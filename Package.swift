@@ -6,6 +6,7 @@ let package = Package(
     platforms: [.macOS(.v14)],
     dependencies: [
         .package(url: "https://github.com/sparkle-project/Sparkle", from: "2.6.0"),
+        .package(url: "https://github.com/TelemetryDeck/SwiftSDK", from: "2.0.0"),
     ],
     targets: [
         .target(
@@ -38,6 +39,7 @@ let package = Package(
                 "TaskMinerShared",
                 "TaskMinerDaemon",
                 "Sparkle",
+                .product(name: "TelemetryDeck", package: "SwiftSDK"),
             ],
             path: "Sources/TaskMinerDashboard",
             linkerSettings: [

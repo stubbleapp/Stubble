@@ -2,11 +2,14 @@ import Foundation
 import TaskMinerShared
 
 /// Persists dashboard settings in a shared JSON file (~/Library/Application Support/Stubble/settings.json).
+/// Caches settings in memory to avoid disk I/O on every property access.
 @MainActor
 final class SettingsManager {
     static let shared = SettingsManager()
 
     private let filePath: URL?
+    /// In-memory cache — avoids reading from disk on every property access.
+    private var cached: Settings?
 
     private init() {
         self.filePath = (try? SharedConfiguration())?.settingsPath
@@ -43,9 +46,11 @@ final class SettingsManager {
         var launchAtLogin: Bool?
     }
 
-    // MARK: - Read / Write (for future file-based settings)
+    // MARK: - Read / Write
 
     func load() -> Settings {
+        if let cached { return cached }
+
         guard let filePath,
               FileManager.default.fileExists(atPath: filePath.path)
         else {
@@ -53,7 +58,9 @@ final class SettingsManager {
         }
         do {
             let data = try Data(contentsOf: filePath)
-            return try JSONDecoder().decode(Settings.self, from: data)
+            let settings = try JSONDecoder().decode(Settings.self, from: data)
+            cached = settings
+            return settings
         } catch {
             Logger.warning("SettingsManager: failed to load settings: \(error.localizedDescription)")
             return Settings()
@@ -71,6 +78,9 @@ final class SettingsManager {
         do {
             let data = try JSONEncoder().encode(settings)
             try data.write(to: filePath, options: .atomic)
+            // Restrict permissions to owner-only (0600) since the file may contain the API key
+            try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: filePath.path)
+            cached = settings
         } catch {
             Logger.warning("SettingsManager: failed to save settings: \(error.localizedDescription)")
         }

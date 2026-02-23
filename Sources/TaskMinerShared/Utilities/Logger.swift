@@ -27,8 +27,13 @@ public enum Logger {
     /// logs to ~/Library/Application Support/Stubble/stubble.log.
     /// The file is capped at ~2 MB and rotated automatically.
     private static var fileHandle: FileHandle?
+    private static var logPath: URL?
+    private static var dataDir: URL?
     private static let fileLock = NSLock()
     private static let maxLogSize: UInt64 = 2 * 1024 * 1024  // 2 MB
+    /// Check file size every N writes to avoid stat() on every log line.
+    private static var writesSinceRotationCheck: Int = 0
+    private static let rotationCheckInterval: Int = 200
 
     /// Start writing log lines to a file in the Stubble data directory.
     /// Safe to call multiple times; only opens the file once.
@@ -38,28 +43,37 @@ public enum Logger {
         guard fileHandle == nil else { return }
 
         guard let config = try? SharedConfiguration() else { return }
-        let logPath = config.dataDirectory.appendingPathComponent("stubble.log")
+        let path = config.dataDirectory.appendingPathComponent("stubble.log")
         let fm = FileManager.default
 
         // Create parent directory if needed
         try? fm.createDirectory(at: config.dataDirectory, withIntermediateDirectories: true)
 
         // Rotate if the log is too large
-        if fm.fileExists(atPath: logPath.path),
-           let attrs = try? fm.attributesOfItem(atPath: logPath.path),
-           let size = attrs[.size] as? UInt64,
-           size > maxLogSize {
-            let oldPath = config.dataDirectory.appendingPathComponent("stubble.log.old")
-            try? fm.removeItem(at: oldPath)
-            try? fm.moveItem(at: logPath, to: oldPath)
-        }
+        rotateIfNeeded(logPath: path, dataDir: config.dataDirectory, fm: fm)
 
         // Create or open for appending
-        if !fm.fileExists(atPath: logPath.path) {
-            fm.createFile(atPath: logPath.path, contents: nil)
+        if !fm.fileExists(atPath: path.path) {
+            fm.createFile(atPath: path.path, contents: nil)
         }
-        fileHandle = FileHandle(forWritingAtPath: logPath.path)
+        fileHandle = FileHandle(forWritingAtPath: path.path)
         fileHandle?.seekToEndOfFile()
+        logPath = path
+        dataDir = config.dataDirectory
+        writesSinceRotationCheck = 0
+    }
+
+    /// Rotate the log file if it exceeds maxLogSize.
+    private static func rotateIfNeeded(logPath: URL, dataDir: URL, fm: FileManager) {
+        guard fm.fileExists(atPath: logPath.path),
+              let attrs = try? fm.attributesOfItem(atPath: logPath.path),
+              let size = attrs[.size] as? UInt64,
+              size > maxLogSize
+        else { return }
+
+        let oldPath = dataDir.appendingPathComponent("stubble.log.old")
+        try? fm.removeItem(at: oldPath)
+        try? fm.moveItem(at: logPath, to: oldPath)
     }
 
     public static func log(_ level: LogLevel, _ message: String) {
@@ -74,6 +88,22 @@ public enum Logger {
         fileLock.lock()
         if let fh = fileHandle, let data = line.data(using: .utf8) {
             fh.write(data)
+
+            // Periodically check if log rotation is needed during long sessions
+            writesSinceRotationCheck += 1
+            if writesSinceRotationCheck >= rotationCheckInterval,
+               let path = logPath, let dir = dataDir {
+                writesSinceRotationCheck = 0
+                let fm = FileManager.default
+                rotateIfNeeded(logPath: path, dataDir: dir, fm: fm)
+                if !fm.fileExists(atPath: path.path) {
+                    // File was rotated — reopen
+                    fh.closeFile()
+                    fm.createFile(atPath: path.path, contents: nil)
+                    fileHandle = FileHandle(forWritingAtPath: path.path)
+                    fileHandle?.seekToEndOfFile()
+                }
+            }
         }
         fileLock.unlock()
     }

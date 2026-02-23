@@ -34,6 +34,12 @@ public struct ExtractedLink: Hashable, Sendable {
 /// Extracts actionable links from window titles and OCR text.
 public enum LinkExtractor {
 
+    // MARK: - Cached Regex Patterns (compiled once, reused on every call)
+
+    private static let urlRegex = try! NSRegularExpression(pattern: #"https?://[^\s<>\"\)\]\}]+"#, options: [])
+    private static let filePathRegex = try! NSRegularExpression(pattern: #"(?:^|\s)(/(?:Users|home|tmp|var|opt|etc)/[^\s:\"]+)"#, options: .anchorsMatchLines)
+    private static let browserURLRegex = try! NSRegularExpression(pattern: #"https?://[^\s]+"#, options: [])
+
     // MARK: - Public API
 
     /// Extract links from a window title for a given app.
@@ -60,8 +66,7 @@ public enum LinkExtractor {
         var seen = Set<String>()
 
         // HTTP(S) URLs
-        guard let urlPattern = try? NSRegularExpression(pattern: #"https?://[^\s<>\"\)\]\}]+"#, options: []) else { return links }
-        let matches = urlPattern.matches(in: text, range: NSRange(text.startIndex..., in: text))
+        let matches = urlRegex.matches(in: text, range: NSRange(text.startIndex..., in: text))
         for match in matches.prefix(10) {
             guard let range = Range(match.range, in: text) else { continue }
             var urlStr = String(text[range])
@@ -75,8 +80,7 @@ public enum LinkExtractor {
         }
 
         // Absolute file paths
-        guard let pathPattern = try? NSRegularExpression(pattern: #"(?:^|\s)(/(?:Users|home|tmp|var|opt|etc)/[^\s:\"]+)"#, options: .anchorsMatchLines) else { return links }
-        let pathMatches = pathPattern.matches(in: text, range: NSRange(text.startIndex..., in: text))
+        let pathMatches = filePathRegex.matches(in: text, range: NSRange(text.startIndex..., in: text))
         for match in pathMatches.prefix(5) {
             guard match.numberOfRanges > 1, let range = Range(match.range(at: 1), in: text) else { continue }
             let path = String(text[range])
@@ -180,8 +184,7 @@ public enum LinkExtractor {
     /// We can't get the actual URL, but if the title contains a URL, we grab it.
     private static func extractURLFromBrowserTitle(_ title: String) -> ExtractedLink? {
         // Some browser titles literally contain URLs
-        guard let urlPattern = try? NSRegularExpression(pattern: #"https?://[^\s]+"#, options: []) else { return nil }
-        if let match = urlPattern.firstMatch(in: title, range: NSRange(title.startIndex..., in: title)),
+        if let match = browserURLRegex.firstMatch(in: title, range: NSRange(title.startIndex..., in: title)),
            let range = Range(match.range, in: title) {
             let url = String(title[range])
             return ExtractedLink(kind: .url, value: url, label: shortLabel(for: url), source: "window_title")

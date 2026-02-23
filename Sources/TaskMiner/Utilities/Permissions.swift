@@ -10,18 +10,11 @@ enum Permissions {
         return AXIsProcessTrustedWithOptions(options)
     }
 
-    /// Test Screen Recording permission by attempting a minimal capture.
-    /// If permission is not granted, the capture returns nil or a blank image.
+    /// Check Screen Recording permission without triggering a system prompt.
+    /// Uses CGPreflightScreenCaptureAccess (macOS 10.15+) which queries TCC
+    /// directly rather than attempting a capture (which itself triggers the dialog).
     static func checkScreenRecording() -> Bool {
-        // Try to capture a 1x1 region — if screen recording is denied,
-        // this returns nil on recent macOS versions
-        let testImage = CGWindowListCreateImage(
-            CGRect(x: 0, y: 0, width: 1, height: 1),
-            .optionOnScreenOnly,
-            kCGNullWindowID,
-            []
-        )
-        return testImage != nil
+        CGPreflightScreenCaptureAccess()
     }
 
     static func printGuidance() {
