@@ -235,21 +235,12 @@ struct TaskTimelineView: View {
             } else {
                 // Task list — keep visible during regeneration
                 ScrollView {
-                    // Regenerating banner
+                    // Regenerating spinner
                     if viewModel.isGeneratingSummary {
-                        HStack(spacing: 6) {
-                            ProgressView()
-                                .scaleEffect(0.5)
-                                .frame(width: 12, height: 12)
-                            Text("Regenerating…")
-                                .font(.system(size: 11, weight: .medium))
-                                .foregroundStyle(Theme.textSecondary)
-                        }
-                        .padding(.vertical, 6)
-                        .padding(.horizontal, 12)
-                        .background(Theme.accent.opacity(0.08))
-                        .cornerRadius(6)
-                        .padding(.top, 8)
+                        ProgressView()
+                            .scaleEffect(0.5)
+                            .frame(width: 12, height: 12)
+                            .padding(.top, 8)
                     }
 
                     // Day summary card

@@ -6,6 +6,8 @@ struct DaySummaryCardView: View {
     let aiSummary: String?
     let topActivities: [ActivityLegendItem]
 
+    @State private var isExpanded = false
+
     /// Locally-computed fallback when no AI summary is available.
     private var localSummary: String {
         guard !tasks.isEmpty else { return "" }
@@ -39,31 +41,34 @@ struct DaySummaryCardView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text(displaySummary)
-                .font(.system(size: 13))
-                .foregroundStyle(Theme.textPrimary)
-                .lineLimit(4)
-                .fixedSize(horizontal: false, vertical: true)
-
+            // Top 3 projects in a vertical column
             if !topActivities.isEmpty {
-                HStack(spacing: 10) {
+                VStack(alignment: .leading, spacing: 6) {
                     ForEach(Array(topActivities.enumerated()), id: \.offset) { _, item in
-                        HStack(spacing: 5) {
+                        HStack(spacing: 6) {
                             RoundedRectangle(cornerRadius: 2, style: .continuous)
                                 .fill(item.color)
                                 .frame(width: 4, height: 14)
-                            VStack(alignment: .leading, spacing: 0) {
-                                Text(item.name)
-                                    .font(.system(size: 11, weight: .medium))
-                                    .foregroundStyle(Theme.textPrimary)
-                                    .lineLimit(1)
-                                Text(formatDuration(item.duration))
-                                    .font(.system(size: 10).monospacedDigit())
-                                    .foregroundStyle(Theme.textMuted)
-                            }
+                            Text(item.name)
+                                .font(.system(size: 12, weight: .medium))
+                                .foregroundStyle(Theme.textPrimary)
+                                .lineLimit(1)
+                            Spacer()
+                            Text(formatDuration(item.duration))
+                                .font(.system(size: 11).monospacedDigit())
+                                .foregroundStyle(Theme.textMuted)
                         }
                     }
                 }
+            }
+
+            // Summary description — collapsed: 2 lines, expanded: full
+            if !displaySummary.isEmpty {
+                Text(displaySummary)
+                    .font(.system(size: 12))
+                    .foregroundStyle(Theme.textSecondary)
+                    .lineLimit(isExpanded ? nil : 2)
+                    .fixedSize(horizontal: false, vertical: isExpanded)
             }
         }
         .padding(14)
@@ -74,6 +79,12 @@ struct DaySummaryCardView: View {
             RoundedRectangle(cornerRadius: 10, style: .continuous)
                 .stroke(Theme.cardBorder.opacity(0.6), lineWidth: 0.5)
         )
+        .contentShape(Rectangle())
+        .onTapGesture {
+            withAnimation(.easeInOut(duration: 0.2)) {
+                isExpanded.toggle()
+            }
+        }
     }
 }
 

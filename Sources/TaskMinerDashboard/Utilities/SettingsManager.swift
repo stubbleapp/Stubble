@@ -144,7 +144,7 @@ final class SettingsManager {
     // MARK: - Launch at Login
 
     var launchAtLogin: Bool {
-        get { load().launchAtLogin ?? false }
+        get { load().launchAtLogin ?? true }
         set {
             var settings = load()
             settings.launchAtLogin = newValue

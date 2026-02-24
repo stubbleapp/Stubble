@@ -105,14 +105,12 @@ final class MenuBarDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    /// Test Screen Recording permission by attempting an actual 1×1 capture.
-    /// CGPreflightScreenCaptureAccess() caches its result for the lifetime of the
-    /// process and never reflects newly-granted TCC permissions. A real capture
-    /// via CGWindowListCreateImage always checks TCC in real time.
+    /// Test Screen Recording permission using the shared PermissionChecker.
+    /// CGPreflightScreenCaptureAccess() caches its result per-process and never
+    /// reflects newly-granted TCC permissions. PermissionChecker uses
+    /// CGWindowListCopyWindowInfo to detect permission in real time.
     private static func testScreenRecordingPermission() -> Bool {
-        let testRect = CGRect(x: 0, y: 0, width: 1, height: 1)
-        let image = CGWindowListCreateImage(testRect, .optionOnScreenOnly, kCGNullWindowID, [])
-        return image != nil
+        PermissionChecker.checkScreenRecording()
     }
 
     // MARK: - App Icon

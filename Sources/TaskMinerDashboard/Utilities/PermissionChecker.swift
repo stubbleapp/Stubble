@@ -14,11 +14,28 @@ enum PermissionChecker {
         return AXIsProcessTrustedWithOptions(options)
     }
 
-    /// Check Screen Recording permission without triggering a system prompt.
-    /// Uses CGPreflightScreenCaptureAccess (macOS 10.15+) which queries TCC
-    /// directly rather than attempting a capture (which itself triggers the dialog).
+    /// Check Screen Recording permission by listing on-screen windows.
+    /// IMPORTANT: CGPreflightScreenCaptureAccess() caches its result per-process
+    /// and never reflects newly-granted TCC permissions.
+    ///
+    /// Instead we use CGWindowListCopyWindowInfo, which returns window names and
+    /// owner details for other apps ONLY when Screen Recording is granted. Without
+    /// permission, window names from other processes come back as nil/empty.
+    /// We check whether any non-own-process window has a non-empty name.
     static func checkScreenRecording() -> Bool {
-        CGPreflightScreenCaptureAccess()
+        guard let windowList = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] else {
+            return false
+        }
+        let myPID = ProcessInfo.processInfo.processIdentifier
+        for window in windowList {
+            guard let ownerPID = window[kCGWindowOwnerPID as String] as? Int32,
+                  ownerPID != myPID else { continue }
+            // Without Screen Recording, window names from other apps are nil/empty
+            if let name = window[kCGWindowName as String] as? String, !name.isEmpty {
+                return true
+            }
+        }
+        return false
     }
 
     /// Open System Settings → Privacy & Security → Accessibility.

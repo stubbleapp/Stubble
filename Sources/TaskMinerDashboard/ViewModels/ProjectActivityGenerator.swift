@@ -34,7 +34,9 @@ final class ProjectActivityGenerator: Sendable {
         You are a project clustering assistant for a desktop activity tracker called Stubble. \
         You group related tasks into higher-level project activities. \
         Use historical task data and user memory to recognise ongoing multi-day projects. \
-        Give each project a clear, concise name (3-6 words). \
+        Project names should be noun phrases — like "Stubble Development", "Client Presentation Prep", \
+        "Email & Communications" — NOT verb-led action phrases. Think of them as project titles or \
+        folder labels, not task descriptions. Keep names concise (2-5 words). \
         Summaries should describe what was accomplished — not just list tasks. \
         Write in an impersonal style — never say "the user" or "you". \
         Respond with a JSON object. Do not include any text outside the JSON.
@@ -156,8 +158,8 @@ final class ProjectActivityGenerator: Sendable {
         {
           "projects": [
             {
-              "name": "Authentication System Development",
-              "summary": "Building and testing the login flow with input validation and error handling.",
+              "name": "Authentication System",
+              "summary": "Built and tested the login flow with input validation and error handling.",
               "task_indices": [0, 2, 5],
               "apps": ["Xcode", "Terminal"]
             }
@@ -167,7 +169,7 @@ final class ProjectActivityGenerator: Sendable {
         Rules:
         - Every task index (0 to \(todayTasks.count - 1)) must appear in exactly one project
         - Order projects by total time spent (most time first)
-        - Project names should be concise (3-6 words) and recognisable
+        - Project names MUST be noun phrases (2-5 words) — like project titles or folder labels. Good: "Stubble Development", "API Integration", "Email & Comms". Bad: "Developing the API", "Working on auth", "Fix login bugs".
         - IMPORTANT: If today's tasks relate to a previously used project name, you MUST reuse that exact name. This ensures consistent color coding across days. Only create a new name if the work is genuinely new.
         - Summaries describe what was accomplished, not just list task titles
         - A single task that doesn't relate to others can be its own project

@@ -26,3 +26,26 @@ struct AppIconView: View {
         }
     }
 }
+
+/// App icon that shows the app name in a popover on hover (instantly, no delay).
+/// Uses NSPopover so the label is never clipped by parent views.
+struct HoverableAppIconView: View {
+    let appName: String
+    let bundleId: String?
+    let size: CGFloat
+    @State private var isHovered = false
+
+    var body: some View {
+        AppIconView(bundleId: bundleId, size: size)
+            .popover(isPresented: $isHovered, arrowEdge: .bottom) {
+                Text(appName)
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(Theme.textPrimary)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+            }
+            .onHover { hovering in
+                isHovered = hovering
+            }
+    }
+}

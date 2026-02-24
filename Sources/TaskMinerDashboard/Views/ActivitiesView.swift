@@ -15,18 +15,18 @@ struct ActivitiesView: View {
                 Spacer()
 
                 if !viewModel.tasks.isEmpty {
-                    Button(action: { viewModel.generateProjectActivities(forceRegenerate: true) }) {
+                    Button(action: { viewModel.generateSummary() }) {
                         Image(systemName: "arrow.clockwise")
                             .font(.system(size: 14, weight: .medium))
                             .foregroundStyle(Theme.accent)
-                            .symbolEffect(.bounce, value: viewModel.isGeneratingActivities)
+                            .symbolEffect(.bounce, value: viewModel.isGeneratingSummary || viewModel.isGeneratingActivities)
                             .frame(width: 32, height: 32)
                             .background(Theme.accent.opacity(0.08))
                             .clipShape(Circle())
                     }
                     .buttonStyle(.plain)
-                    .disabled(viewModel.isGeneratingActivities)
-                    .help("Regenerate activities")
+                    .disabled(viewModel.isGeneratingSummary || viewModel.isGeneratingActivities)
+                    .help("Regenerate tasks & activities")
                 }
             }
             .padding(.horizontal, 20)
@@ -88,14 +88,11 @@ struct ActivitiesView: View {
                     .padding(.top, 4)
                 }
                 Spacer()
-            } else if viewModel.isGeneratingActivities {
+            } else if viewModel.isGeneratingSummary || viewModel.isGeneratingActivities {
                 // Loading
                 Spacer()
                 VStack(spacing: 10) {
                     ProgressView()
-                    Text("Clustering activities\u{2026}")
-                        .font(.subheadline)
-                        .foregroundStyle(Theme.textSecondary)
                 }
                 Spacer()
             } else if !viewModel.projectActivities.isEmpty {

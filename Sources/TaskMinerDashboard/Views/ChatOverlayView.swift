@@ -302,10 +302,12 @@ private struct MessageBubble: View {
     }
 
     /// Parse markdown into an `AttributedString` for rich text rendering.
+    /// Uses `.full` syntax so block elements (bullet lists, numbered lists,
+    /// headings) are rendered — not just inline styles.
     /// Falls back to nil (plain text) if parsing fails.
     private func markdownText(_ source: String) -> AttributedString? {
         var options = AttributedString.MarkdownParsingOptions()
-        options.interpretedSyntax = .inlineOnlyPreservingWhitespace
+        options.interpretedSyntax = .full
         guard var attributed = try? AttributedString(markdown: source, options: options) else {
             return nil
         }

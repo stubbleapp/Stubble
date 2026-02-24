@@ -16,7 +16,6 @@ struct TaskCardView: View {
     /// Fixed-column activity bars. Always has the same count (0–3) and ordering
     /// across all task cards, so bars maintain stable horizontal positions.
     let activityColumns: [ActivityColumn]
-    @State private var isExpanded = false
     @State private var isEditing = false
     @State private var editTitle = ""
     @State private var editDescription = ""
@@ -25,6 +24,11 @@ struct TaskCardView: View {
     @FocusState private var titleFocused: Bool
     @FocusState private var descriptionFocused: Bool
     @Environment(DashboardViewModel.self) var viewModel
+
+    /// Single-expand: only one task can be expanded at a time.
+    private var isExpanded: Bool {
+        viewModel.expandedTaskId == task.id
+    }
 
     /// How far the user must drag to reveal the delete action.
     private let deleteThreshold: CGFloat = -70
@@ -189,37 +193,17 @@ struct TaskCardView: View {
                     }
 
                     if !task.appNamesList.isEmpty {
-                        HStack(spacing: 6) {
+                        HStack(spacing: 4) {
                             ForEach(task.appNamesList, id: \.self) { app in
-                                HStack(spacing: 3) {
-                                    AppIconView(bundleId: viewModel.bundleId(forAppName: app), size: 14)
-                                    Text(app)
-                                        .font(.system(size: 11))
-                                        .foregroundStyle(Theme.textSecondary)
-                                }
+                                HoverableAppIconView(
+                                    appName: app,
+                                    bundleId: viewModel.bundleId(forAppName: app),
+                                    size: 16
+                                )
                             }
                         }
                         .padding(.top, 2)
-                    }
-
-                    // Project/activity associations
-                    if !isEditing {
-                        let activities = viewModel.overlappingActivities(for: task)
-                        if !activities.isEmpty {
-                            HStack(spacing: 6) {
-                                ForEach(Array(activities.enumerated()), id: \.offset) { _, activity in
-                                    HStack(spacing: 4) {
-                                        Circle()
-                                            .fill(activity.color)
-                                            .frame(width: 7, height: 7)
-                                        Text(activity.name)
-                                            .font(.system(size: 11, weight: .medium))
-                                            .foregroundStyle(Theme.textSecondary)
-                                    }
-                                }
-                            }
-                            .padding(.top, 2)
-                        }
+                        .padding(.bottom, 6)
                     }
 
                     // Relevant links
@@ -264,7 +248,14 @@ struct TaskCardView: View {
                 }
             } else {
                 withAnimation(.easeInOut(duration: 0.2)) {
-                    isExpanded.toggle()
+                    if isExpanded {
+                        viewModel.expandedTaskId = nil
+                    } else {
+                        // Collapse any other expanded item across the whole screen
+                        viewModel.expandedTaskId = task.id
+                        viewModel.expandedProjectActivityId = nil
+                        viewModel.expandedActivityGroupId = nil
+                    }
                 }
             }
         }
@@ -317,7 +308,9 @@ struct TaskCardView: View {
         editDescription = task.description
         withAnimation(.easeInOut(duration: 0.2)) {
             isEditing = true
-            isExpanded = true
+            viewModel.expandedTaskId = task.id
+            viewModel.expandedProjectActivityId = nil
+            viewModel.expandedActivityGroupId = nil
             swipeOffset = 0
         }
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {

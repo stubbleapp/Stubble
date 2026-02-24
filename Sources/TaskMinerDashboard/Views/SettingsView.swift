@@ -1,5 +1,4 @@
 import SwiftUI
-import ServiceManagement
 import TaskMinerShared
 
 struct SettingsView: View {
@@ -11,8 +10,6 @@ struct SettingsView: View {
     @State private var customPrompt: String = ""
     @State private var granularity: TaskGranularity = .medium
     @State private var showScreensTab: Bool = false
-    @State private var launchAtLogin: Bool = false
-
     var body: some View {
         VStack(spacing: 0) {
             // Header
@@ -135,40 +132,6 @@ struct SettingsView: View {
                             .foregroundStyle(Theme.textMuted)
                     }
 
-                    // General
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("General")
-                            .font(.subheadline.weight(.medium))
-                            .foregroundStyle(Theme.textPrimary)
-
-                        Toggle(isOn: $launchAtLogin) {
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text("Launch at login")
-                                    .font(.system(size: 13))
-                                    .foregroundStyle(Theme.textPrimary)
-                                Text("Start Stubble automatically when you log in.")
-                                    .font(.caption2)
-                                    .foregroundStyle(Theme.textMuted)
-                            }
-                        }
-                        .toggleStyle(.switch)
-                        .tint(Theme.accent)
-                        .onChange(of: launchAtLogin) { _, enabled in
-                            SettingsManager.shared.launchAtLogin = enabled
-                            if #available(macOS 13.0, *) {
-                                do {
-                                    if enabled {
-                                        try SMAppService.mainApp.register()
-                                    } else {
-                                        try SMAppService.mainApp.unregister()
-                                    }
-                                } catch {
-                                    Logger.error("Failed to update login item: \(error.localizedDescription)")
-                                }
-                            }
-                        }
-                    }
-
                     // Views
                     VStack(alignment: .leading, spacing: 8) {
                         Text("Views")
@@ -191,18 +154,6 @@ struct SettingsView: View {
 
                     // Save
                     HStack(spacing: 12) {
-                        if !apiKey.isEmpty {
-                            Button("Clear Key") {
-                                apiKey = ""
-                                viewModel.updateGeminiKey(nil)
-                                saved = true
-                                hideSavedAfterDelay()
-                            }
-                            .buttonStyle(.plain)
-                            .font(.system(size: 12, weight: .medium))
-                            .foregroundStyle(Theme.textMuted)
-                        }
-
                         Spacer()
 
                         Button {
@@ -244,7 +195,6 @@ struct SettingsView: View {
             customPrompt = SettingsManager.shared.customPrompt ?? ""
             granularity = SettingsManager.shared.granularity
             showScreensTab = SettingsManager.shared.showScreensTab
-            launchAtLogin = SettingsManager.shared.launchAtLogin
         }
     }
 

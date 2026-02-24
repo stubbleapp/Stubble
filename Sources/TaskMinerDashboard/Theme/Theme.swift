@@ -17,33 +17,33 @@ enum Theme {
 
     // MARK: - Backgrounds
 
-    /// Primary background — main content area.
+    /// Primary background — main content area (light cream).
     static let primaryBackground = adaptive(
-        light: NSColor(red: 0.98, green: 0.98, blue: 0.98, alpha: 1),
+        light: NSColor(red: 0.976, green: 0.973, blue: 0.961, alpha: 1),   // #F9F8F5 — warm cream
         dark: NSColor(red: 0.102, green: 0.102, blue: 0.106, alpha: 1)
     )
 
-    /// Secondary background — toolbars, sidebars, input areas.
+    /// Secondary background — toolbars, sidebars, input areas (RGB 247,247,243).
     static let secondaryBackground = adaptive(
-        light: NSColor(red: 0.95, green: 0.95, blue: 0.96, alpha: 1),
+        light: NSColor(red: 0.969, green: 0.969, blue: 0.953, alpha: 1),   // #F7F7F3 — user-specified
         dark: NSColor(red: 0.145, green: 0.145, blue: 0.153, alpha: 1)
     )
 
     /// Elevated surface — segmented controls, group headers.
     static let surfaceElevated = adaptive(
-        light: NSColor(red: 0.91, green: 0.91, blue: 0.92, alpha: 1),
+        light: NSColor(red: 0.92, green: 0.918, blue: 0.902, alpha: 1),    // warm elevated
         dark: NSColor(red: 0.173, green: 0.173, blue: 0.18, alpha: 1)
     )
 
-    /// Card / bubble background.
+    /// Card / bubble background (warm white).
     static let cardBackground = adaptive(
-        light: .white,
+        light: NSColor(red: 0.995, green: 0.993, blue: 0.985, alpha: 1),   // warm white
         dark: NSColor(red: 0.20, green: 0.20, blue: 0.21, alpha: 1)
     )
 
-    /// Selected item background.
+    /// Selected item background (warm white).
     static let selectedSurface = adaptive(
-        light: .white,
+        light: NSColor(red: 0.995, green: 0.993, blue: 0.985, alpha: 1),   // warm white
         dark: NSColor(red: 0.28, green: 0.28, blue: 0.29, alpha: 1)
     )
 
@@ -81,24 +81,24 @@ enum Theme {
     // MARK: - Borders & Dividers
 
     static let separator = adaptive(
-        light: NSColor(red: 0.85, green: 0.85, blue: 0.86, alpha: 1),
+        light: NSColor(red: 0.86, green: 0.855, blue: 0.84, alpha: 1),     // warm separator
         dark: NSColor(red: 0.33, green: 0.33, blue: 0.35, alpha: 1)
     )
 
     static let cardBorder = adaptive(
-        light: NSColor(red: 0.88, green: 0.88, blue: 0.89, alpha: 1),
+        light: NSColor(red: 0.89, green: 0.886, blue: 0.87, alpha: 1),     // warm border
         dark: NSColor(red: 0.28, green: 0.28, blue: 0.30, alpha: 1)
     )
 
     // MARK: - Timeline
 
     static let spineLine = adaptive(
-        light: NSColor(red: 0.80, green: 0.80, blue: 0.82, alpha: 0.8),
+        light: NSColor(red: 0.82, green: 0.815, blue: 0.80, alpha: 0.8),   // warm spine
         dark: NSColor(red: 0.33, green: 0.33, blue: 0.35, alpha: 0.6)
     )
 
     static let gapDot = adaptive(
-        light: NSColor(red: 0.72, green: 0.72, blue: 0.74, alpha: 1),
+        light: NSColor(red: 0.74, green: 0.735, blue: 0.72, alpha: 1),     // warm gap dot
         dark: NSColor(red: 0.40, green: 0.40, blue: 0.42, alpha: 1)
     )
 

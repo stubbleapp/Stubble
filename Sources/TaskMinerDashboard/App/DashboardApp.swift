@@ -1,5 +1,6 @@
 import SwiftUI
 import AppKit
+import ServiceManagement
 import Sparkle
 import TaskMinerShared
 
@@ -12,6 +13,16 @@ struct DashboardApp: App {
     init() {
         Analytics.initialize()
         Analytics.appLaunched()
+        Self.ensureLaunchAtLogin()
+    }
+
+    /// Registers the login item if launch-at-login is enabled (default: true).
+    /// Runs once per launch so existing users who never toggled the setting get it enabled.
+    private static func ensureLaunchAtLogin() {
+        guard SettingsManager.shared.launchAtLogin else { return }
+        if #available(macOS 13.0, *) {
+            try? SMAppService.mainApp.register()
+        }
     }
 
     var body: some Scene {
@@ -19,7 +30,7 @@ struct DashboardApp: App {
             Group {
                 if hasCompletedSetup {
                     ContentView()
-                        .frame(minWidth: 600, minHeight: 400)
+                        .frame(minWidth: 600, maxWidth: 1200, minHeight: 400, maxHeight: 850)
                 } else {
                     SetupWizardView {
                         // Re-initialize Gemini client now that the key may have been saved

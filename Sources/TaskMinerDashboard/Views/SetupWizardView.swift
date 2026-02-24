@@ -354,7 +354,7 @@ private struct PermissionsPage: View {
 
 private struct PreferencesPage: View {
     var onComplete: () -> Void
-    @State private var launchAtLogin = false
+    @State private var launchAtLogin = true
 
     var body: some View {
         VStack(spacing: 0) {

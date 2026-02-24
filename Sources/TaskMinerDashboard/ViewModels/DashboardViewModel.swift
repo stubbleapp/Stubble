@@ -43,6 +43,12 @@ final class DashboardViewModel {
     var activitiesError: String?
     var activityGenerator: ProjectActivityGenerator?
 
+    // Expand state — only one item expanded at a time across the whole screen.
+    // Setting one to a value automatically means the others are collapsed.
+    var expandedTaskId: Int64?
+    var expandedProjectActivityId: UUID?
+    var expandedActivityGroupId: String?
+
     // Chat
     var chatMessages: [ChatMessage] = []
     var isChatLoading = false
