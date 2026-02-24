@@ -463,13 +463,13 @@ struct AppIconStackView: View {
     let bundleIdResolver: (String) -> String?
 
     var body: some View {
-        HStack(spacing: -5) {
+        HStack(spacing: -4) {
             ForEach(Array(appNames.prefix(3).enumerated()), id: \.offset) { index, name in
                 AppIconView(bundleId: bundleIdResolver(name), size: 20)
-                    .clipShape(Circle())
-                    .overlay(
+                    .background(
                         Circle()
-                            .stroke(Theme.primaryBackground, lineWidth: 1.5)
+                            .fill(Theme.primaryBackground)
+                            .frame(width: 22, height: 22)
                     )
                     .zIndex(Double(appNames.count - index))
             }

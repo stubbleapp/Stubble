@@ -29,20 +29,51 @@ fi
 
 echo "📦 Creating $APP_NAME.app bundle..."
 
-# Clean previous build
-rm -rf "$APP_BUNDLE"
+# ─── Smart rebuild: skip re-sign if the binary hasn't changed ──────
+# Ad-hoc signing produces a different CDHash each time, which invalidates
+# macOS TCC permissions (Screen Recording, Accessibility). To avoid
+# having to re-grant permissions after every build, we compare the new
+# binary to the existing one and skip the full rebuild when unchanged.
+EXISTING_BINARY="$APP_BUNDLE/Contents/MacOS/$APP_NAME"
+BINARY_CHANGED=true
 
-# Create .app directory structure
-mkdir -p "$APP_BUNDLE/Contents/MacOS"
-mkdir -p "$APP_BUNDLE/Contents/Resources"
-mkdir -p "$APP_BUNDLE/Contents/Frameworks"
+if [ -f "$EXISTING_BINARY" ]; then
+    # Compare just the binary content (strip signature first from a temp copy)
+    TEMP_NEW=$(mktemp)
+    cp "$DASHBOARD_BINARY" "$TEMP_NEW"
+    codesign --remove-signature "$TEMP_NEW" 2>/dev/null || true
 
-# Copy dashboard binary (it also contains the daemon code — single binary for permissions)
-cp "$DASHBOARD_BINARY" "$APP_BUNDLE/Contents/MacOS/$APP_NAME"
+    TEMP_OLD=$(mktemp)
+    cp "$EXISTING_BINARY" "$TEMP_OLD"
+    codesign --remove-signature "$TEMP_OLD" 2>/dev/null || true
 
-# Strip the linker-applied ad-hoc signature; we'll re-sign the whole
-# bundle at the end so every build has the same identity ("-").
-codesign --remove-signature "$APP_BUNDLE/Contents/MacOS/$APP_NAME" 2>/dev/null || true
+    if cmp -s "$TEMP_NEW" "$TEMP_OLD"; then
+        BINARY_CHANGED=false
+        echo "⚡ Binary unchanged — updating metadata only (permissions preserved)"
+    fi
+    rm -f "$TEMP_NEW" "$TEMP_OLD"
+fi
+
+if [ "$BINARY_CHANGED" = true ]; then
+    # Full rebuild — binary changed, must re-sign (will need permission re-grant)
+    rm -rf "$APP_BUNDLE"
+
+    # Create .app directory structure
+    mkdir -p "$APP_BUNDLE/Contents/MacOS"
+    mkdir -p "$APP_BUNDLE/Contents/Resources"
+    mkdir -p "$APP_BUNDLE/Contents/Frameworks"
+
+    # Copy dashboard binary
+    cp "$DASHBOARD_BINARY" "$APP_BUNDLE/Contents/MacOS/$APP_NAME"
+
+    # Strip the linker-applied ad-hoc signature; we'll re-sign the whole
+    # bundle at the end so every build has the same identity ("-").
+    codesign --remove-signature "$APP_BUNDLE/Contents/MacOS/$APP_NAME" 2>/dev/null || true
+else
+    # Metadata-only update — just ensure directories exist
+    mkdir -p "$APP_BUNDLE/Contents/Resources"
+    mkdir -p "$APP_BUNDLE/Contents/Frameworks"
+fi
 
 # Copy app icon
 ICON_SRC="$BUILD_DIR/Resources/AppIcon.icns"
@@ -55,15 +86,17 @@ fi
 
 # ─── Bundle Sparkle.framework ────────────────────────────────────
 # SPM builds Sparkle as a dynamic framework; we need to embed it in the .app
-SPARKLE_FRAMEWORK=$(find "$BUILD_DIR/.build" -name "Sparkle.framework" -type d 2>/dev/null | head -1)
-if [ -n "$SPARKLE_FRAMEWORK" ] && [ -d "$SPARKLE_FRAMEWORK" ]; then
-    cp -R "$SPARKLE_FRAMEWORK" "$APP_BUNDLE/Contents/Frameworks/"
-    echo "✨ Sparkle.framework bundled"
+if [ "$BINARY_CHANGED" = true ]; then
+    SPARKLE_FRAMEWORK=$(find "$BUILD_DIR/.build" -name "Sparkle.framework" -type d 2>/dev/null | head -1)
+    if [ -n "$SPARKLE_FRAMEWORK" ] && [ -d "$SPARKLE_FRAMEWORK" ]; then
+        cp -R "$SPARKLE_FRAMEWORK" "$APP_BUNDLE/Contents/Frameworks/"
+        echo "✨ Sparkle.framework bundled"
 
-    # Fix rpath so the binary can find the framework at runtime
-    install_name_tool -add_rpath "@executable_path/../Frameworks" "$APP_BUNDLE/Contents/MacOS/$APP_NAME" 2>/dev/null || true
-else
-    echo "⚠️  Sparkle.framework not found in build artifacts — auto-updates won't work"
+        # Fix rpath so the binary can find the framework at runtime
+        install_name_tool -add_rpath "@executable_path/../Frameworks" "$APP_BUNDLE/Contents/MacOS/$APP_NAME" 2>/dev/null || true
+    else
+        echo "⚠️  Sparkle.framework not found in build artifacts — auto-updates won't work"
+    fi
 fi
 
 # ─── Create Info.plist ───────────────────────────────────────────
@@ -119,18 +152,17 @@ PLIST
 echo -n "APPL????" > "$APP_BUNDLE/Contents/PkgInfo"
 
 # ─── Ad-hoc code-sign the whole bundle ────────────────────────────
-# We stripped the per-binary linker signatures above. Now re-sign the
-# entire .app with an explicit ad-hoc identity so that:
-#   1) macOS will actually launch the app (unsigned binaries are blocked)
-#   2) Every build uses the same signing identity ("-"), so Sparkle
-#      won't reject updates due to identity mismatches.
-codesign --force --deep --sign - "$APP_BUNDLE" 2>/dev/null || true
-
-# Create StubbleDaemon as a hard-link to the signed Stubble binary.
-# This MUST be after codesign because signing replaces the file and breaks links.
-# Same inode = same binary = same macOS permission grant for both processes.
-ln -f "$APP_BUNDLE/Contents/MacOS/$APP_NAME" "$APP_BUNDLE/Contents/MacOS/StubbleDaemon"
-echo "🔏 Ad-hoc signed"
+if [ "$BINARY_CHANGED" = true ]; then
+    # We stripped the per-binary linker signatures above. Now re-sign the
+    # entire .app with an explicit ad-hoc identity so that:
+    #   1) macOS will actually launch the app (unsigned binaries are blocked)
+    #   2) Every build uses the same signing identity ("-"), so Sparkle
+    #      won't reject updates due to identity mismatches.
+    codesign --force --deep --sign - "$APP_BUNDLE" 2>/dev/null || true
+    echo "🔏 Ad-hoc signed (⚠️  re-grant Screen Recording & Accessibility in System Settings)"
+else
+    echo "🔏 Existing signature preserved (✅ permissions intact)"
+fi
 
 echo ""
 echo "✅ Built: $APP_BUNDLE"

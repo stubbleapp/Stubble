@@ -41,6 +41,8 @@ struct Configuration {
                 }
             case "--debug":
                 Logger.minimumLevel = .debug
+            case "--daemon":
+                break // handled by main.swift before Configuration is created
             case "--help":
                 Configuration.printUsage()
                 exit(0)

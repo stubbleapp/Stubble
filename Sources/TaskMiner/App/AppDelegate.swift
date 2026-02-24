@@ -110,14 +110,20 @@ class AppDelegate {
             self?.checkSummarization()
         }
 
-        // Log permission status at startup so issues are immediately visible
-        let hasScreenRecording = CGPreflightScreenCaptureAccess()
+        // Log permission status at startup so issues are immediately visible.
+        // NOTE: We test Screen Recording by doing a real 1×1 capture because
+        // CGPreflightScreenCaptureAccess() caches its result per-process and
+        // won't reflect permissions granted after launch.
+        let hasScreenRecording: Bool = {
+            let testRect = CGRect(x: 0, y: 0, width: 1, height: 1)
+            return CGWindowListCreateImage(testRect, .optionOnScreenOnly, kCGNullWindowID, []) != nil
+        }()
         let hasAccessibility = Permissions.checkAccessibility(promptIfNeeded: false)
         Logger.info("Stubble started - monitoring desktop activity")
         Logger.info("Screenshot interval: \(Int(config.screenshotInterval))s, Idle threshold: \(Int(config.idleThreshold))s")
         Logger.info("Permissions — Screen Recording: \(hasScreenRecording ? "✅" : "❌"), Accessibility: \(hasAccessibility ? "✅" : "❌")")
         if !hasScreenRecording {
-            Logger.warning("Screen Recording permission not granted — screenshots will be skipped. Re-grant in System Settings → Privacy & Security → Screen Recording.")
+            Logger.warning("Screen Recording permission not granted — screenshots will be skipped until granted. Re-grant in System Settings → Privacy & Security → Screen Recording.")
         }
         if !hasAccessibility {
             Logger.warning("Accessibility permission not granted — window titles will be empty. Re-grant in System Settings → Privacy & Security → Accessibility.")
@@ -369,20 +375,17 @@ class AppDelegate {
     private func takeScreenshot(trigger: ScreenshotTrigger) {
         guard !isShuttingDown else { return }
 
-        // Check Screen Recording permission before attempting capture.
-        // CGPreflightScreenCaptureAccess queries TCC directly without triggering
-        // the system permission dialog (unlike CGWindowListCreateImage itself).
-        guard CGPreflightScreenCaptureAccess() else {
-            Logger.warning("Screenshot skipped — Screen Recording permission not granted (re-grant in System Settings)")
-            return
-        }
-
+        // Attempt the actual capture — this is the real permission test.
+        // NOTE: We deliberately do NOT gate on CGPreflightScreenCaptureAccess() because
+        // it caches its result for the lifetime of the process and never reflects
+        // newly-granted TCC permissions. CGWindowListCreateImage checks TCC in real time,
+        // so the daemon starts capturing as soon as the user grants Screen Recording.
         Logger.info("takeScreenshot(trigger: \(trigger.rawValue))")
         let now = Date()
         let path = screenshotStorage.generatePath(for: now)
 
         guard let image = screenshotCapture.captureFullScreen() else {
-            Logger.error("Screenshot capture failed")
+            Logger.warning("Screenshot capture returned nil — Screen Recording permission likely not granted")
             return
         }
 

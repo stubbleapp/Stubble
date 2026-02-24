@@ -29,6 +29,11 @@ final class MenuBarDelegate: NSObject, NSApplicationDelegate {
             self.pauseController = PauseController(dataDirectory: config.dataDirectory)
         }
 
+        // Prompt for required permissions if not already granted.
+        // This runs on every launch so that re-signed builds automatically
+        // re-trigger the system permission dialogs instead of silently failing.
+        requestPermissionsIfNeeded()
+
         // Start the monitoring daemon (bundled alongside the dashboard binary)
         startDaemon()
 
@@ -51,36 +56,119 @@ final class MenuBarDelegate: NSObject, NSApplicationDelegate {
         stopDaemon()
     }
 
-    // MARK: - App Icon
+    // MARK: - Permissions
 
-    /// Set the Dock / app switcher icon from the bundled .icns file.
-    private func setAppIcon() {
-        // 1) .app bundle — standard location
-        if let bundlePath = Bundle.main.path(forResource: "AppIcon", ofType: "icns"),
-           let icon = NSImage(contentsOfFile: bundlePath) {
-            NSApp.applicationIconImage = icon
-            return
+    /// Prompt the user for Accessibility and Screen Recording permissions if not already granted.
+    /// Called on every launch so that re-signed builds automatically trigger the system dialogs.
+    /// If permissions are missing, polls until granted and then restarts the daemon so it picks
+    /// up the new TCC grants (macOS caches permission checks per-process).
+    private func requestPermissionsIfNeeded() {
+        // Accessibility: AXIsProcessTrustedWithOptions with prompt=true shows the system dialog
+        let hasAccessibility = PermissionChecker.checkAccessibility(promptIfNeeded: true)
+
+        // Screen Recording: CGRequestScreenCaptureAccess shows the system dialog (first time only)
+        let hasScreenRecording = Self.testScreenRecordingPermission()
+        if !hasScreenRecording {
+            CGRequestScreenCaptureAccess()
+
+            // CGRequestScreenCaptureAccess silently does nothing when there's a stale TCC
+            // entry from a previous code signature. Open System Settings as fallback.
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+                if !Self.testScreenRecordingPermission() {
+                    PermissionChecker.openScreenRecordingSettings()
+                }
+            }
         }
 
-        // 2) Development — look relative to the binary's package checkout
-        //    e.g. <repo>/.build/debug/TaskMinerDashboard → <repo>/Resources/AppIcon.icns
-        let binaryPath = ProcessInfo.processInfo.arguments[0]
-        let binaryDir = (binaryPath as NSString).deletingLastPathComponent
-        // Walk up from .build/arm64-apple-macosx/debug to the package root
-        for ancestor in ["../../..", "../../../.."] {
-            let candidate = (binaryDir as NSString).appendingPathComponent("\(ancestor)/Resources/AppIcon.icns")
-            let resolved = (candidate as NSString).standardizingPath
-            if FileManager.default.fileExists(atPath: resolved),
-               let icon = NSImage(contentsOfFile: resolved) {
-                NSApp.applicationIconImage = icon
-                return
+        Logger.info("Permission check at launch — Accessibility: \(hasAccessibility ? "✅" : "⏳ prompted"), Screen Recording: \(hasScreenRecording ? "✅" : "⏳ prompted")")
+
+        // If either permission is missing, poll every 2 seconds until both are granted,
+        // then restart the daemon so it inherits the new TCC grants.
+        if !hasAccessibility || !hasScreenRecording {
+            var permissionPollTimer: Timer?
+            permissionPollTimer = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: true) { [weak self] _ in
+                Task { @MainActor in
+                    let acc = PermissionChecker.checkAccessibility(promptIfNeeded: false)
+                    // IMPORTANT: CGPreflightScreenCaptureAccess() caches its result per-process
+                    // and never reflects newly-granted permissions. Instead, attempt an actual
+                    // 1×1 test capture which queries macOS TCC in real time.
+                    let scr = Self.testScreenRecordingPermission()
+                    if acc && scr {
+                        permissionPollTimer?.invalidate()
+                        permissionPollTimer = nil
+                        Logger.info("All permissions granted — restarting daemon to apply")
+                        self?.stopDaemon()
+                        self?.startDaemon()
+                    }
+                }
             }
         }
     }
 
+    /// Test Screen Recording permission by attempting an actual 1×1 capture.
+    /// CGPreflightScreenCaptureAccess() caches its result for the lifetime of the
+    /// process and never reflects newly-granted TCC permissions. A real capture
+    /// via CGWindowListCreateImage always checks TCC in real time.
+    private static func testScreenRecordingPermission() -> Bool {
+        let testRect = CGRect(x: 0, y: 0, width: 1, height: 1)
+        let image = CGWindowListCreateImage(testRect, .optionOnScreenOnly, kCGNullWindowID, [])
+        return image != nil
+    }
+
+    // MARK: - App Icon
+
+    /// Set the Dock / app switcher icon from the bundled .icns file.
+    /// Composites the icon onto a solid dark background so it doesn't appear transparent in the Dock.
+    private func setAppIcon() {
+        var rawIcon: NSImage?
+
+        // 1) .app bundle — standard location
+        if let bundlePath = Bundle.main.path(forResource: "AppIcon", ofType: "icns") {
+            rawIcon = NSImage(contentsOfFile: bundlePath)
+        }
+
+        // 2) Development — look relative to the binary's package checkout
+        if rawIcon == nil {
+            let binaryPath = ProcessInfo.processInfo.arguments[0]
+            let binaryDir = (binaryPath as NSString).deletingLastPathComponent
+            for ancestor in ["../../..", "../../../.."] {
+                let candidate = (binaryDir as NSString).appendingPathComponent("\(ancestor)/Resources/AppIcon.icns")
+                let resolved = (candidate as NSString).standardizingPath
+                if FileManager.default.fileExists(atPath: resolved) {
+                    rawIcon = NSImage(contentsOfFile: resolved)
+                    if rawIcon != nil { break }
+                }
+            }
+        }
+
+        guard let icon = rawIcon else { return }
+
+        // Composite onto a solid dark rounded-rect background so the Dock icon isn't transparent
+        let size: CGFloat = 1024
+        let composited = NSImage(size: NSSize(width: size, height: size), flipped: false) { rect in
+            guard let ctx = NSGraphicsContext.current?.cgContext else { return false }
+
+            // Dark background matching the app's theme
+            let bgColor = CGColor(red: 0.08, green: 0.08, blue: 0.10, alpha: 1.0)
+            let cornerRadius = size * 0.22 // macOS squircle-like rounding
+            let bgPath = CGPath(roundedRect: rect, cornerWidth: cornerRadius, cornerHeight: cornerRadius, transform: nil)
+            ctx.addPath(bgPath)
+            ctx.setFillColor(bgColor)
+            ctx.fillPath()
+
+            // Draw the original icon on top
+            icon.draw(in: rect, from: .zero, operation: .sourceOver, fraction: 1.0)
+            return true
+        }
+
+        NSApp.applicationIconImage = composited
+    }
+
     // MARK: - Menu Bar Icon
 
-    /// Draw a small orange radial gradient circle for the menu bar.
+    /// Draw a small radial gradient dot for the menu bar.
+    /// Marked as a template image so macOS renders it in the system's
+    /// menu bar style (white/dark automatically matching other icons).
     private func makeMenuBarIcon() -> NSImage {
         let size: CGFloat = 18
         let image = NSImage(size: NSSize(width: size, height: size), flipped: false) { rect in
@@ -89,11 +177,13 @@ final class MenuBarDelegate: NSObject, NSApplicationDelegate {
             let center = CGPoint(x: rect.midX, y: rect.midY)
             let radius = size / 2
 
-            // Orange radial gradient matching the app icon
+            // Radial gradient from solid black center to transparent edge.
+            // As a template image, macOS maps black → menu bar foreground color
+            // and transparent → clear, matching the system appearance automatically.
             let colors = [
-                CGColor(red: 0.91, green: 0.36, blue: 0.18, alpha: 1.0),
-                CGColor(red: 0.95, green: 0.55, blue: 0.35, alpha: 0.6),
-                CGColor(red: 1.0, green: 0.75, blue: 0.55, alpha: 0.0),
+                CGColor(gray: 0.0, alpha: 1.0),
+                CGColor(gray: 0.0, alpha: 0.55),
+                CGColor(gray: 0.0, alpha: 0.0),
             ] as CFArray
             let locations: [CGFloat] = [0.0, 0.55, 1.0]
 
@@ -107,28 +197,26 @@ final class MenuBarDelegate: NSObject, NSApplicationDelegate {
                                    options: [])
             return true
         }
-        image.isTemplate = false
+        image.isTemplate = true
         return image
     }
 
     // MARK: - Daemon Lifecycle
 
-    /// Starts the StubbleDaemon process bundled inside the .app.
-    /// If running from `swift run` (no bundle), this is a no-op — the user runs the CLI manually.
+    /// Starts the daemon as a child process using the SAME Stubble binary with --daemon.
+    /// This is critical: macOS TCC (Screen Recording, Accessibility) grants permission
+    /// per executable path. Using the same binary path means the daemon inherits the
+    /// dashboard's permissions automatically — no need to grant twice.
     private func startDaemon() {
-        // Look for the daemon binary next to the dashboard binary
-        let dashboardPath = ProcessInfo.processInfo.arguments[0]
-        let dashboardDir = (dashboardPath as NSString).deletingLastPathComponent
-        let daemonPath = (dashboardDir as NSString).appendingPathComponent("StubbleDaemon")
+        let binaryPath = ProcessInfo.processInfo.arguments[0]
 
-        guard FileManager.default.isExecutableFile(atPath: daemonPath) else {
-            // Not bundled (e.g. running via `swift run`) — skip
+        guard FileManager.default.isExecutableFile(atPath: binaryPath) else {
             return
         }
 
         let process = Process()
-        process.executableURL = URL(fileURLWithPath: daemonPath)
-        process.arguments = []
+        process.executableURL = URL(fileURLWithPath: binaryPath)
+        process.arguments = ["--daemon"]
         // Inherit the environment so Gemini key etc. are available
         process.environment = ProcessInfo.processInfo.environment
 
@@ -139,9 +227,9 @@ final class MenuBarDelegate: NSObject, NSApplicationDelegate {
         do {
             try process.run()
             daemonProcess = process
-            Logger.info("Started StubbleDaemon (PID \(process.processIdentifier))")
+            Logger.info("Started daemon (PID \(process.processIdentifier))")
         } catch {
-            Logger.error("Failed to start StubbleDaemon: \(error.localizedDescription)")
+            Logger.error("Failed to start daemon: \(error.localizedDescription)")
         }
     }
 
@@ -150,7 +238,7 @@ final class MenuBarDelegate: NSObject, NSApplicationDelegate {
         guard let process = daemonProcess, process.isRunning else { return }
         // Send SIGTERM for graceful shutdown (the daemon handles this)
         process.terminate()
-        Logger.info("Stopped StubbleDaemon")
+        Logger.info("Stopped daemon")
         daemonProcess = nil
     }
 
