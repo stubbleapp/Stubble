@@ -1,6 +1,5 @@
 import SwiftUI
 import ServiceManagement
-import AppKit
 import TaskMinerShared
 
 /// First-launch setup wizard that guides the user through:
@@ -246,7 +245,7 @@ private struct WelcomePage: View {
                     }
                 }
             }
-            .padding(.horizontal, 40)
+            .padding(.horizontal, 16)
 
             Spacer()
         }
@@ -442,8 +441,7 @@ private struct PermissionsPage: View {
                     detail: "Reads window titles so Stubble knows which app and document you're working in.",
                     granted: accessibilityGranted,
                     action: {
-                        _ = PermissionChecker.checkAccessibility(promptIfNeeded: true)
-                        PermissionChecker.openAccessibilitySettings()
+                        PermissionManager.openAccessibilitySettings()
                     }
                 )
 
@@ -453,8 +451,7 @@ private struct PermissionsPage: View {
                     detail: "Captures periodic screenshots for OCR. Screenshots stay on your Mac and are never uploaded.",
                     granted: screenRecordingGranted,
                     action: {
-                        CGRequestScreenCaptureAccess()
-                        PermissionChecker.openScreenRecordingSettings()
+                        PermissionManager.openScreenRecordingSettings()
                     }
                 )
             }
@@ -495,9 +492,12 @@ private struct PermissionsPage: View {
     }
 
     private func checkPermissions() {
-        accessibilityGranted = PermissionChecker.checkAccessibility(promptIfNeeded: false)
-        screenRecordingGranted = PermissionChecker.checkScreenRecording()
-        allGranted = accessibilityGranted && screenRecordingGranted
+        accessibilityGranted = PermissionManager.checkAccessibility(promptIfNeeded: false)
+        Task {
+            let hasScreenRecording = await PermissionManager.checkScreenRecording()
+            screenRecordingGranted = hasScreenRecording
+            allGranted = accessibilityGranted && hasScreenRecording
+        }
     }
 }
 

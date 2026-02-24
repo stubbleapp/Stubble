@@ -15,41 +15,58 @@ enum TimelineItem: Identifiable {
         }
     }
 
-    /// Build timeline items from tasks, inserting gap indicators from actual idle activity records.
-    /// Idle periods come from the daemon's ActivityRecords (stable across task regenerations),
-    /// NOT from gaps between task boundaries (which change when AI re-summarises).
-    static func build(from tasks: [TaskRecord], idleActivities: [ActivityRecord] = [], gapThreshold: TimeInterval = 900) -> [TimelineItem] {
+    /// Build timeline items from tasks, inserting idle gaps from actual activity records.
+    ///
+    /// Idle periods are **ground truth** from the daemon (screen lock, sleep, HID inactivity).
+    /// Task boundaries are AI-generated approximations. The timeline shows idle gaps at their
+    /// real duration, positioned chronologically between tasks — never clipped or adjusted
+    /// to fit AI task boundaries.
+    static func build(from tasks: [TaskRecord], idleActivities: [ActivityRecord] = []) -> [TimelineItem] {
         guard !tasks.isEmpty else { return [] }
 
-        // Merge idle periods that are consecutive or overlapping into consolidated gaps
-        let idleGaps = consolidateIdlePeriods(idleActivities, threshold: gapThreshold)
+        let idleGaps = consolidateIdlePeriods(idleActivities)
 
         var items: [TimelineItem] = []
+        var usedGaps: Set<Int> = []
 
         for (index, task) in tasks.enumerated() {
-            // Insert any idle gaps that fall between the previous task's end and this task's start
+            // Window between previous task's end and this task's start.
+            // For the first task, look back to the start of the day.
             let windowStart = index > 0 ? tasks[index - 1].endTime : Date.distantPast
             let windowEnd = task.startTime
 
-            for (gapIndex, gap) in idleGaps.enumerated() {
-                // Gap overlaps the window between tasks
+            // Insert idle gaps that overlap this inter-task window.
+            // Use real timestamps — never clip to task boundaries.
+            for (gapIndex, gap) in idleGaps.enumerated() where !usedGaps.contains(gapIndex) {
                 if gap.end > windowStart && gap.start < windowEnd {
-                    let clippedStart = max(gap.start, windowStart)
-                    let clippedEnd = min(gap.end, windowEnd)
-                    let clippedDuration = clippedEnd.timeIntervalSince(clippedStart)
-                    if clippedDuration >= gapThreshold {
-                        items.append(.gap(
-                            id: "idle-\(gapIndex)-\(index)",
-                            startTime: clippedStart,
-                            endTime: clippedEnd,
-                            duration: clippedDuration
-                        ))
-                    }
+                    let duration = gap.end.timeIntervalSince(gap.start)
+                    items.append(.gap(
+                        id: "idle-\(gapIndex)",
+                        startTime: gap.start,
+                        endTime: gap.end,
+                        duration: duration
+                    ))
+                    usedGaps.insert(gapIndex)
                 }
             }
 
             let isFirst = items.isEmpty
             items.append(.task(task, isFirst: isFirst, isLast: false))
+        }
+
+        // Check for idle gaps after the last task
+        if let lastTask = tasks.last {
+            for (gapIndex, gap) in idleGaps.enumerated() where !usedGaps.contains(gapIndex) {
+                if gap.start >= lastTask.startTime {
+                    let duration = gap.end.timeIntervalSince(gap.start)
+                    items.append(.gap(
+                        id: "idle-\(gapIndex)",
+                        startTime: gap.start,
+                        endTime: gap.end,
+                        duration: duration
+                    ))
+                }
+            }
         }
 
         // Fix isLast on the final item
@@ -62,18 +79,35 @@ enum TimelineItem: Identifiable {
         return items
     }
 
+    /// Minimum idle duration to show in the timeline (5 minutes).
+    private static let minIdleDuration: TimeInterval = 300
+
     /// Consolidate idle ActivityRecords into merged time ranges.
-    /// Adjacent or overlapping idle periods become a single gap.
-    private static func consolidateIdlePeriods(_ activities: [ActivityRecord], threshold: TimeInterval) -> [(start: Date, end: Date)] {
-        let idles = activities
-            .filter { $0.isIdle }
-            .compactMap { record -> (start: Date, end: Date)? in
-                let end = record.endTime ?? record.timestamp.addingTimeInterval(record.duration ?? 0)
-                let duration = end.timeIntervalSince(record.timestamp)
-                guard duration >= threshold else { return nil }
-                return (start: record.timestamp, end: end)
+    /// Handles unfinalized idle records (no end_time) by estimating
+    /// the end from the next activity record's timestamp.
+    private static func consolidateIdlePeriods(_ activities: [ActivityRecord]) -> [(start: Date, end: Date)] {
+        let sorted = activities.sorted { $0.timestamp < $1.timestamp }
+
+        var idles: [(start: Date, end: Date)] = []
+        for (i, record) in sorted.enumerated() {
+            guard record.isIdle else { continue }
+
+            let end: Date
+            if let endTime = record.endTime {
+                end = endTime
+            } else if let duration = record.duration, duration > 0 {
+                end = record.timestamp.addingTimeInterval(duration)
+            } else {
+                // Unfinalized idle record (daemon died during sleep, etc.)
+                // Estimate end from the next non-idle activity's start time.
+                let nextNonIdle = sorted.dropFirst(i + 1).first { !$0.isIdle }
+                end = nextNonIdle?.timestamp ?? record.timestamp
             }
-            .sorted { $0.start < $1.start }
+
+            let duration = end.timeIntervalSince(record.timestamp)
+            guard duration >= minIdleDuration else { continue }
+            idles.append((start: record.timestamp, end: end))
+        }
 
         guard !idles.isEmpty else { return [] }
 
@@ -100,8 +134,6 @@ extension Array where Element == TimelineItem {
         let prevIndex = index - 1
         guard prevIndex >= 0 else { return [] }
         if case .gap = self[prevIndex] {
-            // A gap is adjacent — report the current task's own activities
-            // so the bar connects into the gap's dotted line.
             if case .task(let record, _, _) = self[index] {
                 return viewModel.overlappingActivityNames(for: record)
             }
@@ -120,8 +152,6 @@ extension Array where Element == TimelineItem {
         let nextIndex = index + 1
         guard nextIndex < count else { return [] }
         if case .gap = self[nextIndex] {
-            // A gap is adjacent — report the current task's own activities
-            // so the bar connects into the gap's dotted line.
             if case .task(let record, _, _) = self[index] {
                 return viewModel.overlappingActivityNames(for: record)
             }

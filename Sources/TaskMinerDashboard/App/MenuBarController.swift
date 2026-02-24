@@ -76,65 +76,49 @@ final class MenuBarDelegate: NSObject, NSApplicationDelegate {
     /// Check permissions on every launch. If missing, show an alert directing the
     /// user to System Settings and open the relevant pane. Polls until granted,
     /// then restarts the daemon so it picks up the new TCC grants.
-    ///
-    /// NOTE: CGRequestScreenCaptureAccess() and AXIsProcessTrustedWithOptions(prompt:true)
-    /// only show system dialogs for a *brand-new* executable. After a rebuild with a new
-    /// ad-hoc signature, they silently do nothing. We always open System Settings directly
-    /// and show our own alert so the user knows what to do.
     private func requestPermissionsIfNeeded() {
-        let hasAccessibility = PermissionChecker.checkAccessibility(promptIfNeeded: true)
-        let hasScreenRecording = Self.testScreenRecordingPermission()
+        PermissionManager.requestAccessibilityAccess()
 
-        Logger.info("Permission check at launch — Accessibility: \(hasAccessibility ? "✅" : "❌"), Screen Recording: \(hasScreenRecording ? "✅" : "❌")")
+        Task { @MainActor in
+            let status = await PermissionManager.currentStatus()
 
-        guard !hasAccessibility || !hasScreenRecording else { return }
+            Logger.info("Permission check at launch — Accessibility: \(status.accessibility ? "✅" : "❌"), Screen Recording: \(status.screenRecording ? "✅" : "❌")")
 
-        // Build a list of what's missing
-        var missing: [String] = []
-        if !hasAccessibility { missing.append("Accessibility") }
-        if !hasScreenRecording { missing.append("Screen Recording") }
+            guard !status.allGranted else { return }
 
-        // Show an alert so the user knows they need to act
-        let alert = NSAlert()
-        alert.messageText = "Stubble needs permissions"
-        alert.informativeText = "Please grant \(missing.joined(separator: " and ")) in System Settings.\n\nIf Stubble is already in the list, remove it and re-add it (the app was updated)."
-        alert.alertStyle = .warning
-        alert.addButton(withTitle: "Open System Settings")
-        alert.addButton(withTitle: "Later")
+            let missing = status.missingPermissions
 
-        let response = alert.runModal()
-        if response == .alertFirstButtonReturn {
-            // Open the first missing permission pane
-            if !hasScreenRecording {
-                PermissionChecker.openScreenRecordingSettings()
-            } else {
-                PermissionChecker.openAccessibilitySettings()
+            let alert = NSAlert()
+            alert.messageText = "Stubble needs permissions"
+            alert.informativeText = "Please grant \(missing.joined(separator: " and ")) in System Settings.\n\nIf Stubble is already in the list, remove it and re-add it (the app was updated)."
+            alert.alertStyle = .warning
+            alert.addButton(withTitle: "Open System Settings")
+            alert.addButton(withTitle: "Later")
+
+            let response = alert.runModal()
+            if response == .alertFirstButtonReturn {
+                if !status.screenRecording {
+                    PermissionManager.openScreenRecordingSettings()
+                } else {
+                    PermissionManager.openAccessibilitySettings()
+                }
             }
-        }
 
-        // Poll every 2 seconds until both are granted, then restart daemon
-        permissionPollTimer?.invalidate()
-        permissionPollTimer = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: true) { [weak self] _ in
-            Task { @MainActor in
-                let acc = PermissionChecker.checkAccessibility(promptIfNeeded: false)
-                let scr = Self.testScreenRecordingPermission()
-                if acc && scr {
-                    self?.permissionPollTimer?.invalidate()
-                    self?.permissionPollTimer = nil
-                    Logger.info("All permissions granted — restarting daemon to apply")
-                    self?.stopDaemon()
-                    self?.startDaemon()
+            // Poll every 2 seconds until both are granted, then restart daemon
+            permissionPollTimer?.invalidate()
+            permissionPollTimer = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: true) { [weak self] _ in
+                Task { @MainActor in
+                    let current = await PermissionManager.currentStatus()
+                    if current.allGranted {
+                        self?.permissionPollTimer?.invalidate()
+                        self?.permissionPollTimer = nil
+                        Logger.info("All permissions granted — restarting daemon to apply")
+                        self?.stopDaemon()
+                        self?.startDaemon()
+                    }
                 }
             }
         }
-    }
-
-    /// Test Screen Recording permission using the shared PermissionChecker.
-    /// CGPreflightScreenCaptureAccess() caches its result per-process and never
-    /// reflects newly-granted TCC permissions. PermissionChecker uses
-    /// CGWindowListCopyWindowInfo to detect permission in real time.
-    private static func testScreenRecordingPermission() -> Bool {
-        PermissionChecker.checkScreenRecording()
     }
 
     // MARK: - App Icon

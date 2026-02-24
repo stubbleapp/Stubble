@@ -48,7 +48,7 @@ struct RecommendationsView: View {
                     .buttonStyle(.plain)
                 }
                 .padding(10)
-                .background(Color.white.opacity(0.45))
+                .background(Theme.cardBackground)
                 .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
                 .overlay(
                     RoundedRectangle(cornerRadius: 8, style: .continuous)
@@ -138,7 +138,7 @@ private struct TipCardView: View {
             HStack {
                 Text(tip.category.displayName.uppercased())
                     .font(.system(size: 10, weight: .medium, design: .rounded))
-                    .foregroundStyle(categoryColor.opacity(0.8))
+                    .foregroundStyle(Theme.textMuted)
                     .tracking(0.5)
 
                 Spacer()
@@ -195,14 +195,12 @@ private struct TipCardView: View {
         .padding(16)
         .background(
             ZStack {
-                // Base: translucent white layer
                 RoundedRectangle(cornerRadius: 14, style: .continuous)
-                    .fill(Color.white.opacity(0.45))
-                // Top edge highlight for glass feel
+                    .fill(Theme.cardBackground)
                 RoundedRectangle(cornerRadius: 14, style: .continuous)
                     .fill(
                         LinearGradient(
-                            colors: [Color.white.opacity(0.35), Color.clear],
+                            colors: [Theme.surfaceElevated.opacity(0.3), Color.clear],
                             startPoint: .top,
                             endPoint: .center
                         )
@@ -212,32 +210,12 @@ private struct TipCardView: View {
         .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .stroke(Color.white.opacity(0.5), lineWidth: 0.5)
+                .stroke(Theme.cardBorder, lineWidth: 0.5)
         )
         .shadow(color: .black.opacity(0.04), radius: 8, y: 2)
-        .overlay(alignment: .topLeading) {
-            // Subtle accent bar on the left edge
-            RoundedRectangle(cornerRadius: 1)
-                .fill(categoryColor.opacity(0.35))
-                .frame(width: 2.5)
-                .padding(.vertical, 14)
-                .padding(.leading, 2)
-        }
         .onHover { hovering in
             isHovering = hovering
         }
     }
 
-    private var categoryColor: Color {
-        switch tip.category {
-        case .article:
-            return Color(nsColor: NSColor(red: 0.25, green: 0.52, blue: 0.85, alpha: 1))
-        case .tool:
-            return Color(nsColor: NSColor(red: 0.58, green: 0.35, blue: 0.75, alpha: 1))
-        case .bestPractice:
-            return Color(nsColor: NSColor(red: 0.25, green: 0.65, blue: 0.42, alpha: 1))
-        case .workflow:
-            return Color(nsColor: NSColor(red: 0.80, green: 0.52, blue: 0.20, alpha: 1))
-        }
-    }
 }

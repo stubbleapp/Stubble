@@ -92,6 +92,7 @@ struct DayPill: View {
                 .clipShape(Circle())
         }
         .buttonStyle(.plain)
+        .disabled(!day.isToday && !day.hasData)
     }
 
     private var foregroundColor: Color {

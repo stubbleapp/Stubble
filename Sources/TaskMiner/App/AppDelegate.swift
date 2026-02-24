@@ -110,23 +110,17 @@ class AppDelegate {
             self?.checkSummarization()
         }
 
-        // Log permission status at startup so issues are immediately visible.
-        // NOTE: We test Screen Recording by doing a real 1×1 capture because
-        // CGPreflightScreenCaptureAccess() caches its result per-process and
-        // won't reflect permissions granted after launch.
-        let hasScreenRecording: Bool = {
-            let testRect = CGRect(x: 0, y: 0, width: 1, height: 1)
-            return CGWindowListCreateImage(testRect, .optionOnScreenOnly, kCGNullWindowID, []) != nil
-        }()
-        let hasAccessibility = Permissions.checkAccessibility(promptIfNeeded: false)
         Logger.info("Stubble started - monitoring desktop activity")
         Logger.info("Screenshot interval: \(Int(config.screenshotInterval))s, Idle threshold: \(Int(config.idleThreshold))s")
-        Logger.info("Permissions — Screen Recording: \(hasScreenRecording ? "✅" : "❌"), Accessibility: \(hasAccessibility ? "✅" : "❌")")
-        if !hasScreenRecording {
-            Logger.warning("Screen Recording permission not granted — screenshots will be skipped until granted. Re-grant in System Settings → Privacy & Security → Screen Recording.")
-        }
-        if !hasAccessibility {
-            Logger.warning("Accessibility permission not granted — window titles will be empty. Re-grant in System Settings → Privacy & Security → Accessibility.")
+        Task {
+            let permStatus = await PermissionManager.currentStatus()
+            Logger.info("Permissions — Screen Recording: \(permStatus.screenRecording ? "✅" : "❌"), Accessibility: \(permStatus.accessibility ? "✅" : "❌")")
+            if !permStatus.screenRecording {
+                Logger.warning("Screen Recording permission not granted — screenshots will be skipped until granted. Re-grant in System Settings → Privacy & Security → Screen Recording.")
+            }
+            if !permStatus.accessibility {
+                Logger.warning("Accessibility permission not granted — window titles will be empty. Re-grant in System Settings → Privacy & Security → Accessibility.")
+            }
         }
     }
 
