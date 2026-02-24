@@ -1,6 +1,7 @@
 import AppKit
 
 /// Resolves app bundle IDs to icons with caching.
+@MainActor
 final class AppIconResolver {
     static let shared = AppIconResolver()
 
@@ -29,14 +30,13 @@ final class AppIconResolver {
 
     private func sized(_ image: NSImage, _ size: CGFloat) -> NSImage {
         let targetSize = NSSize(width: size, height: size)
-        let newImage = NSImage(size: targetSize)
-        newImage.lockFocus()
-        NSGraphicsContext.current?.imageInterpolation = .high
-        image.draw(in: NSRect(origin: .zero, size: targetSize),
-                   from: NSRect(origin: .zero, size: image.size),
-                   operation: .copy,
-                   fraction: 1)
-        newImage.unlockFocus()
-        return newImage
+        return NSImage(size: targetSize, flipped: false) { rect in
+            NSGraphicsContext.current?.imageInterpolation = .high
+            image.draw(in: rect,
+                       from: NSRect(origin: .zero, size: image.size),
+                       operation: .copy,
+                       fraction: 1)
+            return true
+        }
     }
 }

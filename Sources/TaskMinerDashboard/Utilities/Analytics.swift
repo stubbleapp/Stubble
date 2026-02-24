@@ -1,13 +1,19 @@
 import Foundation
 import TelemetryDeck
+import TaskMinerShared
 
 /// Lightweight wrapper around TelemetryDeck for Stubble analytics.
 /// All event names are defined here so they stay consistent and discoverable.
 enum Analytics {
 
     /// Initialize TelemetryDeck. Call once at app startup.
+    /// The app ID is read from Info.plist (TelemetryDeckAppID) so it's not hardcoded in source.
     static func initialize() {
-        let config = TelemetryDeck.Config(appID: "E9AC5258-ACC0-499A-9BE7-226EC2E6E511")
+        guard let appID = Bundle.main.infoDictionary?["TelemetryDeckAppID"] as? String, !appID.isEmpty else {
+            Logger.warning("TelemetryDeck app ID not found in Info.plist — analytics disabled")
+            return
+        }
+        let config = TelemetryDeck.Config(appID: appID)
         TelemetryDeck.initialize(config: config)
     }
 

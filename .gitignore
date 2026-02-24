@@ -13,3 +13,7 @@ DerivedData/
 
 # macOS
 .DS_Store
+
+# Sensitive / internal docs
+POSITIONING.md
+*.env

@@ -17,9 +17,28 @@ public struct MemoryEntry: Codable, Identifiable, Sendable {
 /// projects, habits, and workflows. Backed by a JSON file on disk.
 public final class UserMemoryStore: Sendable {
     private let filePath: URL
+    private let lockPath: URL
 
     public init(filePath: URL) {
         self.filePath = filePath
+        self.lockPath = filePath.deletingLastPathComponent().appendingPathComponent(".memory.lock")
+    }
+
+    // MARK: - File Locking
+
+    /// Acquire an exclusive file lock, execute the body, then release.
+    /// Prevents the Dashboard and Daemon from stomping each other's writes.
+    private func withFileLock<T>(_ body: () -> T) -> T {
+        FileManager.default.createFile(atPath: lockPath.path, contents: nil)
+        guard let lockFd = FileHandle(forWritingAtPath: lockPath.path) else {
+            return body()
+        }
+        flock(lockFd.fileDescriptor, LOCK_EX)
+        defer {
+            flock(lockFd.fileDescriptor, LOCK_UN)
+            lockFd.closeFile()
+        }
+        return body()
     }
 
     /// Load all memory entries from disk.
@@ -35,7 +54,7 @@ public final class UserMemoryStore: Sendable {
     }
 
     /// Replace the entire memory with new entries and persist to disk.
-    public func save(_ entries: [MemoryEntry]) {
+    private func saveImpl(_ entries: [MemoryEntry]) {
         let dir = filePath.deletingLastPathComponent()
         do {
             try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
@@ -51,6 +70,11 @@ public final class UserMemoryStore: Sendable {
         }
     }
 
+    /// Save entries (file-locked).
+    public func save(_ entries: [MemoryEntry]) {
+        withFileLock { saveImpl(entries) }
+    }
+
     /// Build a compact text representation of memory for injection into prompts.
     /// Returns nil if there are no entries.
     public func contextString() -> String? {
@@ -59,54 +83,39 @@ public final class UserMemoryStore: Sendable {
         return entries.map { "- \($0.content)" }.joined(separator: "\n")
     }
 
-    /// Remove all memory entries.
+    /// Remove all memory entries (file-locked).
     public func clear() {
-        save([])
+        withFileLock { saveImpl([]) }
     }
 
-    /// Delete a single entry by ID.
+    /// Delete a single entry by ID (file-locked).
     public func delete(id: UUID) {
-        var entries = load()
-        entries.removeAll { $0.id == id }
-        save(entries)
+        withFileLock {
+            var entries = load()
+            entries.removeAll { $0.id == id }
+            saveImpl(entries)
+        }
     }
 
-    /// Merge new AI-generated entries with existing memory, replacing duplicates.
-    /// Uses an exclusive file lock to prevent the Dashboard and Daemon from
-    /// stomping each other's writes during concurrent load-modify-save cycles.
+    /// Merge new AI-generated entries with existing memory, replacing duplicates (file-locked).
     public func merge(newEntries: [String]) {
-        let lockPath = filePath.deletingLastPathComponent().appendingPathComponent(".memory.lock")
-        FileManager.default.createFile(atPath: lockPath.path, contents: nil)
-        guard let lockFd = FileHandle(forWritingAtPath: lockPath.path) else {
-            // Fall through without lock if we can't create the lock file
-            mergeImpl(newEntries)
-            return
-        }
-        flock(lockFd.fileDescriptor, LOCK_EX)
-        defer {
-            flock(lockFd.fileDescriptor, LOCK_UN)
-            lockFd.closeFile()
-            try? FileManager.default.removeItem(at: lockPath)
-        }
-        mergeImpl(newEntries)
-    }
+        withFileLock {
+            var existing = load()
+            let existingSet = Set(existing.map { $0.content.lowercased() })
 
-    private func mergeImpl(_ newEntries: [String]) {
-        var existing = load()
-        let existingSet = Set(existing.map { $0.content.lowercased() })
+            for content in newEntries {
+                let trimmed = content.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !trimmed.isEmpty, !existingSet.contains(trimmed.lowercased()) else { continue }
+                existing.append(MemoryEntry(content: trimmed))
+            }
 
-        for content in newEntries {
-            let trimmed = content.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !trimmed.isEmpty, !existingSet.contains(trimmed.lowercased()) else { continue }
-            existing.append(MemoryEntry(content: trimmed))
+            // Cap at 50 entries — drop oldest if needed
+            if existing.count > 50 {
+                existing = Array(existing.suffix(50))
+            }
+
+            saveImpl(existing)
         }
-
-        // Cap at 50 entries — drop oldest if needed
-        if existing.count > 50 {
-            existing = Array(existing.suffix(50))
-        }
-
-        save(existing)
     }
 }
 

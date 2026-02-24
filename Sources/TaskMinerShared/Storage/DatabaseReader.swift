@@ -17,6 +17,7 @@ public enum DatabaseError: Error, LocalizedError {
     }
 }
 
+@MainActor
 public class DatabaseReader {
     private var db: OpaquePointer?
 
@@ -24,7 +25,7 @@ public class DatabaseReader {
         var dbPointer: OpaquePointer?
         let rc = sqlite3_open_v2(
             path.path, &dbPointer,
-            SQLITE_OPEN_READWRITE | SQLITE_OPEN_NOMUTEX,
+            SQLITE_OPEN_READWRITE | SQLITE_OPEN_FULLMUTEX,
             nil
         )
         guard rc == SQLITE_OK else {
@@ -463,13 +464,14 @@ public class DatabaseReader {
             sqlite3_finalize(selectStmt)
         }
 
-        // Delete all rows from every table
-        let tables = ["tasks", "project_activities", "screenshots", "activities", "daily_summaries"]
-        for table in tables {
-            sqlite3_exec(db, "DELETE FROM \(table)", nil, nil, nil)
-        }
+        // Delete all rows from every table (explicit statements — no string interpolation)
+        sqlite3_exec(db, "DELETE FROM tasks", nil, nil, nil)
+        sqlite3_exec(db, "DELETE FROM project_activities", nil, nil, nil)
+        sqlite3_exec(db, "DELETE FROM screenshots", nil, nil, nil)
+        sqlite3_exec(db, "DELETE FROM activities", nil, nil, nil)
+        sqlite3_exec(db, "DELETE FROM daily_summaries", nil, nil, nil)
 
-        Logger.info("Cleared all data from \(tables.count) tables (\(paths.count) screenshot files)")
+        Logger.info("Cleared all data from 5 tables (\(paths.count) screenshot files)")
         return paths
     }
 

@@ -8,6 +8,7 @@ final class MenuBarDelegate: NSObject, NSApplicationDelegate {
     private var statusItem: NSStatusItem?
     private var pauseController: PauseController?
     private var pollTimer: Timer?
+    private var permissionPollTimer: Timer?
     private var daemonProcess: Process?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -53,6 +54,10 @@ final class MenuBarDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        pollTimer?.invalidate()
+        pollTimer = nil
+        permissionPollTimer?.invalidate()
+        permissionPollTimer = nil
         stopDaemon()
     }
 
@@ -98,14 +103,14 @@ final class MenuBarDelegate: NSObject, NSApplicationDelegate {
         }
 
         // Poll every 2 seconds until both are granted, then restart daemon
-        var permissionPollTimer: Timer?
+        permissionPollTimer?.invalidate()
         permissionPollTimer = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: true) { [weak self] _ in
             Task { @MainActor in
                 let acc = PermissionChecker.checkAccessibility(promptIfNeeded: false)
                 let scr = Self.testScreenRecordingPermission()
                 if acc && scr {
-                    permissionPollTimer?.invalidate()
-                    permissionPollTimer = nil
+                    self?.permissionPollTimer?.invalidate()
+                    self?.permissionPollTimer = nil
                     Logger.info("All permissions granted — restarting daemon to apply")
                     self?.stopDaemon()
                     self?.startDaemon()
