@@ -10,6 +10,7 @@ struct SettingsView: View {
     @State private var customPrompt: String = ""
     @State private var granularity: TaskGranularity = .medium
     @State private var showScreensTab: Bool = false
+    @State private var showClearConfirmation = false
     var body: some View {
         VStack(spacing: 0) {
             // Header
@@ -152,6 +153,26 @@ struct SettingsView: View {
                         .tint(Theme.accent)
                     }
 
+                    // Data
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Data")
+                            .font(.subheadline.weight(.medium))
+                            .foregroundStyle(Theme.textPrimary)
+
+                        Button {
+                            showClearConfirmation = true
+                        } label: {
+                            Text("Clear All Data")
+                                .font(.system(size: 12, weight: .medium))
+                                .foregroundStyle(Theme.statusError)
+                        }
+                        .buttonStyle(.plain)
+
+                        Text("Permanently deletes all tasks, activities, screenshots, and memory. Your settings and API key are kept.")
+                            .font(.caption2)
+                            .foregroundStyle(Theme.textMuted)
+                    }
+
                     // Save
                     HStack(spacing: 12) {
                         Spacer()
@@ -195,6 +216,15 @@ struct SettingsView: View {
             customPrompt = SettingsManager.shared.customPrompt ?? ""
             granularity = SettingsManager.shared.granularity
             showScreensTab = SettingsManager.shared.showScreensTab
+        }
+        .alert("Clear All Data?", isPresented: $showClearConfirmation) {
+            Button("Cancel", role: .cancel) {}
+            Button("Clear Everything", role: .destructive) {
+                viewModel.clearAllData()
+                dismiss()
+            }
+        } message: {
+            Text("This will permanently delete all tasks, activities, screenshots, and learned memory. Your settings and API key will be kept. This cannot be undone.")
         }
     }
 

@@ -19,6 +19,8 @@ class DatabaseManager {
         try execute("PRAGMA foreign_keys=ON")
         try createSchema()
         runMigrations()
+        // Restrict database file to owner-only access (0600) — contains OCR text and activity data.
+        try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: path.path)
     }
 
     // MARK: - Schema
@@ -88,16 +90,29 @@ class DatabaseManager {
     private func runMigrations() {
         let currentVersion = getUserVersion()
 
+        // Forward-compatibility guard: if the database was created by a newer version
+        // of Stubble, don't touch the schema — we might corrupt newer structures.
+        if currentVersion > Self.schemaVersion {
+            Logger.warning("Database schema version \(currentVersion) is newer than this binary supports (\(Self.schemaVersion)). Skipping migrations.")
+            return
+        }
+
+        var migrationFailed = false
+
         if currentVersion < 1 {
-            execMigration("ALTER TABLE screenshots ADD COLUMN ocr_text TEXT",
-                         label: "1: add ocr_text", ignoreDuplicate: true)
+            if !execMigration("ALTER TABLE screenshots ADD COLUMN ocr_text TEXT",
+                              label: "1: add ocr_text", ignoreDuplicate: true) {
+                migrationFailed = true
+            }
         }
 
         // Migration 2 is CREATE TABLE tasks — already in createSchema()
 
         if currentVersion < 3 {
-            execMigration("ALTER TABLE tasks ADD COLUMN relevant_links TEXT DEFAULT '[]'",
-                         label: "3: add relevant_links", ignoreDuplicate: true)
+            if !execMigration("ALTER TABLE tasks ADD COLUMN relevant_links TEXT DEFAULT '[]'",
+                              label: "3: add relevant_links", ignoreDuplicate: true) {
+                migrationFailed = true
+            }
         }
 
         if currentVersion < 4 {
@@ -115,32 +130,44 @@ class DatabaseManager {
                 color_index INTEGER DEFAULT 0
             )
             """
-            execMigration(paSql, label: "4: create project_activities table")
+            if !execMigration(paSql, label: "4: create project_activities table") {
+                migrationFailed = true
+            }
             sqlite3_exec(db, "CREATE INDEX IF NOT EXISTS idx_pa_date ON project_activities(date)", nil, nil, nil)
         }
 
         if currentVersion < 5 {
-            execMigration("ALTER TABLE tasks ADD COLUMN active_duration REAL",
-                         label: "5: add active_duration", ignoreDuplicate: true)
+            if !execMigration("ALTER TABLE tasks ADD COLUMN active_duration REAL",
+                              label: "5: add active_duration", ignoreDuplicate: true) {
+                migrationFailed = true
+            }
         }
 
-        // Always update version to current
-        if currentVersion < Self.schemaVersion {
+        // Only bump the version if all migrations succeeded — failed migrations
+        // will be retried on the next launch.
+        if migrationFailed {
+            Logger.error("One or more migrations failed — schema version NOT updated (will retry next launch)")
+        } else if currentVersion < Self.schemaVersion {
             setUserVersion(Self.schemaVersion)
             Logger.info("Schema version updated: \(currentVersion) → \(Self.schemaVersion)")
         }
     }
 
-    private func execMigration(_ sql: String, label: String, ignoreDuplicate: Bool = false) {
+    /// Execute a single migration. Returns true on success, false on failure.
+    @discardableResult
+    private func execMigration(_ sql: String, label: String, ignoreDuplicate: Bool = false) -> Bool {
         var errMsg: UnsafeMutablePointer<CChar>?
         let rc = sqlite3_exec(db, sql, nil, nil, &errMsg)
         if rc != SQLITE_OK {
             let msg = errMsg.map { String(cString: $0) } ?? ""
             sqlite3_free(errMsg)
-            if !(ignoreDuplicate && msg.contains("duplicate column")) {
-                Logger.error("DatabaseManager migration \(label) failed: \(msg)")
+            if ignoreDuplicate && msg.contains("duplicate column") {
+                return true // Column already exists — that's fine
             }
+            Logger.error("DatabaseManager migration \(label) failed: \(msg)")
+            return false
         }
+        return true
     }
 
     private func getUserVersion() -> Int {

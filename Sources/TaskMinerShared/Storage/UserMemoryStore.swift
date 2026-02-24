@@ -59,6 +59,11 @@ public final class UserMemoryStore: Sendable {
         return entries.map { "- \($0.content)" }.joined(separator: "\n")
     }
 
+    /// Remove all memory entries.
+    public func clear() {
+        save([])
+    }
+
     /// Delete a single entry by ID.
     public func delete(id: UUID) {
         var entries = load()

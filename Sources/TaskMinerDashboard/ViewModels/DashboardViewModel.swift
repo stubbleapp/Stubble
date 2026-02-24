@@ -385,6 +385,52 @@ final class DashboardViewModel {
         projectActivities = paRecords.map { ProjectActivity(from: $0) }
     }
 
+    // MARK: - Clear All Data
+
+    /// Erase all tasks, activities, screenshots, and memory. Keeps settings (API key, etc.).
+    func clearAllData() {
+        // 1. Clear database tables and get screenshot paths to delete
+        let screenshotPaths = dbReader?.clearAllData() ?? []
+
+        // 2. Delete screenshot files from disk
+        let fm = FileManager.default
+        for path in screenshotPaths {
+            try? fm.removeItem(atPath: path)
+        }
+
+        // Also clear the screenshots directory of any orphaned files
+        if let config = try? SharedConfiguration() {
+            let ssDir = config.screenshotDirectory
+            if let files = try? fm.contentsOfDirectory(at: ssDir, includingPropertiesForKeys: nil) {
+                for file in files {
+                    try? fm.removeItem(at: file)
+                }
+            }
+        }
+
+        // 3. Reset memory
+        if let config = try? SharedConfiguration() {
+            try? fm.removeItem(at: config.memoryPath)
+        }
+        memoryStore.clear()
+
+        // 4. Clear in-memory state
+        tasks = []
+        activities = []
+        groupedActivities = []
+        screenshots = []
+        projectActivities = []
+        recommendations = []
+        activeSeconds = 0
+        idleSeconds = 0
+        daySummaryText = nil
+        summaryError = nil
+        recommendationsError = nil
+
+        Logger.info("All data cleared by user")
+        Analytics.dataClearedByUser()
+    }
+
     private func startPausePolling() {
         pauseState = pauseController.currentState()
         pauseTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in

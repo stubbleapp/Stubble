@@ -75,4 +75,10 @@ enum Analytics {
     static func monitoringResumed() {
         TelemetryDeck.signal("monitoring.resumed")
     }
+
+    // MARK: - Data Management
+
+    static func dataClearedByUser() {
+        TelemetryDeck.signal("data.cleared")
+    }
 }

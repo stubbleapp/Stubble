@@ -8,6 +8,9 @@ import TaskMinerShared
 /// the GUI and the daemon means macOS permissions (Screen Recording, Accessibility)
 /// only need to be granted once.
 public enum DaemonMain {
+    /// File descriptor for the PID lock — held open for the daemon's entire lifetime.
+    private static var lockFd: Int32 = -1
+
     public static func run() -> Never {
         Logger.enableFileLogging()
 
@@ -31,6 +34,25 @@ public enum DaemonMain {
             Logger.error("Failed to create data directories: \(error)")
             exit(1)
         }
+
+        // MARK: - Singleton lock (prevent multiple daemons)
+
+        let pidPath = config.dataDirectory.appendingPathComponent("daemon.pid").path
+        lockFd = open(pidPath, O_WRONLY | O_CREAT, 0o600)
+        guard lockFd >= 0 else {
+            Logger.error("Cannot open PID file: \(String(cString: strerror(errno)))")
+            exit(1)
+        }
+        guard flock(lockFd, LOCK_EX | LOCK_NB) == 0 else {
+            Logger.info("Another daemon is already running — exiting")
+            close(lockFd)
+            exit(0)
+        }
+        // Write our PID so operators can identify the running daemon
+        ftruncate(lockFd, 0)
+        let pidStr = "\(ProcessInfo.processInfo.processIdentifier)\n"
+        pidStr.withCString { ptr in _ = write(lockFd, ptr, strlen(ptr)) }
+        // lockFd stays open — the OS releases the lock when the process exits
 
         // NOTE: No permission checks here. The Dashboard's setup wizard handles prompting.
         // The daemon gracefully handles missing permissions at runtime:
@@ -68,6 +90,11 @@ public enum DaemonMain {
 
         let shutdownHandler: () -> Void = {
             appDelegate.shutdown()
+            // Release PID lock and clean up file
+            if lockFd >= 0 {
+                close(lockFd)
+                unlink(pidPath)
+            }
             CFRunLoopStop(CFRunLoopGetMain())
         }
 

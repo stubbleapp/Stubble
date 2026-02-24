@@ -45,14 +45,23 @@ public class DatabaseReader {
     private func runMigrations() {
         let currentVersion = getUserVersion()
 
+        // Forward-compatibility guard: if the database was created by a newer version
+        // of Stubble, don't touch the schema — we might corrupt newer structures.
+        if currentVersion > Self.schemaVersion {
+            Logger.warning("Database schema version \(currentVersion) is newer than this binary supports (\(Self.schemaVersion)). Skipping migrations.")
+            return
+        }
+
+        var migrationFailed = false
+
         if currentVersion < 1 {
-            // Migration 1: add ocr_text column to screenshots
-            execMigration("ALTER TABLE screenshots ADD COLUMN ocr_text TEXT",
-                         label: "1: add ocr_text", ignoreDuplicate: true)
+            if !execMigration("ALTER TABLE screenshots ADD COLUMN ocr_text TEXT",
+                              label: "1: add ocr_text", ignoreDuplicate: true) {
+                migrationFailed = true
+            }
         }
 
         if currentVersion < 2 {
-            // Migration 2: create tasks table + indexes
             let tasksSql = """
             CREATE TABLE IF NOT EXISTS tasks (
                 id          INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -65,19 +74,21 @@ public class DatabaseReader {
                 confidence  REAL DEFAULT 0.0
             )
             """
-            execMigration(tasksSql, label: "2: create tasks table")
+            if !execMigration(tasksSql, label: "2: create tasks table") {
+                migrationFailed = true
+            }
             sqlite3_exec(db, "CREATE INDEX IF NOT EXISTS idx_tasks_date ON tasks(date)", nil, nil, nil)
             sqlite3_exec(db, "CREATE INDEX IF NOT EXISTS idx_tasks_start ON tasks(start_time)", nil, nil, nil)
         }
 
         if currentVersion < 3 {
-            // Migration 3: add relevant_links column to tasks
-            execMigration("ALTER TABLE tasks ADD COLUMN relevant_links TEXT DEFAULT '[]'",
-                         label: "3: add relevant_links", ignoreDuplicate: true)
+            if !execMigration("ALTER TABLE tasks ADD COLUMN relevant_links TEXT DEFAULT '[]'",
+                              label: "3: add relevant_links", ignoreDuplicate: true) {
+                migrationFailed = true
+            }
         }
 
         if currentVersion < 4 {
-            // Migration 4: create project_activities table + index
             let paSql = """
             CREATE TABLE IF NOT EXISTS project_activities (
                 id          INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -92,34 +103,44 @@ public class DatabaseReader {
                 color_index INTEGER DEFAULT 0
             )
             """
-            execMigration(paSql, label: "4: create project_activities table")
+            if !execMigration(paSql, label: "4: create project_activities table") {
+                migrationFailed = true
+            }
             sqlite3_exec(db, "CREATE INDEX IF NOT EXISTS idx_pa_date ON project_activities(date)", nil, nil, nil)
         }
 
         if currentVersion < 5 {
-            // Migration 5: add active_duration column to tasks (actual active seconds)
-            execMigration("ALTER TABLE tasks ADD COLUMN active_duration REAL",
-                         label: "5: add active_duration", ignoreDuplicate: true)
+            if !execMigration("ALTER TABLE tasks ADD COLUMN active_duration REAL",
+                              label: "5: add active_duration", ignoreDuplicate: true) {
+                migrationFailed = true
+            }
         }
 
-        // Update stored version
-        if currentVersion < Self.schemaVersion {
+        // Only bump the version if all migrations succeeded — failed migrations
+        // will be retried on the next launch.
+        if migrationFailed {
+            Logger.error("One or more migrations failed — schema version NOT updated (will retry next launch)")
+        } else if currentVersion < Self.schemaVersion {
             setUserVersion(Self.schemaVersion)
             Logger.info("DatabaseReader schema version updated: \(currentVersion) → \(Self.schemaVersion)")
         }
     }
 
-    /// Execute a single migration SQL statement with error handling.
-    private func execMigration(_ sql: String, label: String, ignoreDuplicate: Bool = false) {
+    /// Execute a single migration. Returns true on success, false on failure.
+    @discardableResult
+    private func execMigration(_ sql: String, label: String, ignoreDuplicate: Bool = false) -> Bool {
         var errMsg: UnsafeMutablePointer<CChar>?
         let rc = sqlite3_exec(db, sql, nil, nil, &errMsg)
         if rc != SQLITE_OK {
             let msg = errMsg.map { String(cString: $0) } ?? ""
             sqlite3_free(errMsg)
-            if !(ignoreDuplicate && msg.contains("duplicate column")) {
-                Logger.error("DatabaseReader migration \(label) failed: \(msg)")
+            if ignoreDuplicate && msg.contains("duplicate column") {
+                return true
             }
+            Logger.error("DatabaseReader migration \(label) failed: \(msg)")
+            return false
         }
+        return true
     }
 
     private func getUserVersion() -> Int {
@@ -420,6 +441,36 @@ public class DatabaseReader {
             }
         }
         return map
+    }
+
+    // MARK: - Clear All Data
+
+    /// Delete all rows from every table. Returns the number of screenshot file paths
+    /// that were in the database (caller should delete the files from disk).
+    public func clearAllData() -> [String] {
+        guard db != nil else { return [] }
+
+        // Collect screenshot file paths before deleting rows
+        var paths: [String] = []
+        let selectSql = "SELECT file_path FROM screenshots"
+        var selectStmt: OpaquePointer?
+        if sqlite3_prepare_v2(db, selectSql, -1, &selectStmt, nil) == SQLITE_OK {
+            while sqlite3_step(selectStmt) == SQLITE_ROW {
+                if let cStr = sqlite3_column_text(selectStmt, 0) {
+                    paths.append(String(cString: cStr))
+                }
+            }
+            sqlite3_finalize(selectStmt)
+        }
+
+        // Delete all rows from every table
+        let tables = ["tasks", "project_activities", "screenshots", "activities", "daily_summaries"]
+        for table in tables {
+            sqlite3_exec(db, "DELETE FROM \(table)", nil, nil, nil)
+        }
+
+        Logger.info("Cleared all data from \(tables.count) tables (\(paths.count) screenshot files)")
+        return paths
     }
 
     // MARK: - Helpers

@@ -4,7 +4,7 @@ set -euo pipefail
 # ─── Configuration ───────────────────────────────────────────────
 APP_NAME="Stubble"
 BUNDLE_ID="com.samattias.stubble"
-VERSION="${1:-1.0.0}"                       # pass version as first arg, e.g. ./build-app.sh 1.2.0
+VERSION="${1:-1.3.0}"                       # pass version as first arg, e.g. ./build-app.sh 1.3.0
 BUILD_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 OUTPUT_DIR="$BUILD_DIR/build"
 APP_BUNDLE="$OUTPUT_DIR/$APP_NAME.app"
@@ -171,6 +171,74 @@ echo "   Binary:    $(du -sh "$APP_BUNDLE/Contents/MacOS/$APP_NAME" | cut -f1)"
 echo "   Total:     $(du -sh "$APP_BUNDLE" | cut -f1)"
 echo ""
 echo "To run:  open $APP_BUNDLE"
+
+# ─── Create DMG (for website distribution) ─────────────────────
+DMG_PATH="$OUTPUT_DIR/$APP_NAME-$VERSION.dmg"
+
+if command -v create-dmg &>/dev/null; then
+    echo ""
+    echo "📀 Creating DMG..."
+    # Remove existing DMG (create-dmg won't overwrite)
+    rm -f "$DMG_PATH"
+
+    # ─── Prepare staging directory ────────────────────────────────
+    # We create our own Applications alias (instead of --app-drop-link)
+    # so we can apply a custom orange-tinted icon to match the brand.
+    DMG_STAGING=$(mktemp -d)
+    cp -R "$APP_BUNDLE" "$DMG_STAGING/"
+
+    ORANGE_ICON="$BUILD_DIR/Resources/applications-icon-orange.png"
+    # Create a Finder alias to /Applications and apply orange icon
+    osascript -e "tell application \"Finder\" to make new alias file at (POSIX file \"$DMG_STAGING\" as alias) to (POSIX file \"/Applications\" as alias) with properties {name:\"Applications\"}" 2>/dev/null
+    if [ -f "$ORANGE_ICON" ] && [ -f "$DMG_STAGING/Applications" ]; then
+        python3 -c "
+from AppKit import NSWorkspace, NSImage
+import os, sys
+icon = NSImage.alloc().initWithContentsOfFile_(os.path.abspath('$ORANGE_ICON'))
+if icon:
+    result = NSWorkspace.sharedWorkspace().setIcon_forFile_options_(icon, '$DMG_STAGING/Applications', 0)
+    print('🎨 Orange Applications icon applied' if result else '⚠️  Could not apply orange icon')
+else:
+    print('⚠️  Could not load orange icon')
+" 2>/dev/null
+    fi
+
+    # ─── Build create-dmg arguments ──────────────────────────────
+    DMG_ARGS=""
+    if [ -f "$APP_BUNDLE/Contents/Resources/AppIcon.icns" ]; then
+        DMG_ARGS="$DMG_ARGS --volicon $APP_BUNDLE/Contents/Resources/AppIcon.icns"
+    fi
+
+    BG_IMAGE="$BUILD_DIR/Resources/dmg-background.png"
+    if [ -f "$BG_IMAGE" ]; then
+        DMG_ARGS="$DMG_ARGS --background $BG_IMAGE"
+    fi
+
+    create-dmg \
+        --volname "$APP_NAME" \
+        $DMG_ARGS \
+        --window-pos 200 120 \
+        --window-size 600 400 \
+        --icon-size 100 \
+        --icon "$APP_NAME.app" 150 200 \
+        --icon "Applications" 450 200 \
+        --no-internet-enable \
+        "$DMG_PATH" \
+        "$DMG_STAGING" \
+        2>&1 || true  # create-dmg exits 2 when it can't sign the DMG (expected with ad-hoc)
+
+    rm -rf "$DMG_STAGING"
+
+    if [ -f "$DMG_PATH" ]; then
+        echo "✅ DMG: $DMG_PATH ($(du -sh "$DMG_PATH" | cut -f1))"
+    else
+        echo "⚠️  DMG creation failed — install create-dmg: brew install create-dmg"
+    fi
+else
+    echo ""
+    echo "💡 To create a DMG for website distribution: brew install create-dmg"
+fi
+
 echo ""
 echo "── Publishing an update ──────────────────────────────────────"
 echo "   cd $OUTPUT_DIR && zip -r $APP_NAME-$VERSION.zip $APP_NAME.app"

@@ -15,24 +15,36 @@ enum TimelineItem: Identifiable {
         }
     }
 
-    /// Build timeline items from tasks, inserting gap indicators where the user was away.
-    static func build(from tasks: [TaskRecord], gapThreshold: TimeInterval = 900) -> [TimelineItem] {
+    /// Build timeline items from tasks, inserting gap indicators from actual idle activity records.
+    /// Idle periods come from the daemon's ActivityRecords (stable across task regenerations),
+    /// NOT from gaps between task boundaries (which change when AI re-summarises).
+    static func build(from tasks: [TaskRecord], idleActivities: [ActivityRecord] = [], gapThreshold: TimeInterval = 900) -> [TimelineItem] {
         guard !tasks.isEmpty else { return [] }
+
+        // Merge idle periods that are consecutive or overlapping into consolidated gaps
+        let idleGaps = consolidateIdlePeriods(idleActivities, threshold: gapThreshold)
 
         var items: [TimelineItem] = []
 
         for (index, task) in tasks.enumerated() {
-            // Check for gap before this task
-            if index > 0 {
-                let previousEnd = tasks[index - 1].endTime
-                let gapDuration = task.startTime.timeIntervalSince(previousEnd)
-                if gapDuration >= gapThreshold {
-                    items.append(.gap(
-                        id: "gap-\(index)",
-                        startTime: previousEnd,
-                        endTime: task.startTime,
-                        duration: gapDuration
-                    ))
+            // Insert any idle gaps that fall between the previous task's end and this task's start
+            let windowStart = index > 0 ? tasks[index - 1].endTime : Date.distantPast
+            let windowEnd = task.startTime
+
+            for (gapIndex, gap) in idleGaps.enumerated() {
+                // Gap overlaps the window between tasks
+                if gap.end > windowStart && gap.start < windowEnd {
+                    let clippedStart = max(gap.start, windowStart)
+                    let clippedEnd = min(gap.end, windowEnd)
+                    let clippedDuration = clippedEnd.timeIntervalSince(clippedStart)
+                    if clippedDuration >= gapThreshold {
+                        items.append(.gap(
+                            id: "idle-\(gapIndex)-\(index)",
+                            startTime: clippedStart,
+                            endTime: clippedEnd,
+                            duration: clippedDuration
+                        ))
+                    }
                 }
             }
 
@@ -48,6 +60,34 @@ enum TimelineItem: Identifiable {
         }
 
         return items
+    }
+
+    /// Consolidate idle ActivityRecords into merged time ranges.
+    /// Adjacent or overlapping idle periods become a single gap.
+    private static func consolidateIdlePeriods(_ activities: [ActivityRecord], threshold: TimeInterval) -> [(start: Date, end: Date)] {
+        let idles = activities
+            .filter { $0.isIdle }
+            .compactMap { record -> (start: Date, end: Date)? in
+                let end = record.endTime ?? record.timestamp.addingTimeInterval(record.duration ?? 0)
+                let duration = end.timeIntervalSince(record.timestamp)
+                guard duration >= threshold else { return nil }
+                return (start: record.timestamp, end: end)
+            }
+            .sorted { $0.start < $1.start }
+
+        guard !idles.isEmpty else { return [] }
+
+        // Merge overlapping/adjacent idle periods
+        var merged: [(start: Date, end: Date)] = [idles[0]]
+        for idle in idles.dropFirst() {
+            if idle.start <= merged[merged.count - 1].end {
+                merged[merged.count - 1].end = max(merged[merged.count - 1].end, idle.end)
+            } else {
+                merged.append(idle)
+            }
+        }
+
+        return merged
     }
 }
 
@@ -253,7 +293,7 @@ struct TaskTimelineView: View {
                     .padding(.top, 16)
                     .padding(.bottom, 8)
 
-                    let timelineItems = TimelineItem.build(from: viewModel.tasks)
+                    let timelineItems = TimelineItem.build(from: viewModel.tasks, idleActivities: viewModel.activities)
                     LazyVStack(spacing: 0) {
                         ForEach(Array(timelineItems.enumerated()), id: \.element.id) { index, item in
                             switch item {
