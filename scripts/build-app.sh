@@ -87,6 +87,12 @@ else
     echo "⚠️  No AppIcon.icns found in Resources/ — app will use default icon"
 fi
 
+# Copy logo for setup wizard
+LOGO_SRC="$BUILD_DIR/Resources/logo.png"
+if [ -f "$LOGO_SRC" ]; then
+    cp "$LOGO_SRC" "$APP_BUNDLE/Contents/Resources/logo.png"
+fi
+
 # ─── Bundle Sparkle.framework ────────────────────────────────────
 # SPM builds Sparkle as a dynamic framework; we need to embed it in the .app
 if [ "$BINARY_CHANGED" = true ]; then

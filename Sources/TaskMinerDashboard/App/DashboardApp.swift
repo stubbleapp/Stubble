@@ -39,6 +39,8 @@ struct DashboardApp: App {
                         }
                         viewModel.loadDataForSelectedDate()
                         Analytics.setupCompleted()
+                        // Notify MenuBarController to start daemon + check permissions
+                        NotificationCenter.default.post(name: .setupWizardCompleted, object: nil)
                         withAnimation(.easeInOut(duration: 0.3)) {
                             hasCompletedSetup = true
                         }

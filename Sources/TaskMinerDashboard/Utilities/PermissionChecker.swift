@@ -21,7 +21,10 @@ enum PermissionChecker {
     /// Instead we use CGWindowListCopyWindowInfo, which returns window names and
     /// owner details for other apps ONLY when Screen Recording is granted. Without
     /// permission, window names from other processes come back as nil/empty.
-    /// We check whether any non-own-process window has a non-empty name.
+    ///
+    /// We restrict to **layer 0** (normal application windows) because system
+    /// processes like Dock and WindowServer live at other layers and can report
+    /// window names even without Screen Recording permission — causing false positives.
     static func checkScreenRecording() -> Bool {
         guard let windowList = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] else {
             return false
@@ -30,6 +33,11 @@ enum PermissionChecker {
         for window in windowList {
             guard let ownerPID = window[kCGWindowOwnerPID as String] as? Int32,
                   ownerPID != myPID else { continue }
+            // Only check regular application windows (layer 0).
+            // System chrome (menubar, Dock, Spotlight, etc.) lives at other layers
+            // and can report names without Screen Recording — ignore those.
+            let layer = window[kCGWindowLayer as String] as? Int ?? -1
+            guard layer == 0 else { continue }
             // Without Screen Recording, window names from other apps are nil/empty
             if let name = window[kCGWindowName as String] as? String, !name.isEmpty {
                 return true

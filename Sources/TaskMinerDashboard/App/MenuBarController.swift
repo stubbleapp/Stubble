@@ -30,13 +30,23 @@ final class MenuBarDelegate: NSObject, NSApplicationDelegate {
             self.pauseController = PauseController(dataDirectory: config.dataDirectory)
         }
 
-        // Prompt for required permissions if not already granted.
-        // This runs on every launch so that re-signed builds automatically
-        // re-trigger the system permission dialogs instead of silently failing.
-        requestPermissionsIfNeeded()
-
-        // Start the monitoring daemon (bundled alongside the dashboard binary)
-        startDaemon()
+        // Defer permissions + daemon until after the setup wizard completes.
+        // The wizard has its own permissions page and the daemon triggers
+        // the Screen Recording system dialog — both are confusing during setup.
+        if SettingsManager.shared.hasCompletedSetup {
+            requestPermissionsIfNeeded()
+            startDaemon()
+        } else {
+            // Listen for wizard completion to start daemon + check permissions
+            NotificationCenter.default.addObserver(
+                forName: .setupWizardCompleted, object: nil, queue: .main
+            ) { [weak self] _ in
+                Task { @MainActor in
+                    self?.requestPermissionsIfNeeded()
+                    self?.startDaemon()
+                }
+            }
+        }
 
         // Create the status item with our orange gradient icon
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
@@ -357,4 +367,11 @@ final class MenuBarDelegate: NSObject, NSApplicationDelegate {
     @objc private func quitApp() {
         NSApp.terminate(nil)
     }
+}
+
+// MARK: - Notifications
+
+extension Notification.Name {
+    /// Posted by the setup wizard when the user completes initial setup.
+    static let setupWizardCompleted = Notification.Name("setupWizardCompleted")
 }

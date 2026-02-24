@@ -1,5 +1,6 @@
 import SwiftUI
 import ServiceManagement
+import AppKit
 import TaskMinerShared
 
 /// First-launch setup wizard that guides the user through:
@@ -13,6 +14,12 @@ struct SetupWizardView: View {
 
     @State private var currentPage = 0
     @State private var permissionsGranted = false
+
+    // API key validation (owned here so Continue button can trigger it)
+    @State private var isValidating = false
+    @State private var apiKeyError: String?
+    @State private var apiKeyValidated = false
+
     private let totalPages = 4
 
     var body: some View {
@@ -21,7 +28,7 @@ struct SetupWizardView: View {
             Group {
                 switch currentPage {
                 case 0: WelcomePage()
-                case 1: ApiKeyPage()
+                case 1: ApiKeyPage(error: apiKeyError, isValidating: isValidating)
                 case 2: PermissionsPage(allGranted: $permissionsGranted)
                 case 3: PreferencesPage(onComplete: finish)
                 default: EmptyView()
@@ -56,26 +63,30 @@ struct SetupWizardView: View {
                     Spacer()
 
                     if currentPage < totalPages - 1 {
-                        let canAdvance = currentPage != 2 || permissionsGranted
                         Button {
-                            withAnimation(.easeInOut(duration: 0.25)) {
-                                currentPage += 1
-                            }
+                            handleContinue()
                         } label: {
                             HStack(spacing: 4) {
-                                Text(currentPage == 0 ? "Get Started" : "Continue")
-                                Image(systemName: "arrow.right")
-                                    .font(.system(size: 11, weight: .semibold))
+                                if isValidating {
+                                    ProgressView()
+                                        .controlSize(.small)
+                                        .tint(.white)
+                                    Text("Verifying…")
+                                } else {
+                                    Text(currentPage == 0 ? "Get Started" : "Continue")
+                                    Image(systemName: "arrow.right")
+                                        .font(.system(size: 11, weight: .semibold))
+                                }
                             }
                             .font(.system(size: 13, weight: .semibold))
                             .foregroundStyle(.white)
                             .padding(.horizontal, 20)
                             .padding(.vertical, 8)
-                            .background(canAdvance ? Theme.accent : Theme.accent.opacity(0.35))
+                            .background(continueButtonEnabled ? Theme.accent : Theme.accent.opacity(0.35))
                             .clipShape(Capsule())
                         }
                         .buttonStyle(.plain)
-                        .disabled(!canAdvance)
+                        .disabled(!continueButtonEnabled)
                     }
                 }
             }
@@ -84,6 +95,70 @@ struct SetupWizardView: View {
         }
         .frame(width: 560, height: 480)
         .background(Theme.primaryBackground)
+    }
+
+    private var continueButtonEnabled: Bool {
+        switch currentPage {
+        case 1:
+            let hasKey = !(SettingsManager.shared.geminiApiKey ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            return hasKey && !isValidating
+        case 2:
+            return permissionsGranted
+        default:
+            return true
+        }
+    }
+
+    private func handleContinue() {
+        if currentPage == 1 {
+            validateApiKeyThenAdvance()
+        } else {
+            advance()
+        }
+    }
+
+    private func advance() {
+        withAnimation(.easeInOut(duration: 0.25)) {
+            currentPage += 1
+        }
+    }
+
+    private func validateApiKeyThenAdvance() {
+        let key = (SettingsManager.shared.geminiApiKey ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !key.isEmpty else {
+            apiKeyError = "Please enter your API key first."
+            return
+        }
+
+        isValidating = true
+        apiKeyError = nil
+
+        Task {
+            do {
+                guard let client = GeminiClient.fromAPIKey(key) else {
+                    isValidating = false
+                    apiKeyError = "Invalid key format."
+                    return
+                }
+                let _ = try await client.generateText(
+                    prompt: "Reply with the single word: ok",
+                    systemInstruction: nil
+                )
+                isValidating = false
+                apiKeyValidated = true
+                advance()
+            } catch {
+                isValidating = false
+                let desc = error.localizedDescription.lowercased()
+                if desc.contains("403") || desc.contains("401") || desc.contains("api key") || desc.contains("permission") {
+                    apiKeyError = "This API key is invalid. Please check it and try again."
+                } else if desc.contains("timeout") || desc.contains("network") || desc.contains("internet") {
+                    apiKeyError = "Network error — check your internet connection and try again."
+                } else {
+                    apiKeyError = "Could not verify the key — please try again."
+                }
+            }
+        }
     }
 
     private func finish() {
@@ -99,53 +174,112 @@ private struct WelcomePage: View {
         VStack(spacing: 0) {
             Spacer()
 
-            // Icon
-            Image(systemName: "sparkle.magnifyingglass")
-                .font(.system(size: 48, weight: .thin))
-                .foregroundStyle(Theme.accent)
-                .padding(.bottom, 16)
+            // Logo
+            if let logo = Self.loadLogo() {
+                Image(nsImage: logo)
+                    .resizable()
+                    .aspectRatio(contentMode: .fit)
+                    .frame(height: 40)
+                    .padding(.bottom, 20)
+            }
 
             Text("Welcome to Stubble")
                 .font(.system(size: 24, weight: .semibold))
                 .foregroundStyle(Theme.textPrimary)
                 .padding(.bottom, 6)
 
-            Text("Understand how you spend your time on your Mac.")
-                .font(.system(size: 14))
+            Text("An AI time tracker for macOS that watches what you do\nand turns it into clear tasks, project breakdowns, and tips.")
+                .font(.system(size: 13))
                 .foregroundStyle(Theme.textSecondary)
+                .multilineTextAlignment(.center)
+                .lineSpacing(2)
                 .padding(.bottom, 28)
+                .padding(.horizontal, 40)
 
-            // Privacy cards
-            VStack(spacing: 12) {
-                InfoRow(
-                    icon: "desktopcomputer",
-                    title: "Processed Locally",
-                    detail: "Screenshots, OCR text, and window titles are captured and stored on your Mac. Nothing leaves your device without your knowledge."
-                )
-                InfoRow(
-                    icon: "brain",
-                    title: "AI-Powered Summaries",
-                    detail: "Window titles and OCR text are sent to Google Gemini to generate task summaries. Screenshots are never sent to any server."
-                )
-                InfoRow(
-                    icon: "lock.shield",
-                    title: "You're in Control",
-                    detail: "Pause monitoring any time, delete any screenshot or task, and all data stays in your local Application Support folder."
-                )
+            // Privacy cards — Grid guarantees all icons share
+            // a single column width so the text column aligns perfectly.
+            Grid(alignment: .topLeading, horizontalSpacing: 12, verticalSpacing: 12) {
+                GridRow {
+                    Image(systemName: "desktopcomputer")
+                        .font(.system(size: 16))
+                        .symbolRenderingMode(.monochrome)
+                        .foregroundStyle(Theme.accent)
+                        .gridColumnAlignment(.center)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Processed Locally")
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundStyle(Theme.textPrimary)
+                        Text("Screenshots are captured and stored on your Mac. They never leave your computer.")
+                            .font(.system(size: 12))
+                            .foregroundStyle(Theme.textSecondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+                GridRow {
+                    Image(systemName: "brain")
+                        .font(.system(size: 16))
+                        .symbolRenderingMode(.monochrome)
+                        .foregroundStyle(Theme.accent)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("AI-Powered Insights")
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundStyle(Theme.textPrimary)
+                        Text("Text extracted from screenshots and window titles is sent to AI to generate your tasks and insights. No images or files are ever transmitted.")
+                            .font(.system(size: 12))
+                            .foregroundStyle(Theme.textSecondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+                GridRow {
+                    Image(systemName: "lock.shield")
+                        .font(.system(size: 16))
+                        .symbolRenderingMode(.monochrome)
+                        .foregroundStyle(Theme.accent)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("You're in Control")
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundStyle(Theme.textPrimary)
+                        Text("No accounts, no sign-ups, no tracking. You use your own API key directly. Delete anything at any time.")
+                            .font(.system(size: 12))
+                            .foregroundStyle(Theme.textSecondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
             }
             .padding(.horizontal, 40)
 
             Spacer()
         }
     }
+
+    /// Load the Stubble logo from the app bundle or development Resources directory.
+    private static func loadLogo() -> NSImage? {
+        // 1) App bundle — standard location
+        if let path = Bundle.main.path(forResource: "logo", ofType: "png") {
+            return NSImage(contentsOfFile: path)
+        }
+        // 2) Development — look relative to the binary's package checkout
+        let binaryPath = ProcessInfo.processInfo.arguments[0]
+        let binaryDir = (binaryPath as NSString).deletingLastPathComponent
+        for ancestor in ["../../..", "../../../.."] {
+            let candidate = (binaryDir as NSString).appendingPathComponent("\(ancestor)/Resources/logo.png")
+            let resolved = (candidate as NSString).standardizingPath
+            if FileManager.default.fileExists(atPath: resolved) {
+                return NSImage(contentsOfFile: resolved)
+            }
+        }
+        return nil
+    }
 }
 
 // MARK: - Page 2: API Key
 
 private struct ApiKeyPage: View {
+    let error: String?
+    let isValidating: Bool
+
     @State private var apiKey: String = ""
     @State private var showKey = false
-    @State private var saved = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -161,7 +295,7 @@ private struct ApiKeyPage: View {
                 .foregroundStyle(Theme.textPrimary)
                 .padding(.bottom, 6)
 
-            Text("Stubble uses Google Gemini to turn your raw activity into meaningful tasks.\nA free API key is all you need.")
+            Text("Stubble requires a Google Gemini API key to work.\nIt's free and takes less than a minute to set up.")
                 .font(.system(size: 13))
                 .foregroundStyle(Theme.textSecondary)
                 .multilineTextAlignment(.center)
@@ -169,14 +303,37 @@ private struct ApiKeyPage: View {
                 .padding(.bottom, 24)
                 .padding(.horizontal, 40)
 
-            // Key input
-            VStack(alignment: .leading, spacing: 10) {
+            VStack(alignment: .leading, spacing: 14) {
+                // Step-by-step instructions
+                VStack(alignment: .leading, spacing: 8) {
+                    SetupStep(number: "1", text: "Open Google AI Studio and sign in with Google")
+                    SetupStep(number: "2", text: "Click \"Create API Key\" and copy it")
+                    SetupStep(number: "3", text: "Paste the key below")
+                }
+
+                Button {
+                    if let url = URL(string: "https://aistudio.google.com/apikey") {
+                        NSWorkspace.shared.open(url)
+                    }
+                } label: {
+                    HStack(spacing: 4) {
+                        Image(systemName: "arrow.up.right.square")
+                            .font(.system(size: 10))
+                        Text("Open Google AI Studio")
+                            .font(.system(size: 12))
+                    }
+                    .foregroundStyle(Theme.accent)
+                }
+                .buttonStyle(.plain)
+                .padding(.bottom, 2)
+
+                // Key input
                 HStack(spacing: 8) {
                     Group {
                         if showKey {
-                            TextField("Paste your Gemini API key", text: $apiKey)
+                            TextField("Paste your API key here", text: $apiKey)
                         } else {
-                            SecureField("Paste your Gemini API key", text: $apiKey)
+                            SecureField("Paste your API key here", text: $apiKey)
                         }
                     }
                     .textFieldStyle(.plain)
@@ -196,51 +353,18 @@ private struct ApiKeyPage: View {
                             .clipShape(Circle())
                     }
                     .buttonStyle(.plain)
-
-                    Button {
-                        SettingsManager.shared.geminiApiKey = apiKey
-                        saved = true
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 2) { saved = false }
-                    } label: {
-                        HStack(spacing: 4) {
-                            if saved {
-                                Image(systemName: "checkmark")
-                                    .font(.system(size: 10, weight: .bold))
-                            }
-                            Text(saved ? "Saved" : "Save")
-                        }
-                        .font(.system(size: 12, weight: .medium))
-                        .foregroundStyle(.white)
-                        .padding(.horizontal, 14)
-                        .padding(.vertical, 7)
-                        .background(saved ? Theme.statusActive : Theme.accent)
-                        .clipShape(Capsule())
-                    }
-                    .buttonStyle(.plain)
-                    .disabled(apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                    .opacity(apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? 0.5 : 1)
-                    .animation(.easeInOut(duration: 0.2), value: saved)
                 }
 
-                Button {
-                    if let url = URL(string: "https://aistudio.google.com/apikey") {
-                        NSWorkspace.shared.open(url)
-                    }
-                } label: {
-                    HStack(spacing: 4) {
-                        Image(systemName: "arrow.up.right.square")
-                            .font(.system(size: 10))
-                        Text("Get a free key from Google AI Studio")
+                // Error message
+                if let error {
+                    HStack(spacing: 6) {
+                        Image(systemName: "exclamationmark.circle.fill")
+                            .font(.system(size: 12))
+                        Text(error)
                             .font(.system(size: 12))
                     }
-                    .foregroundStyle(Theme.accent)
+                    .foregroundStyle(Theme.statusError)
                 }
-                .buttonStyle(.plain)
-
-                Text("Without an API key, activity tracking still works but task summaries, project grouping, and chat will be unavailable. You can add a key later in Settings.")
-                    .font(.caption2)
-                    .foregroundStyle(Theme.textMuted)
-                    .lineSpacing(2)
             }
             .padding(.horizontal, 60)
 
@@ -248,6 +372,35 @@ private struct ApiKeyPage: View {
         }
         .onAppear {
             apiKey = SettingsManager.shared.geminiApiKey ?? ""
+        }
+        .onChange(of: apiKey) { _, newValue in
+            // Save to SettingsManager so parent can read it for validation
+            let trimmed = newValue.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !trimmed.isEmpty {
+                SettingsManager.shared.geminiApiKey = trimmed
+            }
+        }
+    }
+}
+
+/// Numbered step label for the API key instructions.
+private struct SetupStep: View {
+    let number: String
+    let text: String
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 10) {
+            Text(number)
+                .font(.system(size: 11, weight: .bold, design: .rounded))
+                .foregroundStyle(.white)
+                .frame(width: 20, height: 20)
+                .background(Theme.accent.opacity(0.8))
+                .clipShape(Circle())
+
+            Text(text)
+                .font(.system(size: 12))
+                .foregroundStyle(Theme.textSecondary)
+                .padding(.top, 2)
         }
     }
 }
@@ -289,7 +442,6 @@ private struct PermissionsPage: View {
                     detail: "Reads window titles so Stubble knows which app and document you're working in.",
                     granted: accessibilityGranted,
                     action: {
-                        // Prompt the system trust dialog
                         _ = PermissionChecker.checkAccessibility(promptIfNeeded: true)
                         PermissionChecker.openAccessibilitySettings()
                     }
@@ -301,7 +453,6 @@ private struct PermissionsPage: View {
                     detail: "Captures periodic screenshots for OCR. Screenshots stay on your Mac and are never uploaded.",
                     granted: screenRecordingGranted,
                     action: {
-                        // Request via the system API (shows dialog), then open Settings as fallback
                         CGRequestScreenCaptureAccess()
                         PermissionChecker.openScreenRecordingSettings()
                     }
@@ -433,31 +584,6 @@ private struct PreferencesPage: View {
 }
 
 // MARK: - Reusable Components
-
-private struct InfoRow: View {
-    let icon: String
-    let title: String
-    let detail: String
-
-    var body: some View {
-        HStack(alignment: .top, spacing: 14) {
-            Image(systemName: icon)
-                .font(.system(size: 18, weight: .medium))
-                .foregroundStyle(Theme.accent)
-                .frame(width: 28, height: 28)
-
-            VStack(alignment: .leading, spacing: 2) {
-                Text(title)
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(Theme.textPrimary)
-                Text(detail)
-                    .font(.system(size: 12))
-                    .foregroundStyle(Theme.textSecondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-        }
-    }
-}
 
 private struct PermissionRow: View {
     let icon: String
