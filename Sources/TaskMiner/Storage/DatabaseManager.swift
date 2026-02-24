@@ -463,22 +463,48 @@ class DatabaseManager {
 
     // MARK: - Cleanup
 
-    /// Delete all screenshot rows with timestamp before the given date (e.g. start of today).
-    /// Used to keep only the current day's screenshots.
-    func deleteScreenshots(before cutoff: Date) {
-        guard db != nil else { return }
-        let cutoffStr = SharedFormatters.iso8601.string(from: cutoff)
-        let sql = "DELETE FROM screenshots WHERE timestamp < ?"
-        var stmt: OpaquePointer?
-        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return }
-        defer { sqlite3_finalize(stmt) }
-        sqliteBindText(stmt, 1, cutoffStr)
-        if sqlite3_step(stmt) == SQLITE_DONE {
-            let deleted = sqlite3_changes(db)
-            if deleted > 0 {
-                Logger.info("Deleted \(deleted) screenshot record(s) from previous days")
+    /// Delete the oldest screenshot rows, keeping only the most recent `keep` entries.
+    /// Returns the file paths of deleted rows so the caller can remove the files from disk.
+    func deleteScreenshotsKeepingLatest(_ keep: Int) -> [String] {
+        guard db != nil else { return [] }
+
+        // 1. Collect file paths of rows that will be deleted
+        let selectSql = """
+        SELECT file_path FROM screenshots
+        WHERE id NOT IN (SELECT id FROM screenshots ORDER BY timestamp DESC LIMIT ?)
+        """
+        var selectStmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, selectSql, -1, &selectStmt, nil) == SQLITE_OK else { return [] }
+        defer { sqlite3_finalize(selectStmt) }
+        sqlite3_bind_int(selectStmt, 1, Int32(keep))
+
+        var paths: [String] = []
+        while sqlite3_step(selectStmt) == SQLITE_ROW {
+            if let cStr = sqlite3_column_text(selectStmt, 0) {
+                paths.append(String(cString: cStr))
             }
         }
+
+        guard !paths.isEmpty else { return [] }
+
+        // 2. Delete the rows
+        let deleteSql = """
+        DELETE FROM screenshots
+        WHERE id NOT IN (SELECT id FROM screenshots ORDER BY timestamp DESC LIMIT ?)
+        """
+        var deleteStmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, deleteSql, -1, &deleteStmt, nil) == SQLITE_OK else { return [] }
+        defer { sqlite3_finalize(deleteStmt) }
+        sqlite3_bind_int(deleteStmt, 1, Int32(keep))
+
+        if sqlite3_step(deleteStmt) == SQLITE_DONE {
+            let deleted = sqlite3_changes(db)
+            if deleted > 0 {
+                Logger.info("Deleted \(deleted) screenshot record(s) (keeping latest \(keep))")
+            }
+        }
+
+        return paths
     }
 
     deinit {

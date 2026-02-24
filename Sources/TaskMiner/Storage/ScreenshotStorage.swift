@@ -50,45 +50,42 @@ class ScreenshotStorage {
         try? FileManager.default.attributesOfItem(atPath: path.path)[.size] as? Int
     }
 
-    /// Remove screenshot files and folders for any day that is not today.
-    /// Keeps only the current day to limit disk usage.
-    func cleanupKeepingOnlyToday() {
+    /// Remove specific screenshot files from disk by their relative paths.
+    /// Also removes empty parent directories left behind.
+    func cleanupFiles(relativePaths: [String]) {
         let fm = FileManager.default
-        let todayStr = Self.dayDirFmt.string(from: Calendar.current.startOfDay(for: Date()))
+        var emptyDirCandidates: Set<URL> = []
 
-        guard let yearDirs = try? fm.contentsOfDirectory(
-            at: directory, includingPropertiesForKeys: [.isDirectoryKey]
-        ) else { return }
-
-        for yearDir in yearDirs {
-            guard (try? yearDir.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true else { continue }
-            guard let monthDirs = try? fm.contentsOfDirectory(
-                at: yearDir, includingPropertiesForKeys: [.isDirectoryKey]
-            ) else { continue }
-
-            for monthDir in monthDirs {
-                guard (try? monthDir.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true else { continue }
-                guard let dayDirs = try? fm.contentsOfDirectory(
-                    at: monthDir, includingPropertiesForKeys: [.isDirectoryKey]
-                ) else { continue }
-
-                for dayDir in dayDirs {
-                    guard (try? dayDir.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true else { continue }
-                    let components = dayDir.pathComponents
-                    let count = components.count
-                    guard count >= 3 else { continue }
-                    let dateStr = "\(components[count-3])/\(components[count-2])/\(components[count-1])"
-                    if dateStr == todayStr { continue }
-
-                    do {
-                        try fm.removeItem(at: dayDir)
-                        Logger.info("Cleaned up screenshots for \(dateStr) (keeping only today)")
-                    } catch {
-                        Logger.warning("Failed to clean up \(dateStr): \(error)")
-                    }
-                }
+        for relPath in relativePaths {
+            let fullPath = directory.appendingPathComponent(relPath)
+            do {
+                try fm.removeItem(at: fullPath)
+                // Track parent dirs for cleanup
+                emptyDirCandidates.insert(fullPath.deletingLastPathComponent())
+            } catch {
+                Logger.debug("Failed to remove screenshot file \(relPath): \(error.localizedDescription)")
             }
         }
+
+        // Remove empty day/month/year directories bottom-up
+        for dayDir in emptyDirCandidates {
+            removeIfEmpty(dayDir, fm: fm)
+            let monthDir = dayDir.deletingLastPathComponent()
+            removeIfEmpty(monthDir, fm: fm)
+            let yearDir = monthDir.deletingLastPathComponent()
+            removeIfEmpty(yearDir, fm: fm)
+        }
+
+        if !relativePaths.isEmpty {
+            Logger.info("Cleaned up \(relativePaths.count) screenshot file(s)")
+        }
+    }
+
+    private func removeIfEmpty(_ dir: URL, fm: FileManager) {
+        // Don't remove the root screenshots directory
+        guard dir != directory else { return }
+        guard let contents = try? fm.contentsOfDirectory(atPath: dir.path), contents.isEmpty else { return }
+        try? fm.removeItem(at: dir)
     }
 
 }

@@ -58,48 +58,57 @@ final class MenuBarDelegate: NSObject, NSApplicationDelegate {
 
     // MARK: - Permissions
 
-    /// Prompt the user for Accessibility and Screen Recording permissions if not already granted.
-    /// Called on every launch so that re-signed builds automatically trigger the system dialogs.
-    /// If permissions are missing, polls until granted and then restarts the daemon so it picks
-    /// up the new TCC grants (macOS caches permission checks per-process).
+    /// Check permissions on every launch. If missing, show an alert directing the
+    /// user to System Settings and open the relevant pane. Polls until granted,
+    /// then restarts the daemon so it picks up the new TCC grants.
+    ///
+    /// NOTE: CGRequestScreenCaptureAccess() and AXIsProcessTrustedWithOptions(prompt:true)
+    /// only show system dialogs for a *brand-new* executable. After a rebuild with a new
+    /// ad-hoc signature, they silently do nothing. We always open System Settings directly
+    /// and show our own alert so the user knows what to do.
     private func requestPermissionsIfNeeded() {
-        // Accessibility: AXIsProcessTrustedWithOptions with prompt=true shows the system dialog
         let hasAccessibility = PermissionChecker.checkAccessibility(promptIfNeeded: true)
-
-        // Screen Recording: CGRequestScreenCaptureAccess shows the system dialog (first time only)
         let hasScreenRecording = Self.testScreenRecordingPermission()
-        if !hasScreenRecording {
-            CGRequestScreenCaptureAccess()
 
-            // CGRequestScreenCaptureAccess silently does nothing when there's a stale TCC
-            // entry from a previous code signature. Open System Settings as fallback.
-            DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
-                if !Self.testScreenRecordingPermission() {
-                    PermissionChecker.openScreenRecordingSettings()
-                }
+        Logger.info("Permission check at launch — Accessibility: \(hasAccessibility ? "✅" : "❌"), Screen Recording: \(hasScreenRecording ? "✅" : "❌")")
+
+        guard !hasAccessibility || !hasScreenRecording else { return }
+
+        // Build a list of what's missing
+        var missing: [String] = []
+        if !hasAccessibility { missing.append("Accessibility") }
+        if !hasScreenRecording { missing.append("Screen Recording") }
+
+        // Show an alert so the user knows they need to act
+        let alert = NSAlert()
+        alert.messageText = "Stubble needs permissions"
+        alert.informativeText = "Please grant \(missing.joined(separator: " and ")) in System Settings.\n\nIf Stubble is already in the list, remove it and re-add it (the app was updated)."
+        alert.alertStyle = .warning
+        alert.addButton(withTitle: "Open System Settings")
+        alert.addButton(withTitle: "Later")
+
+        let response = alert.runModal()
+        if response == .alertFirstButtonReturn {
+            // Open the first missing permission pane
+            if !hasScreenRecording {
+                PermissionChecker.openScreenRecordingSettings()
+            } else {
+                PermissionChecker.openAccessibilitySettings()
             }
         }
 
-        Logger.info("Permission check at launch — Accessibility: \(hasAccessibility ? "✅" : "⏳ prompted"), Screen Recording: \(hasScreenRecording ? "✅" : "⏳ prompted")")
-
-        // If either permission is missing, poll every 2 seconds until both are granted,
-        // then restart the daemon so it inherits the new TCC grants.
-        if !hasAccessibility || !hasScreenRecording {
-            var permissionPollTimer: Timer?
-            permissionPollTimer = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: true) { [weak self] _ in
-                Task { @MainActor in
-                    let acc = PermissionChecker.checkAccessibility(promptIfNeeded: false)
-                    // IMPORTANT: CGPreflightScreenCaptureAccess() caches its result per-process
-                    // and never reflects newly-granted permissions. Instead, attempt an actual
-                    // 1×1 test capture which queries macOS TCC in real time.
-                    let scr = Self.testScreenRecordingPermission()
-                    if acc && scr {
-                        permissionPollTimer?.invalidate()
-                        permissionPollTimer = nil
-                        Logger.info("All permissions granted — restarting daemon to apply")
-                        self?.stopDaemon()
-                        self?.startDaemon()
-                    }
+        // Poll every 2 seconds until both are granted, then restart daemon
+        var permissionPollTimer: Timer?
+        permissionPollTimer = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: true) { [weak self] _ in
+            Task { @MainActor in
+                let acc = PermissionChecker.checkAccessibility(promptIfNeeded: false)
+                let scr = Self.testScreenRecordingPermission()
+                if acc && scr {
+                    permissionPollTimer?.invalidate()
+                    permissionPollTimer = nil
+                    Logger.info("All permissions granted — restarting daemon to apply")
+                    self?.stopDaemon()
+                    self?.startDaemon()
                 }
             }
         }
@@ -141,13 +150,13 @@ final class MenuBarDelegate: NSObject, NSApplicationDelegate {
 
         guard let icon = rawIcon else { return }
 
-        // Composite onto a solid dark rounded-rect background so the Dock icon isn't transparent
+        // Composite onto an off-white rounded-rect background matching the app's warm cream theme
         let size: CGFloat = 1024
         let composited = NSImage(size: NSSize(width: size, height: size), flipped: false) { rect in
             guard let ctx = NSGraphicsContext.current?.cgContext else { return false }
 
-            // Dark background matching the app's theme
-            let bgColor = CGColor(red: 0.08, green: 0.08, blue: 0.10, alpha: 1.0)
+            // Off-white background matching the app's warm cream palette (RGB ~247,247,243)
+            let bgColor = CGColor(red: 0.969, green: 0.969, blue: 0.953, alpha: 1.0)
             let cornerRadius = size * 0.22 // macOS squircle-like rounding
             let bgPath = CGPath(roundedRect: rect, cornerWidth: cornerRadius, cornerHeight: cornerRadius, transform: nil)
             ctx.addPath(bgPath)

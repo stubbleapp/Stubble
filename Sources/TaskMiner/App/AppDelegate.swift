@@ -277,18 +277,20 @@ class AppDelegate {
             }
         }
 
-        // 4. Daily summary at midnight rollover
+        // 4. Daily summary at midnight rollover + screenshot cap
         let today = todayString()
         if today != lastSummaryDate {
             // Generate summary for yesterday
             if let yesterday = Calendar.current.date(byAdding: .day, value: -1, to: Date()) {
                 db.generateDailySummary(for: yesterday)
             }
-            // Keep only current day: delete screenshot DB rows and files from previous days
-            let startOfToday = Calendar.current.startOfDay(for: Date())
-            db.deleteScreenshots(before: startOfToday)
-            screenshotStorage.cleanupKeepingOnlyToday()
             lastSummaryDate = today
+        }
+
+        // 5. Cap screenshots: keep only the latest 100 (DB rows + files)
+        let deletedPaths = db.deleteScreenshotsKeepingLatest(100)
+        if !deletedPaths.isEmpty {
+            screenshotStorage.cleanupFiles(relativePaths: deletedPaths)
         }
     }
 

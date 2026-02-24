@@ -43,6 +43,12 @@ final class DashboardViewModel {
     var activitiesError: String?
     var activityGenerator: ProjectActivityGenerator?
 
+    // Recommendations (AI-generated, ephemeral)
+    var recommendations: [Recommendation] = []
+    var isGeneratingRecommendations = false
+    var recommendationsError: String?
+    var recommendationGenerator: RecommendationGenerator?
+
     // Expand state — only one item expanded at a time across the whole screen.
     // Setting one to a value automatically means the others are collapsed.
     var expandedTaskId: Int64?
@@ -91,11 +97,13 @@ final class DashboardViewModel {
             self.geminiClient = client
             self.taskSummarizer = TaskSummarizer(geminiClient: client)
             self.activityGenerator = ProjectActivityGenerator(geminiClient: client)
+            self.recommendationGenerator = RecommendationGenerator(geminiClient: client)
             self.hasGeminiKey = true
         } else {
             self.geminiClient = nil
             self.taskSummarizer = nil
             self.activityGenerator = nil
+            self.recommendationGenerator = nil
             self.hasGeminiKey = false
         }
 
@@ -244,11 +252,13 @@ final class DashboardViewModel {
             self.geminiClient = client
             self.taskSummarizer = TaskSummarizer(geminiClient: client)
             self.activityGenerator = ProjectActivityGenerator(geminiClient: client)
+            self.recommendationGenerator = RecommendationGenerator(geminiClient: client)
             self.hasGeminiKey = true
         } else {
             self.geminiClient = nil
             self.taskSummarizer = nil
             self.activityGenerator = nil
+            self.recommendationGenerator = nil
             self.hasGeminiKey = false
         }
     }

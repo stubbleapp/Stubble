@@ -16,7 +16,7 @@ struct ContentView: View {
     @State private var showScreensTab = SettingsManager.shared.showScreensTab
 
     private var tabItems: [String] {
-        var items = ["Timeline", "Activities"]
+        var items = ["Timeline", "Activities", "Tips"]
         if showScreensTab { items.append("Screens") }
         return items
     }
@@ -54,6 +54,11 @@ struct ContentView: View {
                     ActivitiesView()
                     ChatOverlayView()
                 }
+            case 2:
+                ZStack(alignment: .bottom) {
+                    RecommendationsView()
+                    ChatOverlayView()
+                }
             default:
                 ScreenshotBrowserView()
             }
@@ -66,7 +71,7 @@ struct ContentView: View {
                     items: tabItems,
                     selection: $selectedTab
                 )
-                .frame(maxWidth: 400)
+                .frame(maxWidth: 500)
             }
 
             ToolbarItem(placement: .primaryAction) {
