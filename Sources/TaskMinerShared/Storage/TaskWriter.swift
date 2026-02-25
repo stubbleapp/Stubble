@@ -208,6 +208,48 @@ public class TaskWriter {
         }
     }
 
+    // MARK: - Chat Messages
+
+    /// Insert a single chat message record into the database.
+    @discardableResult
+    public func insertChatMessage(_ message: ChatMessageRecord) throws -> Int64 {
+        let sql = """
+        INSERT INTO chat_messages (date, role, content, timestamp)
+        VALUES (?, ?, ?, ?)
+        """
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
+            throw DatabaseError.executionFailed(lastError)
+        }
+        defer { sqlite3_finalize(stmt) }
+
+        sqliteBindText(stmt, 1, message.date)
+        sqliteBindText(stmt, 2, message.role)
+        sqliteBindText(stmt, 3, message.content)
+        sqliteBindText(stmt, 4, SharedFormatters.iso8601.string(from: message.timestamp))
+
+        guard sqlite3_step(stmt) == SQLITE_DONE else {
+            throw DatabaseError.executionFailed(lastError)
+        }
+        return sqlite3_last_insert_rowid(db)
+    }
+
+    /// Delete all chat messages for a given date.
+    public func deleteChatMessages(for dateString: String) throws {
+        let sql = "DELETE FROM chat_messages WHERE date = ?"
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
+            throw DatabaseError.executionFailed(lastError)
+        }
+        defer { sqlite3_finalize(stmt) }
+
+        sqliteBindText(stmt, 1, dateString)
+
+        guard sqlite3_step(stmt) == SQLITE_DONE else {
+            throw DatabaseError.executionFailed(lastError)
+        }
+    }
+
     // MARK: - Screenshot Deletion
 
     /// Delete screenshot records by their IDs (single or bulk).

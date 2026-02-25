@@ -11,6 +11,30 @@ extension DashboardViewModel {
         return f
     }()
 
+    /// The date string for the currently selected date (yyyy-MM-dd).
+    private var selectedDateString: String {
+        SharedFormatters.dayFormatter.string(from: selectedDate)
+    }
+
+    /// Load persisted chat messages for the selected date.
+    func loadChatHistory() {
+        guard let db = dbReader else { return }
+        let records = db.chatMessages(for: selectedDate)
+        chatMessages = records.map { ChatMessage(from: $0) }
+    }
+
+    /// Persist a single message to the database and store its row ID.
+    private func persistMessage(_ message: ChatMessage) {
+        guard let writer = taskWriter else { return }
+        let record = message.toRecord(date: selectedDateString)
+        do {
+            let rowId = try writer.insertChatMessage(record)
+            message.dbId = rowId
+        } catch {
+            Logger.error("Failed to persist chat message: \(error.localizedDescription)")
+        }
+    }
+
     func sendChatMessage(_ text: String) {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
@@ -19,7 +43,10 @@ extension DashboardViewModel {
             return
         }
 
-        chatMessages.append(ChatMessage(role: .user, content: trimmed))
+        let userMessage = ChatMessage(role: .user, content: trimmed)
+        chatMessages.append(userMessage)
+        persistMessage(userMessage)
+
         isChatLoading = true
         chatError = nil
         Analytics.chatMessageSent()
@@ -28,6 +55,11 @@ extension DashboardViewModel {
         let taskContext = buildChatTaskContext()
         let memoryContext = memoryStore.contextString()
         let history = buildConversationHistory()
+        let screenContext = currentScreen
+
+        // Create empty assistant message for streaming
+        let assistantMessage = ChatMessage(role: .assistant, content: "", isStreaming: true)
+        chatMessages.append(assistantMessage)
 
         Task {
             do {
@@ -48,23 +80,38 @@ extension DashboardViewModel {
                 Today's tasks and activity context:
                 \(taskContext)
                 \(memoryContext.map { "User context: \($0)" } ?? "")
+                The user is currently viewing the "\(screenContext)" screen.
 
                 \(trimmed)
                 """
 
-                let response = try await client.generateText(
+                for try await chunk in client.streamGenerateText(
                     prompt: prompt,
                     systemInstruction: systemInstruction,
                     conversationHistory: history
-                )
+                ) {
+                    assistantMessage.content += chunk
+                }
 
-                self.chatMessages.append(ChatMessage(role: .assistant, content: response))
+                assistantMessage.isStreaming = false
+                self.isChatLoading = false
+
+                // Persist the complete assistant message
+                self.persistMessage(assistantMessage)
+
                 // Keep chat history bounded to prevent unbounded memory growth
                 if self.chatMessages.count > 50 {
                     self.chatMessages.removeFirst(self.chatMessages.count - 50)
                 }
-                self.isChatLoading = false
             } catch {
+                // Remove the empty assistant message on error
+                if assistantMessage.content.isEmpty {
+                    self.chatMessages.removeAll { $0.id == assistantMessage.id }
+                } else {
+                    // Keep partial content but mark streaming as done
+                    assistantMessage.isStreaming = false
+                    self.persistMessage(assistantMessage)
+                }
                 self.chatError = error.localizedDescription
                 self.isChatLoading = false
             }
@@ -75,6 +122,11 @@ extension DashboardViewModel {
         chatMessages = []
         chatError = nil
         isChatLoading = false
+
+        // Also clear from database
+        if let writer = taskWriter {
+            try? writer.deleteChatMessages(for: selectedDateString)
+        }
     }
 
     /// Build a text block summarizing the current day's tasks, activities, and window titles for chat context.
@@ -154,8 +206,8 @@ extension DashboardViewModel {
     /// Build Gemini-compatible conversation history from previous messages (excluding the latest user message).
     /// Limits to the most recent 20 messages to avoid exceeding Gemini's context window.
     func buildConversationHistory() -> [[String: Any]]? {
-        // All messages except the last one (which is the new user message sent as the prompt)
-        let previous = chatMessages.dropLast()
+        // All messages except the last two (the new user message and the empty streaming assistant message)
+        let previous = chatMessages.dropLast(2)
         guard !previous.isEmpty else { return nil }
 
         // Keep only the last 20 messages to stay within token limits

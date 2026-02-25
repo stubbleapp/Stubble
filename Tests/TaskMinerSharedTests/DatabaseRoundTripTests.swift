@@ -481,6 +481,74 @@ final class DatabaseRoundTripTests: XCTestCase {
         XCTAssertTrue(reader.projectActivities(for: date).isEmpty)
     }
 
+    // MARK: - Chat Message Round Trip
+
+    @MainActor
+    func testChatMessageWriteAndRead() throws {
+        let reader = try createSchema()
+        let writer = try TaskWriter(path: dbPath)
+
+        let date = SharedFormatters.dayFormatter.date(from: "2025-06-15")!
+        let now = Date()
+
+        let message = ChatMessageRecord(
+            date: "2025-06-15",
+            role: "user",
+            content: "What did I work on today?",
+            timestamp: now
+        )
+
+        let id = try writer.insertChatMessage(message)
+        XCTAssertGreaterThan(id, 0)
+
+        let loaded = reader.chatMessages(for: date)
+        XCTAssertEqual(loaded.count, 1)
+        XCTAssertEqual(loaded[0].date, "2025-06-15")
+        XCTAssertEqual(loaded[0].role, "user")
+        XCTAssertEqual(loaded[0].content, "What did I work on today?")
+        XCTAssertNotNil(loaded[0].id)
+    }
+
+    @MainActor
+    func testDeleteChatMessages() throws {
+        let reader = try createSchema()
+        let writer = try TaskWriter(path: dbPath)
+
+        let date = SharedFormatters.dayFormatter.date(from: "2025-06-15")!
+
+        let msg1 = ChatMessageRecord(date: "2025-06-15", role: "user", content: "Hello")
+        let msg2 = ChatMessageRecord(date: "2025-06-15", role: "assistant", content: "Hi there!")
+
+        _ = try writer.insertChatMessage(msg1)
+        _ = try writer.insertChatMessage(msg2)
+        XCTAssertEqual(reader.chatMessages(for: date).count, 2)
+
+        try writer.deleteChatMessages(for: "2025-06-15")
+        XCTAssertEqual(reader.chatMessages(for: date).count, 0)
+    }
+
+    @MainActor
+    func testChatMessagesScopedByDate() throws {
+        let reader = try createSchema()
+        let writer = try TaskWriter(path: dbPath)
+
+        let date1 = SharedFormatters.dayFormatter.date(from: "2025-06-15")!
+        let date2 = SharedFormatters.dayFormatter.date(from: "2025-06-16")!
+
+        _ = try writer.insertChatMessage(ChatMessageRecord(date: "2025-06-15", role: "user", content: "Day 1 message"))
+        _ = try writer.insertChatMessage(ChatMessageRecord(date: "2025-06-16", role: "user", content: "Day 2 message"))
+        _ = try writer.insertChatMessage(ChatMessageRecord(date: "2025-06-15", role: "assistant", content: "Day 1 reply"))
+
+        let day1 = reader.chatMessages(for: date1)
+        let day2 = reader.chatMessages(for: date2)
+
+        XCTAssertEqual(day1.count, 2)
+        XCTAssertEqual(day2.count, 1)
+        XCTAssertEqual(day1[0].content, "Day 1 message")
+        XCTAssertEqual(day1[1].content, "Day 1 reply")
+        XCTAssertEqual(day2[0].content, "Day 2 message")
+    }
+
     // MARK: - Transaction Rollback
 
     @MainActor

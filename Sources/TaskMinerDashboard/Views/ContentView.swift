@@ -11,7 +11,7 @@ private enum ToolbarLayout {
 
 struct ContentView: View {
     @Environment(DashboardViewModel.self) var viewModel
-    @State private var selectedTab = 0
+    @State private var selectedTab = 1
     @State private var showSettings = false
 
     /// Tracks whether the Option (⌥) key is currently held down.
@@ -24,7 +24,7 @@ struct ContentView: View {
     private let screensTabIndex = 3
 
     private var tabItems: [String] {
-        var items = ["Timeline", "Activities", "Tips"]
+        var items = ["Timeline", "Stubs", "Activities"]
         if showScreensTab { items.append("Screens") }
         return items
     }
@@ -51,24 +51,22 @@ struct ContentView: View {
                 .fill(Theme.separator)
                 .frame(height: 1)
 
-            switch selectedTab {
-            case 0:
-                ZStack(alignment: .bottom) {
+            ZStack(alignment: .bottom) {
+                switch selectedTab {
+                case 0:
                     TaskTimelineView()
-                    ChatOverlayView()
-                }
-            case 1:
-                ZStack(alignment: .bottom) {
-                    ActivitiesView()
-                    ChatOverlayView()
-                }
-            case 2:
-                ZStack(alignment: .bottom) {
+                case 1:
                     RecommendationsView()
+                case 2:
+                    ActivitiesView()
+                default:
+                    ScreenshotBrowserView()
+                }
+
+                // Single chat overlay shared across all tabs (except Screens)
+                if selectedTab < 3 {
                     ChatOverlayView()
                 }
-            default:
-                ScreenshotBrowserView()
             }
         }
         .background(Theme.primaryBackground)
@@ -77,7 +75,8 @@ struct ContentView: View {
             ToolbarItem(placement: .principal) {
                 SegmentedPicker(
                     items: tabItems,
-                    selection: $selectedTab
+                    selection: $selectedTab,
+                    highlightedItem: "Stubs"
                 )
                 .frame(maxWidth: 500)
                 .accessibilityIdentifier("content-tab-picker")
@@ -157,6 +156,9 @@ struct ContentView: View {
                     showScreensTab = false
                 }
             }
+            // Keep ViewModel's currentScreen in sync so chat context knows which tab is active
+            let screenNames = ["Timeline", "Stubs", "Activities", "Screens"]
+            viewModel.currentScreen = newTab < screenNames.count ? screenNames[newTab] : "Stubs"
         }
     }
 }
@@ -165,6 +167,8 @@ struct ContentView: View {
 struct SegmentedPicker: View {
     let items: [String]
     @Binding var selection: Int
+    /// Title of the item that gets a subtle accent tint even when not selected.
+    var highlightedItem: String? = nil
 
     private let segmentPaddingH: CGFloat = 14
     private let segmentPaddingV: CGFloat = 6
@@ -173,24 +177,35 @@ struct SegmentedPicker: View {
     var body: some View {
         HStack(spacing: 0) {
             ForEach(Array(items.enumerated()), id: \.offset) { index, title in
+                let isSelected = selection == index
+                let isHighlighted = title == highlightedItem && !isSelected
+
                 Button {
                     withAnimation(.easeInOut(duration: 0.15)) { selection = index }
                 } label: {
                     Text(title)
-                        .font(.system(size: 12, weight: selection == index ? .semibold : .regular))
-                        .foregroundStyle(selection == index ? Theme.textPrimary : Theme.textSecondary)
+                        .font(.system(size: 12, weight: isSelected ? .semibold : .regular))
+                        .foregroundStyle(
+                            isSelected ? Theme.textPrimary
+                            : isHighlighted ? Theme.accent
+                            : Theme.textSecondary
+                        )
                         .padding(.horizontal, segmentPaddingH)
                         .padding(.vertical, segmentPaddingV)
                         .frame(minHeight: ToolbarLayout.minTouchTarget)
                         .contentShape(Rectangle())
                         .background(
                             RoundedRectangle(cornerRadius: 6, style: .continuous)
-                                .fill(selection == index ? Theme.selectedSurface : Color.clear)
+                                .fill(
+                                    isSelected ? Theme.selectedSurface
+                                    : isHighlighted ? Theme.accent.opacity(0.08)
+                                    : Color.clear
+                                )
                         )
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel(title)
-                .accessibilityAddTraits(selection == index ? [.isSelected] : [])
+                .accessibilityAddTraits(isSelected ? [.isSelected] : [])
             }
         }
         .padding(trackPadding)

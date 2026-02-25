@@ -36,16 +36,18 @@ extension DashboardViewModel {
 
         Task {
             do {
-                let results = try await generator.generate(
+                let content = try await generator.generate(
                     recentTasks: recentTasks,
                     projectActivities: currentProjectActivities,
                     appsUsed: appsUsed,
                     memoryContext: memoryContext,
                     activityLog: activityLog
                 )
-                self.recommendations = results
+                self.recommendations = content.recommendations
+                self.greetingContext = content.greetingContext.isEmpty ? nil : content.greetingContext
+                self.suggestedQuestions = content.suggestedQuestions
                 self.isGeneratingRecommendations = false
-                Analytics.recommendationsGenerated(count: results.count)
+                Analytics.recommendationsGenerated(count: content.recommendations.count)
             } catch {
                 self.recommendationsError = error.localizedDescription
                 self.isGeneratingRecommendations = false

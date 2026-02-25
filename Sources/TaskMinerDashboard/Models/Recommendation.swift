@@ -1,5 +1,12 @@
 import Foundation
 
+/// The full output from the Stubs page AI generation: greeting, questions, and recommendations.
+struct StubsContent {
+    let greetingContext: String
+    let suggestedQuestions: [String]
+    let recommendations: [Recommendation]
+}
+
 /// A single AI-generated recommendation based on the user's recent work activity.
 /// Recommendations are ephemeral (not persisted to the database).
 struct Recommendation: Identifiable {

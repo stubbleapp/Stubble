@@ -5,26 +5,46 @@ import TaskMinerShared
 struct RecommendationsView: View {
     @Environment(DashboardViewModel.self) var viewModel
 
+    /// The user's first name from macOS account, used for the greeting.
+    private var firstName: String {
+        let full = NSFullUserName()
+        return full.split(separator: " ").first.map(String.init) ?? full
+    }
+
     var body: some View {
         VStack(spacing: 0) {
-            // Header
-            HStack(alignment: .firstTextBaseline) {
-                Text("Tips")
-                    .font(.system(size: 22, weight: .bold))
-                    .foregroundStyle(Theme.textPrimary)
+            // Header — greeting + refresh
+            HStack(alignment: .top) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Hey, \(firstName)")
+                        .font(.system(size: 22, weight: .bold))
+                        .foregroundStyle(Theme.textPrimary)
+
+                    if let context = viewModel.greetingContext {
+                        Text(context)
+                            .font(.system(size: 13))
+                            .foregroundStyle(Theme.textMuted)
+                            .lineSpacing(2)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
 
                 Spacer()
 
                 if !viewModel.recommendations.isEmpty {
                     Button(action: { viewModel.generateRecommendations() }) {
-                        Text("Refresh")
-                            .font(.system(size: 12, weight: .medium))
+                        Image(systemName: "arrow.clockwise")
+                            .font(.system(size: 14, weight: .medium))
                             .foregroundStyle(Theme.accent)
+                            .symbolEffect(.bounce, value: viewModel.isGeneratingRecommendations)
+                            .frame(width: 32, height: 32)
+                            .background(Theme.accent.opacity(0.08))
+                            .clipShape(Circle())
                     }
                     .buttonStyle(.plain)
                     .disabled(viewModel.isGeneratingRecommendations)
-                    .opacity(viewModel.isGeneratingRecommendations ? 0.4 : 1)
-                    .accessibilityLabel("Refresh tips")
+                    .help("Regenerate stubs")
+                    .accessibilityLabel("Regenerate stubs")
                 }
             }
             .padding(.horizontal, 20)
@@ -65,27 +85,23 @@ struct RecommendationsView: View {
                 VStack(spacing: 16) {
                     ProgressView()
                         .scaleEffect(0.8)
-                    Text("Analyzing your recent activity...")
+                    Text("Analyzing your recent activity\u{2026}")
                         .font(.system(size: 13, weight: .regular))
                         .foregroundStyle(Theme.textMuted)
                 }
                 Spacer()
             } else if viewModel.recommendations.isEmpty {
-                // Empty state — minimal, clean
+                // Empty state
                 Spacer()
                 VStack(spacing: 14) {
-                    Text("No tips yet")
-                        .font(.system(size: 16, weight: .medium))
-                        .foregroundStyle(Theme.textSecondary)
-
-                    Text("Generate personalized tips based on\nyour recent work activity.")
+                    Text("Generate stubs to get personalized\ninsights based on your recent work.")
                         .font(.system(size: 13))
                         .foregroundStyle(Theme.textMuted)
                         .multilineTextAlignment(.center)
                         .lineSpacing(2)
 
                     Button(action: { viewModel.generateRecommendations() }) {
-                        Text("Generate Tips")
+                        Text("Generate Stubs")
                             .font(.system(size: 13, weight: .medium))
                             .foregroundStyle(.white)
                             .padding(.horizontal, 20)
@@ -106,7 +122,7 @@ struct RecommendationsView: View {
                 }
                 Spacer()
             } else {
-                // Tip cards
+                // Cards + suggested questions
                 ScrollView {
                     LazyVStack(spacing: 10) {
                         ForEach(viewModel.recommendations) { tip in
@@ -119,8 +135,61 @@ struct RecommendationsView: View {
                     .padding(.horizontal, 20)
                     .padding(.top, 12)
 
+                    // Suggested questions
+                    if !viewModel.suggestedQuestions.isEmpty {
+                        suggestedQuestionsSection
+                            .padding(.horizontal, 20)
+                            .padding(.top, 16)
+                    }
+
                     Spacer().frame(height: 64)
                 }
+            }
+        }
+    }
+
+    // MARK: - Suggested Questions
+
+    private var suggestedQuestionsSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("QUESTIONS TO EXPLORE")
+                .font(.system(size: 10, weight: .medium, design: .rounded))
+                .foregroundStyle(Theme.textMuted)
+                .tracking(0.5)
+
+            ForEach(viewModel.suggestedQuestions, id: \.self) { question in
+                Button {
+                    viewModel.pendingChatQuestion = question
+                } label: {
+                    HStack(spacing: 8) {
+                        Image(systemName: "bubble.left.fill")
+                            .font(.system(size: 10))
+                            .foregroundStyle(Theme.accent.opacity(0.6))
+
+                        Text(question)
+                            .font(.system(size: 12, weight: .medium))
+                            .foregroundStyle(Theme.textPrimary)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .lineLimit(2)
+
+                        Spacer()
+
+                        Image(systemName: "arrow.right")
+                            .font(.system(size: 9, weight: .medium))
+                            .foregroundStyle(Theme.textMuted)
+                    }
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 10)
+                    .background(
+                        RoundedRectangle(cornerRadius: 10, style: .continuous)
+                            .fill(Theme.surfaceElevated)
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 10, style: .continuous)
+                            .strokeBorder(Theme.textQuaternary, lineWidth: 0.5)
+                    )
+                }
+                .buttonStyle(.plain)
             }
         }
     }
@@ -218,5 +287,4 @@ private struct TipCardView: View {
             isHovering = hovering
         }
     }
-
 }

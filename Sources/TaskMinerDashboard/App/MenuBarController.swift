@@ -124,7 +124,6 @@ final class MenuBarDelegate: NSObject, NSApplicationDelegate {
     // MARK: - App Icon
 
     /// Set the Dock / app switcher icon from the bundled .icns file.
-    /// Composites the icon onto a solid dark background so it doesn't appear transparent in the Dock.
     private func setAppIcon() {
         var rawIcon: NSImage?
 
@@ -148,26 +147,7 @@ final class MenuBarDelegate: NSObject, NSApplicationDelegate {
         }
 
         guard let icon = rawIcon else { return }
-
-        // Composite onto an off-white rounded-rect background matching the app's warm cream theme
-        let size: CGFloat = 1024
-        let composited = NSImage(size: NSSize(width: size, height: size), flipped: false) { rect in
-            guard let ctx = NSGraphicsContext.current?.cgContext else { return false }
-
-            // Off-white background matching the app's warm cream palette (RGB ~247,247,243)
-            let bgColor = CGColor(red: 0.969, green: 0.969, blue: 0.953, alpha: 1.0)
-            let cornerRadius = size * 0.22 // macOS squircle-like rounding
-            let bgPath = CGPath(roundedRect: rect, cornerWidth: cornerRadius, cornerHeight: cornerRadius, transform: nil)
-            ctx.addPath(bgPath)
-            ctx.setFillColor(bgColor)
-            ctx.fillPath()
-
-            // Draw the original icon on top
-            icon.draw(in: rect, from: .zero, operation: .sourceOver, fraction: 1.0)
-            return true
-        }
-
-        NSApp.applicationIconImage = composited
+        NSApp.applicationIconImage = icon
     }
 
     // MARK: - Menu Bar Icon

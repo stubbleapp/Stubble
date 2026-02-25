@@ -103,6 +103,104 @@ public final class GeminiClient: Sendable {
         )
     }
 
+    /// Stream a conversational response from Gemini using Server-Sent Events (SSE).
+    /// Yields text chunks as they arrive. The caller appends each chunk to build the full response.
+    /// No retry logic — the user can resend on failure.
+    public func streamGenerateText(
+        prompt: String,
+        systemInstruction: String? = nil,
+        conversationHistory: [[String: Any]]? = nil
+    ) -> AsyncThrowingStream<String, Error> {
+        AsyncThrowingStream { continuation in
+            let task = Task {
+                do {
+                    var contents: [[String: Any]] = conversationHistory ?? []
+                    contents.append([
+                        "role": "user",
+                        "parts": [["text": prompt]]
+                    ])
+
+                    var components = URLComponents(string: baseURL)
+                    components?.path = "/v1beta/models/\(model):streamGenerateContent"
+                    components?.queryItems = [URLQueryItem(name: "alt", value: "sse")]
+
+                    guard let url = components?.url else {
+                        continuation.finish(throwing: GeminiError.invalidURL)
+                        return
+                    }
+
+                    var body: [String: Any] = ["contents": contents]
+                    if let system = systemInstruction {
+                        body["systemInstruction"] = ["parts": [["text": system]]]
+                    }
+                    body["generationConfig"] = [
+                        "temperature": 0.5,
+                        "maxOutputTokens": 4096,
+                        "responseMimeType": "text/plain",
+                        "thinkingConfig": ["thinkingBudget": 1024]
+                    ] as [String: Any]
+
+                    let jsonData = try JSONSerialization.data(withJSONObject: body)
+
+                    var request = URLRequest(url: url)
+                    request.httpMethod = "POST"
+                    request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+                    request.setValue(apiKey, forHTTPHeaderField: "x-goog-api-key")
+                    request.httpBody = jsonData
+                    request.timeoutInterval = 120
+
+                    let (bytes, response) = try await URLSession.shared.bytes(for: request)
+
+                    guard let httpResponse = response as? HTTPURLResponse else {
+                        continuation.finish(throwing: GeminiError.invalidResponse)
+                        return
+                    }
+
+                    guard httpResponse.statusCode == 200 else {
+                        // Read full body for error message
+                        var errorData = Data()
+                        for try await byte in bytes {
+                            errorData.append(byte)
+                        }
+                        let errorBody = String(data: errorData, encoding: .utf8) ?? "unknown"
+                        continuation.finish(throwing: GeminiError.apiError(statusCode: httpResponse.statusCode, message: errorBody))
+                        return
+                    }
+
+                    // Parse SSE lines: each line starts with "data: " followed by a JSON chunk
+                    for try await line in bytes.lines {
+                        guard !Task.isCancelled else { break }
+                        guard line.hasPrefix("data: ") else { continue }
+                        let jsonStr = String(line.dropFirst(6))
+                        guard let lineData = jsonStr.data(using: .utf8),
+                              let json = try? JSONSerialization.jsonObject(with: lineData) as? [String: Any],
+                              let candidates = json["candidates"] as? [[String: Any]],
+                              let firstCandidate = candidates.first,
+                              let content = firstCandidate["content"] as? [String: Any],
+                              let parts = content["parts"] as? [[String: Any]]
+                        else { continue }
+
+                        // Yield only non-thought text parts
+                        for part in parts {
+                            if part["thought"] != nil { continue }
+                            if let text = part["text"] as? String, !text.isEmpty {
+                                continuation.yield(text)
+                            }
+                        }
+                    }
+
+                    continuation.finish()
+                } catch {
+                    continuation.finish(throwing: error)
+                }
+            }
+
+            continuation.onTermination = { _ in
+                task.cancel()
+            }
+        }
+    }
+
     // MARK: - Private
 
     /// Common request + retry + response parsing.

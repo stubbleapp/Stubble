@@ -43,8 +43,10 @@ final class DashboardViewModel {
     var activitiesError: String?
     var activityGenerator: ProjectActivityGenerator?
 
-    // Recommendations (AI-generated, ephemeral)
+    // Stubs page (AI-generated, ephemeral)
     var recommendations: [Recommendation] = []
+    var greetingContext: String?
+    var suggestedQuestions: [String] = []
     var isGeneratingRecommendations = false
     var recommendationsError: String?
     var recommendationGenerator: RecommendationGenerator?
@@ -59,6 +61,12 @@ final class DashboardViewModel {
     var chatMessages: [ChatMessage] = []
     var isChatLoading = false
     var chatError: String?
+    /// The name of the currently active screen/tab (e.g. "Timeline", "Stubs", "Activities").
+    /// Used to give the chat assistant context about what the user is looking at.
+    var currentScreen: String = "Stubs"
+    /// Set by the Stubs page to trigger a chat question. ChatOverlayView observes this,
+    /// expands, sends the message, and clears it.
+    var pendingChatQuestion: String?
 
     // App name → bundle ID mapping (for icon resolution)
     var appNameBundleMap: [String: String] = [:]
@@ -128,6 +136,7 @@ final class DashboardViewModel {
 
         loadAvailableDates()
         loadDataForSelectedDate()
+        loadChatHistory()
         loadAppNameMap()
         startPausePolling()
     }
@@ -135,8 +144,11 @@ final class DashboardViewModel {
     func selectDate(_ date: Date) {
         selectedDate = date
         daySummaryText = nil
-        clearChat()
+        chatMessages = []
+        chatError = nil
+        isChatLoading = false
         loadDataForSelectedDate()
+        loadChatHistory()
     }
 
     /// Whether the selected date is today.
@@ -440,6 +452,10 @@ final class DashboardViewModel {
         screenshots = []
         projectActivities = []
         recommendations = []
+        greetingContext = nil
+        suggestedQuestions = []
+        chatMessages = []
+        chatError = nil
         activeSeconds = 0
         idleSeconds = 0
         daySummaryText = nil

@@ -39,7 +39,7 @@ public class DatabaseReader {
     }
 
     /// Current schema version. Bump this when adding new migrations.
-    private static let schemaVersion = 5
+    private static let schemaVersion = 6
 
     /// Apply schema migrations so the dashboard works even if the CLI hasn't run yet.
     /// Uses PRAGMA user_version to track which migrations have already run.
@@ -115,6 +115,22 @@ public class DatabaseReader {
                               label: "5: add active_duration", ignoreDuplicate: true) {
                 migrationFailed = true
             }
+        }
+
+        if currentVersion < 6 {
+            let chatSql = """
+            CREATE TABLE IF NOT EXISTS chat_messages (
+                id        INTEGER PRIMARY KEY AUTOINCREMENT,
+                date      TEXT NOT NULL,
+                role      TEXT NOT NULL,
+                content   TEXT NOT NULL,
+                timestamp TEXT NOT NULL
+            )
+            """
+            if !execMigration(chatSql, label: "6: create chat_messages table") {
+                migrationFailed = true
+            }
+            sqlite3_exec(db, "CREATE INDEX IF NOT EXISTS idx_chat_date ON chat_messages(date)", nil, nil, nil)
         }
 
         // Only bump the version if all migrations succeeded — failed migrations
@@ -425,6 +441,37 @@ public class DatabaseReader {
         return (activeSeconds, idleSeconds, activityCount, screenshotCount)
     }
 
+    // MARK: - Chat Messages
+
+    public func chatMessages(for date: Date) -> [ChatMessageRecord] {
+        let dateStr = SharedFormatters.dayFormatter.string(from: date)
+
+        let sql = """
+        SELECT id, date, role, content, timestamp
+        FROM chat_messages
+        WHERE date = ?
+        ORDER BY timestamp ASC
+        """
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return [] }
+        defer { sqlite3_finalize(stmt) }
+
+        sqliteBindText(stmt, 1, dateStr)
+
+        var results: [ChatMessageRecord] = []
+        while sqlite3_step(stmt) == SQLITE_ROW {
+            let record = ChatMessageRecord(
+                id: sqlite3_column_int64(stmt, 0),
+                date: sqlite3_column_text(stmt, 1).map({ String(cString: $0) }) ?? dateStr,
+                role: sqlite3_column_text(stmt, 2).map({ String(cString: $0) }) ?? "user",
+                content: sqlite3_column_text(stmt, 3).map({ String(cString: $0) }) ?? "",
+                timestamp: sqlite3_column_text(stmt, 4).flatMap({ SharedFormatters.iso8601.date(from: String(cString: $0)) }) ?? Date()
+            )
+            results.append(record)
+        }
+        return results
+    }
+
     // MARK: - App Name → Bundle ID Mapping
 
     /// Returns a dictionary mapping app display names to bundle identifiers.
@@ -470,8 +517,9 @@ public class DatabaseReader {
         sqlite3_exec(db, "DELETE FROM screenshots", nil, nil, nil)
         sqlite3_exec(db, "DELETE FROM activities", nil, nil, nil)
         sqlite3_exec(db, "DELETE FROM daily_summaries", nil, nil, nil)
+        sqlite3_exec(db, "DELETE FROM chat_messages", nil, nil, nil)
 
-        Logger.info("Cleared all data from 5 tables (\(paths.count) screenshot files)")
+        Logger.info("Cleared all data from 6 tables (\(paths.count) screenshot files)")
         return paths
     }
 

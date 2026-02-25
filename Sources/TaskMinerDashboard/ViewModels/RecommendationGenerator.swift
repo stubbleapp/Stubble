@@ -13,21 +13,21 @@ final class RecommendationGenerator: Sendable {
 
     // MARK: - Public API
 
-    /// Generate recommendations based on recent work context.
+    /// Generate stubs content: greeting, suggested questions, and recommendations.
     /// - Parameters:
     ///   - recentTasks: Tasks from the last few days, keyed by date string
     ///   - projectActivities: Current day's project activity clusters
     ///   - appsUsed: Map of app name → approximate total seconds used
     ///   - memoryContext: Known facts about the user from the memory store
     ///   - activityLog: Today's granular activity log (app sessions with window titles)
-    /// - Returns: Array of 2-5 recommendations
+    /// - Returns: StubsContent with greeting, questions, and 2-5 recommendations
     func generate(
         recentTasks: [String: [TaskRecord]],
         projectActivities: [ProjectActivity],
         appsUsed: [String: TimeInterval],
         memoryContext: String?,
         activityLog: String? = nil
-    ) async throws -> [Recommendation] {
+    ) async throws -> StubsContent {
         let prompt = buildPrompt(
             recentTasks: recentTasks,
             projectActivities: projectActivities,
@@ -41,6 +41,15 @@ final class RecommendationGenerator: Sendable {
         You provide highly specific, actionable recommendations based on a user's ACTUAL recent \
         computer activity. Every recommendation MUST directly relate to something the user worked on. \
         Never give generic productivity advice that could apply to anyone. \
+        \
+        Your output has three parts: \
+        1. greeting_context: A warm, casual 1-2 sentence summary of what the user has been working on recently, \
+           ending with a natural transition like "here are some things that might help" or similar. \
+           Reference specific projects, technologies, or tasks from the data. Keep it conversational. \
+        2. suggested_questions: 3-4 thoughtful questions the user might want to ask an AI assistant \
+           about their recent work. These should be specific to their actual activity — not generic. \
+           Frame them as questions the user would ask (e.g. "How can I improve my test coverage for async code?"). \
+        3. recommendations: 2-5 actionable recommendations (see categories below). \
         \
         Categories: \
         - article: A relevant technical article, tutorial, or documentation page \
@@ -76,15 +85,15 @@ final class RecommendationGenerator: Sendable {
                 throw error
             }
 
-            let recommendations = parseResponse(response)
-            if !recommendations.isEmpty || attempt == 1 {
-                return recommendations
+            let content = parseResponse(response)
+            if !content.recommendations.isEmpty || attempt == 1 {
+                return content
             }
 
             Logger.warning("RecommendationGenerator: empty parse result (attempt \(attempt + 1)), retrying")
         }
 
-        return []
+        return StubsContent(greetingContext: "", suggestedQuestions: [], recommendations: [])
     }
 
     // MARK: - Prompt Building
@@ -162,6 +171,12 @@ final class RecommendationGenerator: Sendable {
         ## Output Format
         Respond with a JSON object:
         {
+          "greeting_context": "You've been deep into Swift concurrency and API integration lately — here are some things that might help.",
+          "suggested_questions": [
+            "What patterns should I follow for actor isolation in my codebase?",
+            "How can I improve my test coverage for async code?",
+            "What are the best practices for SQLite WAL mode on macOS?"
+          ],
           "recommendations": [
             {
               "category": "article",
@@ -174,7 +189,11 @@ final class RecommendationGenerator: Sendable {
           ]
         }
 
-        Fields:
+        Top-level fields:
+        - greeting_context: 1-2 warm, casual sentences summarizing what the user has been working on, with a natural transition
+        - suggested_questions: 3-4 specific questions the user might want to ask about their recent work
+
+        Recommendation fields:
         - category: one of "article", "tool", "best_practice", "workflow"
         - title: concise, specific title (not generic)
         - description: 2-3 sentences explaining what this is and why it's valuable for THIS user
@@ -188,15 +207,18 @@ final class RecommendationGenerator: Sendable {
 
     // MARK: - Response Parsing
 
-    private func parseResponse(_ response: String) -> [Recommendation] {
+    private func parseResponse(_ response: String) -> StubsContent {
         guard let parsed = JSONSanitizer.parse(response) as? [String: Any],
               let items = parsed["recommendations"] as? [[String: Any]]
         else {
             Logger.error("RecommendationGenerator: failed to parse response. Preview: \(String(response.prefix(300)))")
-            return []
+            return StubsContent(greetingContext: "", suggestedQuestions: [], recommendations: [])
         }
 
-        return items.compactMap { dict -> Recommendation? in
+        let greetingContext = parsed["greeting_context"] as? String ?? ""
+        let suggestedQuestions = parsed["suggested_questions"] as? [String] ?? []
+
+        let recommendations = items.compactMap { dict -> Recommendation? in
             guard let categoryStr = dict["category"] as? String,
                   let title = dict["title"] as? String,
                   let description = dict["description"] as? String,
@@ -218,5 +240,11 @@ final class RecommendationGenerator: Sendable {
                 iconName: iconName
             )
         }
+
+        return StubsContent(
+            greetingContext: greetingContext,
+            suggestedQuestions: suggestedQuestions,
+            recommendations: recommendations
+        )
     }
 }
