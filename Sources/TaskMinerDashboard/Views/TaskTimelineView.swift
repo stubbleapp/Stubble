@@ -30,43 +30,31 @@ enum TimelineItem: Identifiable {
         var usedGaps: Set<Int> = []
 
         for (index, task) in tasks.enumerated() {
-            // Window between previous task's end and this task's start.
-            // For the first task, look back to the start of the day.
-            let windowStart = index > 0 ? tasks[index - 1].endTime : Date.distantPast
-            let windowEnd = task.startTime
+            // Only show idle gaps BETWEEN tasks — never before the first
+            // task (user hadn't started working) or after the last (user
+            // is just done for the day).
+            if index > 0 {
+                let windowStart = tasks[index - 1].endTime
+                let windowEnd = task.startTime
 
-            // Insert idle gaps that overlap this inter-task window.
-            // Use real timestamps — never clip to task boundaries.
-            for (gapIndex, gap) in idleGaps.enumerated() where !usedGaps.contains(gapIndex) {
-                if gap.end > windowStart && gap.start < windowEnd {
-                    let duration = gap.end.timeIntervalSince(gap.start)
-                    items.append(.gap(
-                        id: "idle-\(gapIndex)",
-                        startTime: gap.start,
-                        endTime: gap.end,
-                        duration: duration
-                    ))
-                    usedGaps.insert(gapIndex)
+                // Insert idle gaps that overlap this inter-task window.
+                // Use real timestamps — never clip to task boundaries.
+                for (gapIndex, gap) in idleGaps.enumerated() where !usedGaps.contains(gapIndex) {
+                    if gap.end > windowStart && gap.start < windowEnd {
+                        let duration = gap.end.timeIntervalSince(gap.start)
+                        items.append(.gap(
+                            id: "idle-\(gapIndex)",
+                            startTime: gap.start,
+                            endTime: gap.end,
+                            duration: duration
+                        ))
+                        usedGaps.insert(gapIndex)
+                    }
                 }
             }
 
             let isFirst = items.isEmpty
             items.append(.task(task, isFirst: isFirst, isLast: false))
-        }
-
-        // Check for idle gaps after the last task
-        if let lastTask = tasks.last {
-            for (gapIndex, gap) in idleGaps.enumerated() where !usedGaps.contains(gapIndex) {
-                if gap.start >= lastTask.startTime {
-                    let duration = gap.end.timeIntervalSince(gap.start)
-                    items.append(.gap(
-                        id: "idle-\(gapIndex)",
-                        startTime: gap.start,
-                        endTime: gap.end,
-                        duration: duration
-                    ))
-                }
-            }
         }
 
         // Fix isLast on the final item
