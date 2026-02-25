@@ -19,9 +19,12 @@ set -euo pipefail
 #        gh auth login
 #
 # This script will:
-#   - Create a signed .zip of the app bundle
-#   - Build appcast.xml manually (no code signing required)
-#   - Create a GitHub Release and upload both files
+#   - Notarize the app with Apple (requires stored credentials: stubble-notary)
+#   - Staple the notarization ticket to the app
+#   - Create an EdDSA-signed .zip of the stapled app bundle
+#   - Build appcast.xml with the signature
+#   - Rebuild the DMG with the stapled app
+#   - Create a GitHub Release and upload everything
 # ─────────────────────────────────────────────────────────────────
 
 GITHUB_REPO="samattias/stubble-releases"
@@ -67,16 +70,95 @@ MIN_OS=$(/usr/libexec/PlistBuddy -c "Print LSMinimumSystemVersion" "$APP_BUNDLE/
 TAG="v$VERSION"
 echo "📦 Publishing Stubble $TAG"
 
-# ─── Create signed zip ──────────────────────────────────────────
-mkdir -p "$UPDATES_DIR"
+# ─── Notarize with Apple ─────────────────────────────────────
+NOTARY_PROFILE="stubble-notary"
+NOTARY_ZIP="$OUTPUT_DIR/Stubble-notarize.zip"
 
-# Clean old archives for this version
+echo "📋 Notarizing with Apple..."
+echo "   Creating submission zip..."
+cd "$OUTPUT_DIR" && /usr/bin/ditto -c -k --keepParent "Stubble.app" "$NOTARY_ZIP"
+
+echo "   Submitting to Apple notary service (this may take a few minutes)..."
+NOTARY_OUTPUT=$(xcrun notarytool submit "$NOTARY_ZIP" \
+    --keychain-profile "$NOTARY_PROFILE" \
+    --wait 2>&1)
+echo "$NOTARY_OUTPUT"
+
+if echo "$NOTARY_OUTPUT" | grep -q "status: Accepted"; then
+    echo "   ✅ Notarization accepted"
+else
+    echo "   ❌ Notarization failed"
+    # Extract submission ID and fetch the log
+    SUBMISSION_ID=$(echo "$NOTARY_OUTPUT" | grep "id:" | head -1 | awk '{print $2}')
+    if [ -n "$SUBMISSION_ID" ]; then
+        echo "   Fetching rejection log..."
+        xcrun notarytool log "$SUBMISSION_ID" --keychain-profile "$NOTARY_PROFILE" 2>&1
+    fi
+    rm -f "$NOTARY_ZIP"
+    exit 1
+fi
+rm -f "$NOTARY_ZIP"
+
+echo "📌 Stapling notarization ticket..."
+xcrun stapler staple "$APP_BUNDLE" 2>&1 | while IFS= read -r line; do echo "   $line"; done
+
+if xcrun stapler validate "$APP_BUNDLE" &>/dev/null; then
+    echo "   ✅ Notarization ticket stapled successfully"
+else
+    echo "   ⚠️  Stapling failed — app will still work but users may see a delay on first launch"
+fi
+
+# ─── Rebuild DMG with stapled app ────────────────────────────
+DMG_PATH_ORIG="$OUTPUT_DIR/Stubble-$VERSION.dmg"
+if [ -f "$DMG_PATH_ORIG" ] && command -v create-dmg &>/dev/null; then
+    echo "📀 Rebuilding DMG with notarized app..."
+    rm -f "$DMG_PATH_ORIG"
+
+    DMG_STAGING=$(mktemp -d)
+    cp -R "$APP_BUNDLE" "$DMG_STAGING/"
+
+    ORANGE_ICON="$BUILD_DIR/Resources/applications-icon-orange.png"
+    osascript -e "tell application \"Finder\" to make new alias file at (POSIX file \"$DMG_STAGING\" as alias) to (POSIX file \"/Applications\" as alias) with properties {name:\"Applications\"}" 2>/dev/null
+    if [ -f "$ORANGE_ICON" ] && [ -f "$DMG_STAGING/Applications" ]; then
+        python3 -c "
+from AppKit import NSWorkspace, NSImage
+import os
+icon = NSImage.alloc().initWithContentsOfFile_(os.path.abspath('$ORANGE_ICON'))
+if icon:
+    NSWorkspace.sharedWorkspace().setIcon_forFile_options_(icon, '$DMG_STAGING/Applications', 0)
+" 2>/dev/null
+    fi
+
+    DMG_ARGS=""
+    [ -f "$APP_BUNDLE/Contents/Resources/AppIcon.icns" ] && DMG_ARGS="--volicon $APP_BUNDLE/Contents/Resources/AppIcon.icns"
+    BG_IMAGE="$BUILD_DIR/Resources/dmg-background.png"
+    [ -f "$BG_IMAGE" ] && DMG_ARGS="$DMG_ARGS --background $BG_IMAGE"
+
+    create-dmg \
+        --volname "Stubble" \
+        $DMG_ARGS \
+        --window-pos 200 120 \
+        --window-size 600 400 \
+        --icon-size 100 \
+        --icon "Stubble.app" 150 200 \
+        --icon "Applications" 450 200 \
+        --no-internet-enable \
+        "$DMG_PATH_ORIG" \
+        "$DMG_STAGING" \
+        2>&1 || true
+
+    rm -rf "$DMG_STAGING"
+    [ -f "$DMG_PATH_ORIG" ] && echo "   ✅ DMG rebuilt with notarized app"
+fi
+
+# ─── Create EdDSA-signed zip (with stapled app) ─────────────
+mkdir -p "$UPDATES_DIR"
 rm -f "$UPDATES_DIR/Stubble-$VERSION.zip"
 
 ZIP_NAME="Stubble-$VERSION.zip"
 ZIP_PATH="$UPDATES_DIR/$ZIP_NAME"
-echo "🗜  Creating $ZIP_NAME..."
-cd "$OUTPUT_DIR" && zip -r -q "$ZIP_PATH" "Stubble.app"
+echo "🗜  Creating $ZIP_NAME (stapled)..."
+cd "$OUTPUT_DIR" && /usr/bin/ditto -c -k --keepParent "Stubble.app" "$ZIP_PATH"
 
 echo "🔏 Signing update with EdDSA..."
 SIGN_OUTPUT=$("$SIGN_UPDATE" "$ZIP_PATH" 2>&1)
@@ -164,9 +246,7 @@ else
         --title "Stubble $TAG" \
         --notes "Stubble $VERSION
 
-Download **Stubble-$VERSION.dmg** and drag to Applications.
-
-Right-click → Open the first time to bypass Gatekeeper." \
+Download **Stubble-$VERSION.dmg** and drag to Applications." \
         --latest
 fi
 

@@ -133,20 +133,40 @@ PLIST
 echo -n "APPL????" > "$APP_BUNDLE/Contents/PkgInfo"
 
 # ─── Code-sign with Developer ID ──────────────────────────────────
-# Sign inside-out: nested frameworks first, then the .app bundle.
-# Apple discourages --deep because it signs nested bundles in
-# unpredictable order and can produce invalid signatures.
+# Sign inside-out: innermost nested binaries first, then frameworks,
+# then the .app bundle. Apple discourages --deep because it signs
+# nested bundles in unpredictable order and can produce invalid signatures.
 # --options runtime enables the hardened runtime (required for notarization).
-if [ -d "$APP_BUNDLE/Contents/Frameworks/Sparkle.framework" ]; then
-    codesign --force --sign "$CODESIGN_IDENTITY" --options runtime \
-        "$APP_BUNDLE/Contents/Frameworks/Sparkle.framework" 2>&1 || echo "⚠️  Sparkle signing failed"
-fi
-codesign --force --sign "$CODESIGN_IDENTITY" --options runtime \
-    "$APP_BUNDLE" 2>&1 || echo "⚠️  App signing failed"
+# --timestamp requests a secure timestamp from Apple (required for notarization).
+SPARKLE_FW="$APP_BUNDLE/Contents/Frameworks/Sparkle.framework"
+if [ -d "$SPARKLE_FW" ]; then
+    echo "🔏 Signing Sparkle nested binaries (inside-out)..."
 
-# Verify
-if codesign --verify "$APP_BUNDLE" 2>&1; then
-    echo "🔏 Signed with Developer ID (✅ TCC permissions persist across rebuilds)"
+    # 1) XPC services (deepest nested)
+    find "$SPARKLE_FW" -name "*.xpc" -type d | while read -r xpc; do
+        codesign --force --sign "$CODESIGN_IDENTITY" --options runtime --timestamp "$xpc" 2>&1 || echo "   ⚠️  Failed: $xpc"
+    done
+
+    # 2) Nested apps (Updater.app)
+    find "$SPARKLE_FW" -name "*.app" -type d | while read -r app; do
+        codesign --force --sign "$CODESIGN_IDENTITY" --options runtime --timestamp "$app" 2>&1 || echo "   ⚠️  Failed: $app"
+    done
+
+    # 3) Standalone executables (Autoupdate)
+    find "$SPARKLE_FW" -name "Autoupdate" -type f | while read -r exe; do
+        codesign --force --sign "$CODESIGN_IDENTITY" --options runtime --timestamp "$exe" 2>&1 || echo "   ⚠️  Failed: $exe"
+    done
+
+    # 4) The framework itself
+    codesign --force --sign "$CODESIGN_IDENTITY" --options runtime --timestamp "$SPARKLE_FW" 2>&1 || echo "   ⚠️  Sparkle framework signing failed"
+fi
+
+# 5) The main app bundle (outermost)
+codesign --force --sign "$CODESIGN_IDENTITY" --options runtime --timestamp "$APP_BUNDLE" 2>&1 || echo "⚠️  App signing failed"
+
+# Verify (strict checks match what notarization expects)
+if codesign --verify --strict "$APP_BUNDLE" 2>&1; then
+    echo "🔏 Signed with Developer ID + secure timestamp (✅ ready for notarization)"
 else
     echo "⚠️  Signature verification failed:"
     codesign --verify --verbose "$APP_BUNDLE" 2>&1
