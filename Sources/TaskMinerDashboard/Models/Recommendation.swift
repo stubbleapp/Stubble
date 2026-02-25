@@ -1,8 +1,10 @@
 import Foundation
 
 /// The full output from the Stubs page AI generation: greeting, questions, and recommendations.
+/// For past days, `daySummary` contains a retrospective narrative; for today it's nil.
 struct StubsContent {
     let greetingContext: String
+    let daySummary: String?
     let suggestedQuestions: [String]
     let recommendations: [Recommendation]
 }

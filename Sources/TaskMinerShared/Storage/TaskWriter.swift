@@ -250,6 +250,55 @@ public class TaskWriter {
         }
     }
 
+    // MARK: - Stubs Content
+
+    /// Insert or replace stubs content for a given date (one record per day).
+    @discardableResult
+    public func insertOrReplaceStubsContent(_ record: StubsContentRecord) throws -> Int64 {
+        let sql = """
+        INSERT OR REPLACE INTO stubs_content
+        (date, greeting_context, day_summary, questions_json, recommendations_json, generated_at)
+        VALUES (?, ?, ?, ?, ?, ?)
+        """
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
+            throw DatabaseError.executionFailed(lastError)
+        }
+        defer { sqlite3_finalize(stmt) }
+
+        sqliteBindText(stmt, 1, record.date)
+        sqliteBindText(stmt, 2, record.greetingContext)
+        if let summary = record.daySummary {
+            sqliteBindText(stmt, 3, summary)
+        } else {
+            sqlite3_bind_null(stmt, 3)
+        }
+        sqliteBindText(stmt, 4, record.questionsJson)
+        sqliteBindText(stmt, 5, record.recommendationsJson)
+        sqliteBindText(stmt, 6, SharedFormatters.iso8601.string(from: record.generatedAt))
+
+        guard sqlite3_step(stmt) == SQLITE_DONE else {
+            throw DatabaseError.executionFailed(lastError)
+        }
+        return sqlite3_last_insert_rowid(db)
+    }
+
+    /// Delete stubs content for a given date.
+    public func deleteStubsContent(for dateString: String) throws {
+        let sql = "DELETE FROM stubs_content WHERE date = ?"
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
+            throw DatabaseError.executionFailed(lastError)
+        }
+        defer { sqlite3_finalize(stmt) }
+
+        sqliteBindText(stmt, 1, dateString)
+
+        guard sqlite3_step(stmt) == SQLITE_DONE else {
+            throw DatabaseError.executionFailed(lastError)
+        }
+    }
+
     // MARK: - Screenshot Deletion
 
     /// Delete screenshot records by their IDs (single or bulk).

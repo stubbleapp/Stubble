@@ -25,15 +25,24 @@ class ScreenshotStorage {
         self.directory = directory
         self.maxAgeDays = maxAgeDays
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        // Restrict screenshots directory to owner-only access (0700) — contains captured screen content.
+        try? FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: directory.path)
     }
 
     func generatePath(for date: Date) -> URL {
         let dayDir = directory.appendingPathComponent(Self.dayDirFmt.string(from: date))
         try? FileManager.default.createDirectory(at: dayDir, withIntermediateDirectories: true)
+        // Restrict subdirectories to owner-only access
+        try? FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: dayDir.path)
 
         let suffix = UUID().uuidString.prefix(6).lowercased()
         let filename = "\(Self.fileFmt.string(from: date))_\(suffix).jpg"
         return dayDir.appendingPathComponent(filename)
+    }
+
+    /// Set owner-only permissions (0600) on a screenshot file after writing.
+    func restrictPermissions(at path: URL) {
+        try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: path.path)
     }
 
     func relativePath(for fullPath: URL) -> String {

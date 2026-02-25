@@ -86,7 +86,7 @@ class DatabaseManager {
     }
 
     /// Current schema version — kept in sync with DatabaseReader's migrations.
-    private static let schemaVersion = 6
+    private static let schemaVersion = 7
 
     private func runMigrations() {
         let currentVersion = getUserVersion()
@@ -158,6 +158,23 @@ class DatabaseManager {
                 migrationFailed = true
             }
             sqlite3_exec(db, "CREATE INDEX IF NOT EXISTS idx_chat_date ON chat_messages(date)", nil, nil, nil)
+        }
+
+        if currentVersion < 7 {
+            let stubsSql = """
+            CREATE TABLE IF NOT EXISTS stubs_content (
+                id                   INTEGER PRIMARY KEY AUTOINCREMENT,
+                date                 TEXT NOT NULL UNIQUE,
+                greeting_context     TEXT NOT NULL DEFAULT '',
+                day_summary          TEXT,
+                questions_json       TEXT NOT NULL DEFAULT '[]',
+                recommendations_json TEXT NOT NULL DEFAULT '[]',
+                generated_at         TEXT NOT NULL
+            )
+            """
+            if !execMigration(stubsSql, label: "7: create stubs_content table") {
+                migrationFailed = true
+            }
         }
 
         // Only bump the version if all migrations succeeded — failed migrations

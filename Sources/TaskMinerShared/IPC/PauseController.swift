@@ -48,6 +48,8 @@ public class PauseController {
         do {
             let data = try JSONEncoder().encode(state)
             try data.write(to: pauseFileURL, options: .atomic)
+            // Restrict pause file to owner-only access (0600) — IPC state file.
+            try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: pauseFileURL.path)
         } catch {
             Logger.warning("PauseController: failed to write pause state: \(error.localizedDescription)")
         }

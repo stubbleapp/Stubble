@@ -54,8 +54,10 @@ public enum Logger {
 
         // Create or open for appending
         if !fm.fileExists(atPath: path.path) {
-            fm.createFile(atPath: path.path, contents: nil)
+            fm.createFile(atPath: path.path, contents: nil, attributes: [.posixPermissions: 0o600])
         }
+        // Ensure owner-only access (0600) — log may contain window titles and activity details.
+        try? fm.setAttributes([.posixPermissions: 0o600], ofItemAtPath: path.path)
         fileHandle = FileHandle(forWritingAtPath: path.path)
         fileHandle?.seekToEndOfFile()
         logPath = path
@@ -99,7 +101,7 @@ public enum Logger {
                 if !fm.fileExists(atPath: path.path) {
                     // File was rotated — reopen
                     fh.closeFile()
-                    fm.createFile(atPath: path.path, contents: nil)
+                    fm.createFile(atPath: path.path, contents: nil, attributes: [.posixPermissions: 0o600])
                     fileHandle = FileHandle(forWritingAtPath: path.path)
                     fileHandle?.seekToEndOfFile()
                 }

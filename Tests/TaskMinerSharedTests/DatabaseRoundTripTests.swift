@@ -559,4 +559,75 @@ final class DatabaseRoundTripTests: XCTestCase {
         let count = try writer.insertTasks([])
         XCTAssertEqual(count, 0)
     }
+
+    // MARK: - Stubs Content
+
+    @MainActor
+    func testStubsContentWriteAndRead() throws {
+        let reader = try createSchema()
+        let writer = try TaskWriter(path: dbPath)
+
+        let record = StubsContentRecord(
+            date: "2024-11-01",
+            greetingContext: "You've been deep into Swift concurrency",
+            daySummary: "A productive day focused on async code.",
+            questionsJson: "[\"How to use actors?\"]",
+            recommendationsJson: "[{\"title\":\"Learn Actors\"}]"
+        )
+        let rowId = try writer.insertOrReplaceStubsContent(record)
+        XCTAssertGreaterThan(rowId, 0)
+
+        let df = DateFormatter()
+        df.dateFormat = "yyyy-MM-dd"
+        df.locale = Locale(identifier: "en_US_POSIX")
+        let date = df.date(from: "2024-11-01")!
+
+        let loaded = reader.stubsContent(for: date)
+        XCTAssertNotNil(loaded)
+        XCTAssertEqual(loaded?.date, "2024-11-01")
+        XCTAssertEqual(loaded?.greetingContext, "You've been deep into Swift concurrency")
+        XCTAssertEqual(loaded?.daySummary, "A productive day focused on async code.")
+        XCTAssertEqual(loaded?.questionsJson, "[\"How to use actors?\"]")
+        XCTAssertEqual(loaded?.recommendationsJson, "[{\"title\":\"Learn Actors\"}]")
+    }
+
+    @MainActor
+    func testStubsContentReplaceOnSameDate() throws {
+        let reader = try createSchema()
+        let writer = try TaskWriter(path: dbPath)
+
+        let first = StubsContentRecord(date: "2024-11-01", greetingContext: "First")
+        try writer.insertOrReplaceStubsContent(first)
+
+        let second = StubsContentRecord(date: "2024-11-01", greetingContext: "Second")
+        try writer.insertOrReplaceStubsContent(second)
+
+        let df = DateFormatter()
+        df.dateFormat = "yyyy-MM-dd"
+        df.locale = Locale(identifier: "en_US_POSIX")
+        let date = df.date(from: "2024-11-01")!
+
+        let loaded = reader.stubsContent(for: date)
+        XCTAssertNotNil(loaded)
+        XCTAssertEqual(loaded?.greetingContext, "Second")
+    }
+
+    @MainActor
+    func testDeleteStubsContent() throws {
+        let reader = try createSchema()
+        let writer = try TaskWriter(path: dbPath)
+
+        let record = StubsContentRecord(date: "2024-11-01", greetingContext: "Hello")
+        try writer.insertOrReplaceStubsContent(record)
+
+        try writer.deleteStubsContent(for: "2024-11-01")
+
+        let df = DateFormatter()
+        df.dateFormat = "yyyy-MM-dd"
+        df.locale = Locale(identifier: "en_US_POSIX")
+        let date = df.date(from: "2024-11-01")!
+
+        let loaded = reader.stubsContent(for: date)
+        XCTAssertNil(loaded)
+    }
 }

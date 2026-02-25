@@ -39,7 +39,7 @@ public class DatabaseReader {
     }
 
     /// Current schema version. Bump this when adding new migrations.
-    private static let schemaVersion = 6
+    private static let schemaVersion = 7
 
     /// Apply schema migrations so the dashboard works even if the CLI hasn't run yet.
     /// Uses PRAGMA user_version to track which migrations have already run.
@@ -131,6 +131,23 @@ public class DatabaseReader {
                 migrationFailed = true
             }
             sqlite3_exec(db, "CREATE INDEX IF NOT EXISTS idx_chat_date ON chat_messages(date)", nil, nil, nil)
+        }
+
+        if currentVersion < 7 {
+            let stubsSql = """
+            CREATE TABLE IF NOT EXISTS stubs_content (
+                id                   INTEGER PRIMARY KEY AUTOINCREMENT,
+                date                 TEXT NOT NULL UNIQUE,
+                greeting_context     TEXT NOT NULL DEFAULT '',
+                day_summary          TEXT,
+                questions_json       TEXT NOT NULL DEFAULT '[]',
+                recommendations_json TEXT NOT NULL DEFAULT '[]',
+                generated_at         TEXT NOT NULL
+            )
+            """
+            if !execMigration(stubsSql, label: "7: create stubs_content table") {
+                migrationFailed = true
+            }
         }
 
         // Only bump the version if all migrations succeeded — failed migrations
@@ -472,6 +489,37 @@ public class DatabaseReader {
         return results
     }
 
+    // MARK: - Stubs Content
+
+    /// Load the persisted stubs content for a given date (one record per day, or nil if not generated yet).
+    public func stubsContent(for date: Date) -> StubsContentRecord? {
+        let dateStr = SharedFormatters.dayFormatter.string(from: date)
+
+        let sql = """
+        SELECT id, date, greeting_context, day_summary, questions_json, recommendations_json, generated_at
+        FROM stubs_content
+        WHERE date = ?
+        LIMIT 1
+        """
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return nil }
+        defer { sqlite3_finalize(stmt) }
+
+        sqliteBindText(stmt, 1, dateStr)
+
+        guard sqlite3_step(stmt) == SQLITE_ROW else { return nil }
+
+        return StubsContentRecord(
+            id: sqlite3_column_int64(stmt, 0),
+            date: sqlite3_column_text(stmt, 1).map({ String(cString: $0) }) ?? dateStr,
+            greetingContext: sqlite3_column_text(stmt, 2).map({ String(cString: $0) }) ?? "",
+            daySummary: sqlite3_column_text(stmt, 3).map({ String(cString: $0) }),
+            questionsJson: sqlite3_column_text(stmt, 4).map({ String(cString: $0) }) ?? "[]",
+            recommendationsJson: sqlite3_column_text(stmt, 5).map({ String(cString: $0) }) ?? "[]",
+            generatedAt: sqlite3_column_text(stmt, 6).flatMap({ SharedFormatters.iso8601.date(from: String(cString: $0)) }) ?? Date()
+        )
+    }
+
     // MARK: - App Name → Bundle ID Mapping
 
     /// Returns a dictionary mapping app display names to bundle identifiers.
@@ -518,6 +566,7 @@ public class DatabaseReader {
         sqlite3_exec(db, "DELETE FROM activities", nil, nil, nil)
         sqlite3_exec(db, "DELETE FROM daily_summaries", nil, nil, nil)
         sqlite3_exec(db, "DELETE FROM chat_messages", nil, nil, nil)
+        sqlite3_exec(db, "DELETE FROM stubs_content", nil, nil, nil)
 
         Logger.info("Cleared all data from 6 tables (\(paths.count) screenshot files)")
         return paths

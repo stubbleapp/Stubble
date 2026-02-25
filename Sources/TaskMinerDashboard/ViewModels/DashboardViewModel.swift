@@ -43,13 +43,22 @@ final class DashboardViewModel {
     var activitiesError: String?
     var activityGenerator: ProjectActivityGenerator?
 
-    // Stubs page (AI-generated, ephemeral)
+    // Stubs page (AI-generated, persisted per day)
     var recommendations: [Recommendation] = []
     var greetingContext: String?
+    var daySummaryContent: String?
     var suggestedQuestions: [String] = []
     var isGeneratingRecommendations = false
     var recommendationsError: String?
     var recommendationGenerator: RecommendationGenerator?
+    /// Tracks whether we've already attempted to auto-generate stubs for this date,
+    /// so we don't re-trigger on every tab switch.
+    var hasAttemptedStubsGeneration = false
+
+    /// Whether the user is viewing today's date (forward-looking stubs) or a past day (retrospective summary).
+    var isViewingToday: Bool {
+        Calendar.current.isDateInToday(selectedDate)
+    }
 
     // Expand state — only one item expanded at a time across the whole screen.
     // Setting one to a value automatically means the others are collapsed.
@@ -139,6 +148,9 @@ final class DashboardViewModel {
         loadChatHistory()
         loadAppNameMap()
         startPausePolling()
+
+        // Auto-generate day summaries for recent past days that don't have one yet
+        autoGeneratePendingSummaries()
     }
 
     func selectDate(_ date: Date) {
@@ -147,8 +159,27 @@ final class DashboardViewModel {
         chatMessages = []
         chatError = nil
         isChatLoading = false
+        // Reset stubs state for the new date
+        recommendations = []
+        greetingContext = nil
+        daySummaryContent = nil
+        suggestedQuestions = []
+        hasAttemptedStubsGeneration = false
+        recommendationsError = nil
         loadDataForSelectedDate()
         loadChatHistory()
+
+        // Auto-generate stubs if no persisted content was loaded and we have data.
+        // This handles the case where the user changes dates while already on the Stubs tab
+        // (where onAppear won't re-fire).
+        if recommendations.isEmpty
+            && daySummaryContent == nil
+            && !isGeneratingRecommendations
+            && hasGeminiKey
+            && !tasks.isEmpty {
+            hasAttemptedStubsGeneration = true
+            generateRecommendations()
+        }
     }
 
     /// Whether the selected date is today.
@@ -414,6 +445,56 @@ final class DashboardViewModel {
         // Load persisted project activities
         let paRecords = db.projectActivities(for: selectedDate)
         projectActivities = paRecords.map { ProjectActivity(from: $0) }
+
+        // Load persisted stubs content (if previously generated for this date)
+        loadPersistedStubs(from: db)
+    }
+
+    /// Attempt to load stubs content from the database for the selected date.
+    /// If found, populates greetingContext, daySummaryContent, suggestedQuestions, and recommendations.
+    private func loadPersistedStubs(from db: DatabaseReader) {
+        guard let record = db.stubsContent(for: selectedDate) else { return }
+
+        greetingContext = record.greetingContext.isEmpty ? nil : record.greetingContext
+        daySummaryContent = record.daySummary
+
+        // Deserialize questions
+        if let data = record.questionsJson.data(using: .utf8),
+           let questions = try? JSONSerialization.jsonObject(with: data) as? [String] {
+            suggestedQuestions = questions
+        }
+
+        // Deserialize recommendations
+        if let data = record.recommendationsJson.data(using: .utf8),
+           let items = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] {
+            recommendations = items.compactMap { dict -> Recommendation? in
+                guard let categoryStr = dict["category"] as? String,
+                      let title = dict["title"] as? String,
+                      let description = dict["description"] as? String,
+                      let reason = dict["reason"] as? String
+                else { return nil }
+
+                let category = Recommendation.Category(rawValue: categoryStr) ?? .bestPractice
+                let actionURL = dict["action_url"] as? String
+                let iconName = dict["icon"] as? String ?? category.defaultIcon
+
+                return Recommendation(
+                    id: UUID(),
+                    category: category,
+                    title: title,
+                    description: description,
+                    reason: reason,
+                    actionLabel: actionURL != nil ? category.defaultActionLabel : "Noted",
+                    actionURL: actionURL,
+                    iconName: iconName
+                )
+            }
+        }
+
+        // Mark as already loaded so auto-generate doesn't fire
+        if !recommendations.isEmpty || daySummaryContent != nil {
+            hasAttemptedStubsGeneration = true
+        }
     }
 
     // MARK: - Clear All Data
@@ -453,6 +534,7 @@ final class DashboardViewModel {
         projectActivities = []
         recommendations = []
         greetingContext = nil
+        daySummaryContent = nil
         suggestedQuestions = []
         chatMessages = []
         chatError = nil

@@ -93,7 +93,77 @@ final class RecommendationGenerator: Sendable {
             Logger.warning("RecommendationGenerator: empty parse result (attempt \(attempt + 1)), retrying")
         }
 
-        return StubsContent(greetingContext: "", suggestedQuestions: [], recommendations: [])
+        return StubsContent(greetingContext: "", daySummary: nil, suggestedQuestions: [], recommendations: [])
+    }
+
+    /// Generate a retrospective day summary for a past day.
+    func generateDaySummary(
+        recentTasks: [String: [TaskRecord]],
+        projectActivities: [ProjectActivity],
+        appsUsed: [String: TimeInterval],
+        memoryContext: String?,
+        activityLog: String? = nil,
+        dateLabel: String
+    ) async throws -> StubsContent {
+        let prompt = buildPrompt(
+            recentTasks: recentTasks,
+            projectActivities: projectActivities,
+            appsUsed: appsUsed,
+            memoryContext: memoryContext,
+            activityLog: activityLog
+        )
+
+        let systemInstruction = """
+        You are a knowledgeable productivity assistant embedded in a desktop activity tracker called Stubble. \
+        The user is reviewing a past day (\(dateLabel)). Provide a comprehensive retrospective analysis. \
+        \
+        Your output has four parts: \
+        1. greeting_context: A warm, casual 1 sentence intro referencing the date and the main theme of the day \
+           (e.g. "Last Tuesday was a big coding day" or "Wednesday was split between meetings and design work"). \
+        2. day_summary: A comprehensive 2-4 paragraph narrative of what was done that day. Include: \
+           - What the user worked on and how their time was split \
+           - Notable patterns (e.g. "You spent most of the morning in deep focus on code, then switched to communications after lunch") \
+           - Observations about work habits, context-switching, or focus blocks \
+           - Any interesting trends (apps used, projects touched, time distribution) \
+           Write in second person ("you"), warm and conversational. Use markdown for structure (bold, lists) where it helps. \
+        3. suggested_questions: 3-4 thoughtful questions about that day's work \
+           (e.g. "How could I have reduced the context-switching between projects?"). \
+        4. recommendations: 1-3 brief takeaways or insights specific to that day. \
+        \
+        Rules: \
+        - Be specific — reference actual tasks, apps, and projects from the data \
+        - The day_summary should feel like a thoughtful end-of-day review \
+        - Don't be generic — every observation should be rooted in the actual data \
+        - If the data is sparse, keep the summary short and honest about it \
+        \
+        Respond with a JSON object. Do not include any text outside the JSON. \
+        \
+        JSON format: \
+        { "greeting_context": "...", "day_summary": "...", "suggested_questions": [...], \
+          "recommendations": [{"category": "...", "title": "...", "description": "...", \
+          "reason": "...", "action_url": null, "icon": "..."}] }
+        """
+
+        for attempt in 0..<2 {
+            let response: String
+            do {
+                response = try await geminiClient.generateContent(
+                    prompt: prompt,
+                    systemInstruction: systemInstruction
+                )
+            } catch {
+                throw error
+            }
+
+            let content = parseDaySummaryResponse(response)
+            if content.daySummary != nil || attempt == 1 {
+                return content
+            }
+
+            Logger.warning("RecommendationGenerator: empty day summary parse (attempt \(attempt + 1)), retrying")
+        }
+
+        return StubsContent(greetingContext: "", daySummary: nil, suggestedQuestions: [], recommendations: [])
     }
 
     // MARK: - Prompt Building
@@ -212,7 +282,7 @@ final class RecommendationGenerator: Sendable {
               let items = parsed["recommendations"] as? [[String: Any]]
         else {
             Logger.error("RecommendationGenerator: failed to parse response. Preview: \(String(response.prefix(300)))")
-            return StubsContent(greetingContext: "", suggestedQuestions: [], recommendations: [])
+            return StubsContent(greetingContext: "", daySummary: nil, suggestedQuestions: [], recommendations: [])
         }
 
         let greetingContext = parsed["greeting_context"] as? String ?? ""
@@ -243,6 +313,49 @@ final class RecommendationGenerator: Sendable {
 
         return StubsContent(
             greetingContext: greetingContext,
+            daySummary: nil,
+            suggestedQuestions: suggestedQuestions,
+            recommendations: recommendations
+        )
+    }
+
+    private func parseDaySummaryResponse(_ response: String) -> StubsContent {
+        guard let parsed = JSONSanitizer.parse(response) as? [String: Any] else {
+            Logger.error("RecommendationGenerator: failed to parse day summary. Preview: \(String(response.prefix(300)))")
+            return StubsContent(greetingContext: "", daySummary: nil, suggestedQuestions: [], recommendations: [])
+        }
+
+        let greetingContext = parsed["greeting_context"] as? String ?? ""
+        let daySummary = parsed["day_summary"] as? String
+        let suggestedQuestions = parsed["suggested_questions"] as? [String] ?? []
+
+        let items = parsed["recommendations"] as? [[String: Any]] ?? []
+        let recommendations = items.compactMap { dict -> Recommendation? in
+            guard let categoryStr = dict["category"] as? String,
+                  let title = dict["title"] as? String,
+                  let description = dict["description"] as? String,
+                  let reason = dict["reason"] as? String
+            else { return nil }
+
+            let category = Recommendation.Category(rawValue: categoryStr) ?? .bestPractice
+            let actionURL = dict["action_url"] as? String
+            let iconName = dict["icon"] as? String ?? category.defaultIcon
+
+            return Recommendation(
+                id: UUID(),
+                category: category,
+                title: title,
+                description: description,
+                reason: reason,
+                actionLabel: actionURL != nil ? category.defaultActionLabel : "Noted",
+                actionURL: actionURL,
+                iconName: iconName
+            )
+        }
+
+        return StubsContent(
+            greetingContext: greetingContext,
+            daySummary: daySummary,
             suggestedQuestions: suggestedQuestions,
             recommendations: recommendations
         )

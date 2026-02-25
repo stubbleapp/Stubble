@@ -65,6 +65,8 @@ public final class UserMemoryStore: Sendable {
         do {
             let data = try JSONEncoder.iso8601.encode(entries)
             try data.write(to: filePath, options: .atomic)
+            // Restrict memory file to owner-only access (0600) — contains inferred personal details.
+            try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: filePath.path)
         } catch {
             Logger.error("UserMemoryStore: failed to save \(entries.count) entries to \(filePath.lastPathComponent): \(error.localizedDescription)")
         }

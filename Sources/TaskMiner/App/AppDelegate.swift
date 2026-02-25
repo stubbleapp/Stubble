@@ -408,6 +408,8 @@ class AppDelegate {
                 Logger.error("Screenshot save failed to \(path.path)")
                 return
             }
+            // Restrict screenshot file to owner-only access (0600)
+            self.screenshotStorage.restrictPermissions(at: path)
             var ocrText = self.ocrEngine.recognizeText(in: image)
             if let text = ocrText {
                 Logger.debug("OCR extracted \(text.count) chars from screenshot")
