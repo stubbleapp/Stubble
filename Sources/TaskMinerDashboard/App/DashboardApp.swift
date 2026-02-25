@@ -68,7 +68,20 @@ struct DashboardApp: App {
                     .disabled(!updater.canCheckForUpdates)
                 }
             }
+            CommandGroup(replacing: .appSettings) {
+                OpenSettingsButton()
+            }
         }
+
+        Window("Settings", id: "settings") {
+            SettingsView()
+                .environment(viewModel)
+                .tint(Theme.accent)
+        }
+        .windowStyle(.titleBar)
+        .windowToolbarStyle(.unified(showsTitle: false))
+        .defaultSize(width: 460, height: 560)
+        .windowResizability(.contentSize)
     }
 
     private func showAboutPanel() {
@@ -86,5 +99,18 @@ struct DashboardApp: App {
                 ]
             )
         ])
+    }
+}
+
+/// Menu button that opens the Settings window via `openWindow`.
+/// Defined as a View so `@Environment(\.openWindow)` is available.
+private struct OpenSettingsButton: View {
+    @Environment(\.openWindow) var openWindow
+
+    var body: some View {
+        Button("Settings\u{2026}") {
+            openWindow(id: "settings")
+        }
+        .keyboardShortcut(",", modifiers: .command)
     }
 }

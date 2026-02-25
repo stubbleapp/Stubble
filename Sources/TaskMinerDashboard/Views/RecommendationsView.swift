@@ -68,94 +68,36 @@ struct RecommendationsView: View {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 0) {
                         // Header — greeting + refresh
-                        HStack(alignment: .top) {
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text("Hey, \(firstName)")
-                                    .font(.system(size: 22, weight: .bold))
-                                    .foregroundStyle(Theme.textPrimary)
-
-                                if let context = viewModel.greetingContext {
-                                    Text(context)
-                                        .font(.system(size: 13))
-                                        .foregroundStyle(Theme.textMuted)
-                                        .lineSpacing(2)
-                                        .fixedSize(horizontal: false, vertical: true)
-                                }
-                            }
-
-                            Spacer()
-
-                            Button(action: { viewModel.generateRecommendations() }) {
-                                Image(systemName: "arrow.clockwise")
-                                    .font(.system(size: 14, weight: .medium))
-                                    .foregroundStyle(Theme.accent)
-                                    .symbolEffect(.bounce, value: viewModel.isGeneratingRecommendations)
-                                    .frame(width: 32, height: 32)
-                                    .background(Theme.accent.opacity(0.08))
-                                    .clipShape(Circle())
-                            }
-                            .buttonStyle(.plain)
-                            .disabled(viewModel.isGeneratingRecommendations)
-                            .help("Regenerate stubs")
-                            .accessibilityLabel("Regenerate stubs")
-                        }
-                        .padding(.horizontal, 20)
-                        .padding(.top, 16)
-                        .padding(.bottom, 12)
+                        headerSection
+                            .padding(.horizontal, 24)
+                            .padding(.top, 20)
+                            .padding(.bottom, 16)
 
                         // Error banner
                         if let error = viewModel.recommendationsError {
-                            HStack(spacing: 8) {
-                                Text(error)
-                                    .font(.system(size: 12))
-                                    .foregroundStyle(Theme.textSecondary)
-                                    .lineLimit(2)
-                                Spacer()
-                                Button {
-                                    viewModel.recommendationsError = nil
-                                } label: {
-                                    Image(systemName: "xmark")
-                                        .font(.system(size: 10, weight: .medium))
-                                        .foregroundStyle(Theme.textMuted)
-                                }
-                                .buttonStyle(.plain)
-                            }
-                            .padding(10)
-                            .background(.ultraThinMaterial)
-                            .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 8, style: .continuous)
-                                    .stroke(Theme.statusError.opacity(0.2), lineWidth: 0.5)
-                            )
-                            .padding(.horizontal, 20)
-                            .padding(.bottom, 8)
+                            errorBanner(error)
+                                .padding(.horizontal, 24)
+                                .padding(.bottom, 12)
                         }
 
                         // Day summary (past days only)
                         if let summary = viewModel.daySummaryContent {
-                            daySummarySection(summary)
-                                .padding(.horizontal, 20)
-                                .padding(.bottom, 12)
+                            daySummaryCard(summary)
+                                .padding(.horizontal, 24)
+                                .padding(.bottom, 16)
                         }
 
-                        // Recommendation / insight cards
+                        // Insight rows
                         if !viewModel.recommendations.isEmpty {
-                            LazyVStack(spacing: 8) {
-                                ForEach(viewModel.recommendations) { tip in
-                                    TipCardView(
-                                        tip: tip,
-                                        onDismiss: { viewModel.dismissRecommendation(id: tip.id) }
-                                    )
-                                }
-                            }
-                            .padding(.horizontal, 20)
+                            insightsSection
+                                .padding(.horizontal, 24)
+                                .padding(.bottom, 16)
                         }
 
-                        // Suggested questions — chat bubble style
+                        // Suggested questions — horizontal pills
                         if !viewModel.suggestedQuestions.isEmpty {
-                            suggestedQuestionsSection
-                                .padding(.horizontal, 20)
-                                .padding(.top, 16)
+                            questionPills
+                                .padding(.bottom, 16)
                         }
 
                         Spacer().frame(height: 64)
@@ -176,57 +118,143 @@ struct RecommendationsView: View {
         }
     }
 
-    // MARK: - Day Summary
+    // MARK: - Header
 
-    @ViewBuilder
-    private func daySummarySection(_ summary: String) -> some View {
-        let rendered = Self.renderMarkdown(summary)
-        if let attributed = rendered {
-            Text(attributed)
-                .font(.system(size: 13))
-                .foregroundStyle(Theme.textSecondary)
-                .lineSpacing(3)
-                .fixedSize(horizontal: false, vertical: true)
-                .textSelection(.enabled)
-        } else {
-            Text(summary)
-                .font(.system(size: 13))
-                .foregroundStyle(Theme.textSecondary)
-                .lineSpacing(3)
-                .fixedSize(horizontal: false, vertical: true)
-                .textSelection(.enabled)
+    private var headerSection: some View {
+        HStack(alignment: .top) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Hey, \(firstName)")
+                    .font(.system(size: 22, weight: .bold))
+                    .foregroundStyle(Theme.textPrimary)
+
+                if let context = viewModel.greetingContext {
+                    Text(context)
+                        .font(.system(size: 13))
+                        .foregroundStyle(Theme.textMuted)
+                        .lineSpacing(2)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+
+            Spacer()
+
+            Button(action: { viewModel.generateRecommendations() }) {
+                Image(systemName: "arrow.clockwise")
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(Theme.textMuted)
+                    .symbolEffect(.bounce, value: viewModel.isGeneratingRecommendations)
+                    .frame(width: 28, height: 28)
+                    .background(.ultraThinMaterial)
+                    .clipShape(Circle())
+                    .overlay(
+                        Circle()
+                            .strokeBorder(Theme.cardBorder, lineWidth: 0.5)
+                    )
+            }
+            .buttonStyle(.plain)
+            .disabled(viewModel.isGeneratingRecommendations)
+            .help("Regenerate stubs")
+            .accessibilityLabel("Regenerate stubs")
         }
     }
 
-    // MARK: - Suggested Questions (Chat Bubble Style)
+    // MARK: - Error Banner
 
-    private var suggestedQuestionsSection: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            ForEach(viewModel.suggestedQuestions, id: \.self) { question in
-                Button {
-                    viewModel.pendingChatQuestion = question
-                } label: {
-                    HStack {
+    private func errorBanner(_ error: String) -> some View {
+        HStack(spacing: 8) {
+            Text(error)
+                .font(.system(size: 12))
+                .foregroundStyle(Theme.textSecondary)
+                .lineLimit(2)
+            Spacer()
+            Button {
+                viewModel.recommendationsError = nil
+            } label: {
+                Image(systemName: "xmark")
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundStyle(Theme.textMuted)
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(10)
+        .background(.ultraThinMaterial)
+        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .stroke(Theme.statusError.opacity(0.2), lineWidth: 0.5)
+        )
+    }
+
+    // MARK: - Day Summary Card
+
+    @ViewBuilder
+    private func daySummaryCard(_ summary: String) -> some View {
+        let rendered = Self.renderMarkdown(summary)
+        VStack(alignment: .leading, spacing: 0) {
+            if let attributed = rendered {
+                Text(attributed)
+                    .font(.system(size: 13))
+                    .foregroundStyle(Theme.textSecondary)
+                    .lineSpacing(3)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .textSelection(.enabled)
+            } else {
+                Text(summary)
+                    .font(.system(size: 13))
+                    .foregroundStyle(Theme.textSecondary)
+                    .lineSpacing(3)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .textSelection(.enabled)
+            }
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(.ultraThinMaterial)
+        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .strokeBorder(Theme.cardBorder, lineWidth: 0.5)
+        )
+    }
+
+    // MARK: - Insights Section
+
+    private var insightsSection: some View {
+        VStack(spacing: 2) {
+            ForEach(viewModel.recommendations) { tip in
+                InsightRow(
+                    tip: tip,
+                    onDismiss: { viewModel.dismissRecommendation(id: tip.id) }
+                )
+            }
+        }
+    }
+
+    // MARK: - Question Pills (horizontal scroll)
+
+    private var questionPills: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                ForEach(viewModel.suggestedQuestions, id: \.self) { question in
+                    Button {
+                        viewModel.pendingChatQuestion = question
+                    } label: {
                         Text(question)
-                            .font(.system(size: 13))
+                            .font(.system(size: 12, weight: .medium))
                             .foregroundStyle(Theme.textPrimary)
-                            .fixedSize(horizontal: false, vertical: true)
-                            .lineLimit(2)
-                            .lineSpacing(3)
-                            .padding(.horizontal, 12)
-                            .padding(.vertical, 10)
-                            .background(Theme.cardBackground)
-                            .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                            .padding(.horizontal, 14)
+                            .padding(.vertical, 8)
+                            .background(.ultraThinMaterial)
+                            .clipShape(Capsule())
                             .overlay(
-                                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                                Capsule()
                                     .strokeBorder(Theme.cardBorder, lineWidth: 0.5)
                             )
-
-                        Spacer(minLength: 48)
                     }
+                    .buttonStyle(.plain)
                 }
-                .buttonStyle(.plain)
             }
+            .padding(.horizontal, 24)
         }
     }
 
@@ -258,12 +286,12 @@ struct RecommendationsView: View {
                     let indent = str[str.startIndex..<str.index(before: match.upperBound)]
                     let rest = str[match.upperBound...]
                     let indentStr = String(indent)
-                        .replacingOccurrences(of: "-", with: "◦")
-                        .replacingOccurrences(of: "*", with: "◦")
+                        .replacingOccurrences(of: "-", with: "\u{25E6}")
+                        .replacingOccurrences(of: "*", with: "\u{25E6}")
                     return "\(indentStr) \(rest)"
                 }
                 if let range = str.range(of: #"^[\-\*]\s"#, options: .regularExpression) {
-                    return "•\u{2002}" + str[range.upperBound...]
+                    return "\u{2022}\u{2002}" + str[range.upperBound...]
                 }
                 if str.hasPrefix("## ") {
                     return "**" + str.dropFirst(3) + "**"
@@ -277,78 +305,100 @@ struct RecommendationsView: View {
     }
 }
 
-// MARK: - Tip Card
+// MARK: - Insight Row (single-line glass, hover reveals description)
 
-private struct TipCardView: View {
+private struct InsightRow: View {
     let tip: Recommendation
     let onDismiss: () -> Void
     @State private var isHovering = false
+    @State private var isExpanded = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            // Category + dismiss
-            HStack {
-                Text(tip.category.displayName.uppercased())
-                    .font(.system(size: 10, weight: .medium, design: .rounded))
-                    .foregroundStyle(Theme.textMuted)
-                    .tracking(0.5)
-
-                Spacer()
-
-                Button(action: onDismiss) {
-                    Image(systemName: "xmark")
-                        .font(.system(size: 9, weight: .medium))
-                        .foregroundStyle(Theme.textMuted.opacity(0.6))
+            // Always-visible: icon + title
+            Button {
+                withAnimation(.easeInOut(duration: 0.2)) {
+                    isExpanded.toggle()
                 }
-                .buttonStyle(.plain)
-                .opacity(isHovering ? 1 : 0)
-            }
-            .padding(.bottom, 6)
+            } label: {
+                HStack(spacing: 10) {
+                    Image(systemName: tip.iconName)
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(Theme.textMuted)
+                        .frame(width: 20)
 
-            // Title
-            Text(tip.title)
-                .font(.system(size: 13, weight: .semibold))
-                .foregroundStyle(Theme.textPrimary)
-                .fixedSize(horizontal: false, vertical: true)
-                .padding(.bottom, 4)
+                    Text(tip.title)
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundStyle(Theme.textPrimary)
+                        .lineLimit(1)
 
-            // Description
-            Text(tip.description)
-                .font(.system(size: 12))
-                .foregroundStyle(Theme.textSecondary)
-                .fixedSize(horizontal: false, vertical: true)
-                .lineSpacing(2)
+                    Spacer(minLength: 4)
 
-            // Action link
-            if let urlStr = tip.actionURL,
-               let url = URL(string: urlStr) {
-                Button {
-                    NSWorkspace.shared.open(url)
-                } label: {
-                    HStack(spacing: 3) {
-                        Text(tip.actionLabel)
-                            .font(.system(size: 11, weight: .medium))
-                        Image(systemName: "arrow.up.right")
-                            .font(.system(size: 8, weight: .semibold))
+                    // Dismiss — only on hover
+                    if isHovering {
+                        Button(action: onDismiss) {
+                            Image(systemName: "xmark")
+                                .font(.system(size: 9, weight: .medium))
+                                .foregroundStyle(Theme.textMuted.opacity(0.6))
+                        }
+                        .buttonStyle(.plain)
+                        .transition(.opacity)
                     }
-                    .foregroundStyle(Theme.accent)
+
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 10, weight: .medium))
+                        .foregroundStyle(Theme.textQuaternary)
+                        .rotationEffect(.degrees(isExpanded ? 90 : 0))
                 }
-                .buttonStyle(.plain)
-                .padding(.top, 8)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 10)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+
+            // Expanded detail
+            if isExpanded {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text(tip.description)
+                        .font(.system(size: 12))
+                        .foregroundStyle(Theme.textSecondary)
+                        .lineSpacing(2)
+                        .fixedSize(horizontal: false, vertical: true)
+
+                    if let urlStr = tip.actionURL,
+                       let url = URL(string: urlStr) {
+                        Button {
+                            NSWorkspace.shared.open(url)
+                        } label: {
+                            HStack(spacing: 3) {
+                                Text(tip.actionLabel)
+                                    .font(.system(size: 11, weight: .medium))
+                                Image(systemName: "arrow.up.right")
+                                    .font(.system(size: 8, weight: .semibold))
+                            }
+                            .foregroundStyle(Theme.accent)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .padding(.horizontal, 12)
+                .padding(.leading, 30) // Align with title text (past icon)
+                .padding(.bottom, 10)
+                .transition(.opacity.combined(with: .move(edge: .top)))
             }
         }
-        .padding(14)
         .background(
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
                 .fill(.ultraThinMaterial)
         )
         .overlay(
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .stroke(Theme.cardBorder, lineWidth: 0.5)
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .strokeBorder(Theme.cardBorder, lineWidth: 0.5)
         )
-        .shadow(color: .black.opacity(0.03), radius: 6, y: 2)
         .onHover { hovering in
-            isHovering = hovering
+            withAnimation(.easeInOut(duration: 0.15)) {
+                isHovering = hovering
+            }
         }
     }
 }

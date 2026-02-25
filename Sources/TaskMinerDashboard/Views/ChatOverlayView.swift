@@ -24,23 +24,28 @@ struct ChatOverlayView: View {
                     .transition(.move(edge: .bottom).combined(with: .opacity))
             }
 
-            // Input bar — always visible at the bottom
-            inputBar
+            // Input bar — collapsed: tappable placeholder, expanded: real text field
+            if isExpanded {
+                expandedInputBar
+            } else {
+                collapsedInputBar
+            }
         }
         .background(
-            RoundedRectangle(cornerRadius: isExpanded ? 16 : 12, style: .continuous)
-                .fill(.ultraThinMaterial)
-                .shadow(color: .black.opacity(0.12), radius: 12, y: -4)
+            RoundedRectangle(cornerRadius: isExpanded ? 20 : 14, style: .continuous)
+                .fill(.white.opacity(0.88))
+                .shadow(color: .black.opacity(0.06), radius: 20, y: -6)
+                .shadow(color: .black.opacity(0.04), radius: 6, y: -2)
         )
         .overlay(
-            RoundedRectangle(cornerRadius: isExpanded ? 16 : 12, style: .continuous)
-                .strokeBorder(Theme.cardBorder, lineWidth: 0.5)
+            RoundedRectangle(cornerRadius: isExpanded ? 20 : 14, style: .continuous)
+                .strokeBorder(.white.opacity(0.5), lineWidth: 0.5)
         )
-        .clipShape(RoundedRectangle(cornerRadius: isExpanded ? 16 : 12, style: .continuous))
-        .padding(.horizontal, 16)
-        .padding(.bottom, 12)
+        .clipShape(RoundedRectangle(cornerRadius: isExpanded ? 20 : 14, style: .continuous))
+        .padding(.horizontal, 20)
+        .padding(.bottom, 16)
         .fixedSize(horizontal: false, vertical: true)
-        .animation(.easeInOut(duration: 0.25), value: isExpanded)
+        .animation(.spring(response: 0.35, dampingFraction: 0.85), value: isExpanded)
         .onChange(of: viewModel.pendingChatQuestion) { _, question in
             guard let question, !question.isEmpty else { return }
             inputText = question
@@ -49,50 +54,74 @@ struct ChatOverlayView: View {
         }
     }
 
-    // MARK: - Input Bar
+    // MARK: - Collapsed Input Bar
 
-    private var inputBar: some View {
-        HStack(spacing: 10) {
-            if isExpanded {
-                Button {
-                    withAnimation(.easeInOut(duration: 0.2)) {
-                        isExpanded = false
-                    }
-                } label: {
-                    Image(systemName: "chevron.down.circle.fill")
-                        .font(.system(size: 18))
-                        .foregroundStyle(Theme.textMuted)
+    private var collapsedInputBar: some View {
+        Button {
+            withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) { isExpanded = true }
+        } label: {
+            HStack(spacing: 10) {
+                Image(systemName: "sparkles")
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(Theme.accent.opacity(0.7))
+
+                Text("Ask about your day\u{2026}")
+                    .font(.system(size: 13))
+                    .foregroundStyle(Theme.textMuted)
+
+                Spacer()
+
+                if viewModel.isChatLoading {
+                    ProgressView()
+                        .scaleEffect(0.55)
+                        .frame(width: 24, height: 24)
+                } else {
+                    Image(systemName: "arrow.up.circle.fill")
+                        .font(.system(size: 20))
+                        .foregroundStyle(Theme.textQuaternary.opacity(0.5))
                 }
-                .buttonStyle(.plain)
             }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 11)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
+    // MARK: - Expanded Input Bar
+
+    private var expandedInputBar: some View {
+        HStack(spacing: 10) {
+            Button {
+                withAnimation(.spring(response: 0.3, dampingFraction: 0.85)) {
+                    isExpanded = false
+                }
+            } label: {
+                Image(systemName: "chevron.down")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(Theme.textMuted)
+                    .frame(width: 24, height: 24)
+                    .background(.ultraThinMaterial)
+                    .clipShape(Circle())
+            }
+            .buttonStyle(.plain)
 
             ChatTextField(
                 text: $inputText,
                 placeholder: "Ask about your day\u{2026}",
-                onSubmit: sendMessage,
-                onMouseDown: {
-                    if !isExpanded {
-                        withAnimation(.easeInOut(duration: 0.25)) { isExpanded = true }
-                    }
-                }
+                onSubmit: sendMessage
             )
             .frame(height: 22)
 
-            if viewModel.isChatLoading && !isExpanded {
-                ProgressView()
-                    .scaleEffect(0.6)
-                    .frame(width: 24, height: 24)
-            } else {
-                Button(action: sendMessage) {
-                    Image(systemName: "arrow.up.circle.fill")
-                        .font(.system(size: 22))
-                        .foregroundStyle(
-                            canSend ? Theme.accent : Theme.textQuaternary
-                        )
-                }
-                .buttonStyle(.plain)
-                .disabled(!canSend)
+            Button(action: sendMessage) {
+                Image(systemName: "arrow.up.circle.fill")
+                    .font(.system(size: 22))
+                    .foregroundStyle(
+                        canSend ? Theme.accent : Theme.textQuaternary.opacity(0.4)
+                    )
             }
+            .buttonStyle(.plain)
+            .disabled(!canSend)
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 10)
@@ -104,6 +133,10 @@ struct ChatOverlayView: View {
         VStack(spacing: 0) {
             // Header
             HStack {
+                Image(systemName: "sparkles")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(Theme.accent.opacity(0.6))
+
                 Text("Chat")
                     .font(.system(size: 12, weight: .semibold))
                     .foregroundStyle(Theme.textSecondary)
@@ -115,31 +148,40 @@ struct ChatOverlayView: View {
                         viewModel.clearChat()
                     } label: {
                         Image(systemName: "trash")
-                            .font(.system(size: 11))
-                            .foregroundStyle(Theme.textMuted)
+                            .font(.system(size: 10))
+                            .foregroundStyle(Theme.textMuted.opacity(0.6))
+                            .frame(width: 22, height: 22)
+                            .background(.ultraThinMaterial)
+                            .clipShape(Circle())
                     }
                     .buttonStyle(.plain)
                     .help("Clear chat")
                 }
 
                 Button {
-                    withAnimation(.easeInOut(duration: 0.2)) {
+                    withAnimation(.spring(response: 0.3, dampingFraction: 0.85)) {
                         isExpanded = false
                     }
                 } label: {
-                    Image(systemName: "xmark.circle.fill")
-                        .font(.system(size: 16))
-                        .foregroundStyle(Theme.textMuted)
+                    Image(systemName: "xmark")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(Theme.textMuted.opacity(0.6))
+                        .frame(width: 22, height: 22)
+                        .background(.ultraThinMaterial)
+                        .clipShape(Circle())
                 }
                 .buttonStyle(.plain)
                 .help("Close")
             }
             .padding(.horizontal, 16)
-            .padding(.top, 10)
-            .padding(.bottom, 4)
+            .padding(.top, 12)
+            .padding(.bottom, 6)
 
-            Divider()
-                .padding(.horizontal, 8)
+            // Subtle separator
+            Rectangle()
+                .fill(Color.black.opacity(0.04))
+                .frame(height: 0.5)
+                .padding(.horizontal, 12)
 
             // Messages or suggestions
             if viewModel.chatMessages.isEmpty && !viewModel.isChatLoading {
@@ -148,39 +190,42 @@ struct ChatOverlayView: View {
                 messagesScrollView
             }
 
-            Divider()
-                .padding(.horizontal, 8)
+            // Subtle separator
+            Rectangle()
+                .fill(Color.black.opacity(0.04))
+                .frame(height: 0.5)
+                .padding(.horizontal, 12)
         }
     }
 
     // MARK: - Suggestions Panel
 
     private var suggestionsPanel: some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: 4) {
             ForEach(Self.suggestions, id: \.self) { suggestion in
                 Button {
                     inputText = suggestion
                     sendMessage()
                 } label: {
-                    Text(suggestion)
-                        .font(.system(size: 12, weight: .medium))
-                        .foregroundStyle(Theme.textPrimary)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 8)
-                        .background(
-                            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                                .fill(Theme.surfaceElevated)
-                        )
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                                .strokeBorder(Theme.textQuaternary, lineWidth: 0.5)
-                        )
+                    HStack(spacing: 8) {
+                        Text(suggestion)
+                            .font(.system(size: 12, weight: .medium))
+                            .foregroundStyle(Theme.textPrimary)
+
+                        Spacer()
+
+                        Image(systemName: "arrow.up.right")
+                            .font(.system(size: 9, weight: .semibold))
+                            .foregroundStyle(Theme.textQuaternary)
+                    }
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 8)
+                    .contentShape(Rectangle())
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(SuggestionButtonStyle())
             }
         }
-        .padding(.horizontal, 16)
+        .padding(.horizontal, 12)
         .padding(.vertical, 10)
     }
 
@@ -189,45 +234,24 @@ struct ChatOverlayView: View {
     private var messagesScrollView: some View {
         ScrollViewReader { proxy in
             ScrollView {
-                LazyVStack(spacing: 12) {
+                LazyVStack(spacing: 10) {
                     ForEach(viewModel.chatMessages) { message in
                         MessageBubble(message: message)
                             .id(message.id)
                     }
 
                     if let error = viewModel.chatError {
-                        HStack(spacing: 6) {
-                            Image(systemName: "exclamationmark.triangle.fill")
-                                .font(.caption2)
-                                .foregroundStyle(Theme.statusError)
-                            Text(error)
-                                .font(.system(size: 11))
-                                .foregroundStyle(Theme.textSecondary)
-                                .lineLimit(2)
-                            Spacer()
-                            Button {
-                                viewModel.chatError = nil
-                            } label: {
-                                Image(systemName: "xmark")
-                                    .font(.caption2)
-                                    .foregroundStyle(Theme.textMuted)
-                            }
-                            .buttonStyle(.plain)
-                        }
-                        .padding(8)
-                        .background(Theme.statusError.opacity(0.06))
-                        .cornerRadius(8)
-                        .id("error")
+                        errorRow(error)
+                            .id("error")
                     }
                 }
-                .padding(.horizontal, 16)
+                .padding(.horizontal, 14)
                 .padding(.vertical, 10)
             }
             .onChange(of: viewModel.chatMessages.count) { _, _ in
                 scrollToBottom(proxy: proxy)
             }
             .onChange(of: viewModel.chatMessages.last?.content) { _, _ in
-                // Auto-scroll during streaming — no animation to avoid jank
                 if let last = viewModel.chatMessages.last {
                     proxy.scrollTo(last.id, anchor: .bottom)
                 }
@@ -239,6 +263,32 @@ struct ChatOverlayView: View {
             }
         }
         .frame(minHeight: 60, maxHeight: 300)
+    }
+
+    // MARK: - Error Row
+
+    private func errorRow(_ error: String) -> some View {
+        HStack(spacing: 6) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .font(.caption2)
+                .foregroundStyle(Theme.statusError.opacity(0.7))
+            Text(error)
+                .font(.system(size: 11))
+                .foregroundStyle(Theme.textSecondary)
+                .lineLimit(2)
+            Spacer()
+            Button {
+                viewModel.chatError = nil
+            } label: {
+                Image(systemName: "xmark")
+                    .font(.system(size: 8, weight: .semibold))
+                    .foregroundStyle(Theme.textMuted)
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(8)
+        .background(Theme.statusError.opacity(0.04))
+        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
     }
 
     // MARK: - Helpers
@@ -253,9 +303,8 @@ struct ChatOverlayView: View {
         inputText = ""
         viewModel.sendChatMessage(text)
 
-        // Always expand when sending — shows the loading indicator immediately
         if !isExpanded {
-            withAnimation(.easeInOut(duration: 0.25)) { isExpanded = true }
+            withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) { isExpanded = true }
         }
     }
 
@@ -268,29 +317,34 @@ struct ChatOverlayView: View {
     }
 }
 
-// MARK: - AppKit TextField (reliable keyboard input on macOS)
+// MARK: - Suggestion Button Style (hover highlight)
 
-/// Custom NSTextField subclass that notifies on mouseDown — needed because
-/// `controlTextDidBeginEditing` only fires when actual text editing starts,
-/// not on a simple click to gain focus.
-private class ClickableTextField: NSTextField {
-    var onMouseDown: (() -> Void)?
+private struct SuggestionButtonStyle: ButtonStyle {
+    @State private var isHovering = false
 
-    override func mouseDown(with event: NSEvent) {
-        onMouseDown?()
-        super.mouseDown(with: event)
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .background(
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .fill(isHovering ? Color.black.opacity(0.03) : Color.clear)
+            )
+            .onHover { hovering in
+                withAnimation(.easeInOut(duration: 0.12)) {
+                    isHovering = hovering
+                }
+            }
     }
 }
+
+// MARK: - AppKit TextField (auto-focuses on creation)
 
 private struct ChatTextField: NSViewRepresentable {
     @Binding var text: String
     var placeholder: String
     var onSubmit: () -> Void
-    var onMouseDown: () -> Void
 
-    func makeNSView(context: Context) -> ClickableTextField {
-        let field = ClickableTextField()
-        field.onMouseDown = onMouseDown
+    func makeNSView(context: Context) -> NSTextField {
+        let field = NSTextField()
         field.placeholderString = placeholder
         field.isBordered = false
         field.drawsBackground = false
@@ -300,14 +354,18 @@ private struct ChatTextField: NSViewRepresentable {
         field.lineBreakMode = .byTruncatingTail
         field.cell?.wraps = false
         field.cell?.isScrollable = true
+
+        // Auto-focus after the expansion animation settles
+        DispatchQueue.main.async {
+            field.window?.makeFirstResponder(field)
+        }
         return field
     }
 
-    func updateNSView(_ nsView: ClickableTextField, context: Context) {
+    func updateNSView(_ nsView: NSTextField, context: Context) {
         if nsView.stringValue != text {
             nsView.stringValue = text
         }
-        nsView.onMouseDown = onMouseDown
     }
 
     func makeCoordinator() -> Coordinator {
@@ -348,7 +406,6 @@ private struct MessageBubble: View {
 
             Group {
                 if message.isStreaming && message.content.isEmpty {
-                    // Pulsing dots while waiting for first chunk
                     streamingDotsView
                 } else if message.role == .assistant {
                     assistantContentView
@@ -362,20 +419,32 @@ private struct MessageBubble: View {
             .lineSpacing(3)
             .padding(.horizontal, 12)
             .padding(.vertical, 10)
-            .background(
-                message.role == .user
-                    ? AnyShapeStyle(Theme.accent)
-                    : AnyShapeStyle(Theme.cardBackground)
-            )
-            .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .background(bubbleBackground)
+            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
             .overlay(
                 message.role == .assistant
-                    ? RoundedRectangle(cornerRadius: 14, style: .continuous)
-                        .strokeBorder(Theme.cardBorder, lineWidth: 0.5)
+                    ? RoundedRectangle(cornerRadius: 16, style: .continuous)
+                        .strokeBorder(Color.black.opacity(0.04), lineWidth: 0.5)
                     : nil
+            )
+            .shadow(
+                color: message.role == .user ? Theme.accent.opacity(0.15) : .black.opacity(0.03),
+                radius: message.role == .user ? 6 : 3,
+                y: 2
             )
 
             if message.role == .assistant { Spacer(minLength: 48) }
+        }
+    }
+
+    @ViewBuilder
+    private var bubbleBackground: some View {
+        if message.role == .user {
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .fill(Theme.accent)
+        } else {
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .fill(.white.opacity(0.7))
         }
     }
 
@@ -383,7 +452,6 @@ private struct MessageBubble: View {
     @ViewBuilder
     private var assistantContentView: some View {
         if message.isStreaming {
-            // Plain text during streaming — avoids expensive markdown re-parse on every chunk
             Text(message.content + "\u{258E}")
                 .foregroundStyle(Theme.textPrimary)
         } else if let rendered = markdownText(message.content) {
@@ -398,43 +466,34 @@ private struct MessageBubble: View {
         HStack(spacing: 4) {
             ForEach(0..<3) { index in
                 Circle()
-                    .fill(Theme.textMuted)
-                    .frame(width: 6, height: 6)
-                    .opacity(0.4)
+                    .fill(Theme.textMuted.opacity(0.5))
+                    .frame(width: 5, height: 5)
                     .animation(
                         .easeInOut(duration: 0.6)
                             .repeatForever(autoreverses: true)
                             .delay(Double(index) * 0.2),
                         value: true
                     )
-                    .onAppear {} // trigger animation
+                    .onAppear {}
             }
         }
         .frame(height: 14)
     }
 
-    /// Pre-process markdown to convert block-level list syntax into Unicode bullets
-    /// before parsing, since we use `.inlineOnlyPreservingWhitespace` to preserve
-    /// paragraph breaks. Converts `- item` and `* item` → `• item`,
-    /// `  - nested` → `  ◦ nested`, and `1. item` → `1. item` (unchanged).
     private static func preprocessMarkdown(_ source: String) -> String {
         source
             .split(separator: "\n", omittingEmptySubsequences: false)
             .map { line in
                 let str = String(line)
-                // Nested list items (2+ spaces or tab before marker)
                 if let match = str.range(of: #"^(\s{2,}|\t)[\-\*]\s"#, options: .regularExpression) {
                     let indent = str[str.startIndex..<str.index(before: match.upperBound)]
                     let rest = str[match.upperBound...]
-                    // Replace the marker character with ◦, keep the indent
-                    let indentStr = String(indent).replacingOccurrences(of: "-", with: "◦").replacingOccurrences(of: "*", with: "◦")
+                    let indentStr = String(indent).replacingOccurrences(of: "-", with: "\u{25E6}").replacingOccurrences(of: "*", with: "\u{25E6}")
                     return "\(indentStr) \(rest)"
                 }
-                // Top-level unordered list items
                 if let range = str.range(of: #"^[\-\*]\s"#, options: .regularExpression) {
-                    return "•\u{2002}" + str[range.upperBound...]
+                    return "\u{2022}\u{2002}" + str[range.upperBound...]
                 }
-                // Headers → bold (strip ## markers)
                 if let range = str.range(of: #"^#{1,3}\s+"#, options: .regularExpression) {
                     return "**" + str[range.upperBound...] + "**"
                 }
@@ -443,9 +502,6 @@ private struct MessageBubble: View {
             .joined(separator: "\n")
     }
 
-    /// Parse markdown into an `AttributedString` for rich text rendering.
-    /// Pre-processes block-level elements (lists, headers) into inline equivalents,
-    /// then uses `.inlineOnlyPreservingWhitespace` to keep paragraph breaks visible.
     private func markdownText(_ source: String) -> AttributedString? {
         guard !source.isEmpty else { return nil }
         let processed = Self.preprocessMarkdown(source)
@@ -454,7 +510,6 @@ private struct MessageBubble: View {
         guard var attributed = try? AttributedString(markdown: processed, options: options) else {
             return nil
         }
-        // Ensure inline code uses a monospaced font at the same size
         for run in attributed.runs {
             if run.inlinePresentationIntent?.contains(.code) == true {
                 let range = run.range

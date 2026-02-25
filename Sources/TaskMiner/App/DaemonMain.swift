@@ -14,6 +14,11 @@ public enum DaemonMain {
     private static var pidFilePath: String = ""
 
     public static func run() -> Never {
+        // Hide from Dock and app switcher — the daemon is a background-only process.
+        // Must be set before anything triggers NSApplication.shared creation
+        // (NSWorkspace, AXObserver, etc.) to prevent a second Dock icon.
+        NSApplication.shared.setActivationPolicy(.prohibited)
+
         Logger.enableFileLogging()
 
         // MARK: - Configuration

@@ -10,188 +10,166 @@ struct SettingsView: View {
     @State private var customPrompt: String = ""
     @State private var granularity: TaskGranularity = .medium
     @State private var showClearConfirmation = false
+
     var body: some View {
-        VStack(spacing: 0) {
-            // Header
-            HStack {
-                Text("Settings")
-                    .font(.title3.weight(.semibold))
-                    .foregroundStyle(Theme.textPrimary)
-                Spacer()
-                Button { dismiss() } label: {
-                    Image(systemName: "xmark")
-                        .font(.system(size: 12, weight: .medium))
-                        .foregroundStyle(Theme.textSecondary)
-                        .frame(width: 24, height: 24)
-                        .background(.ultraThinMaterial)
-                        .clipShape(Circle())
-                }
-                .buttonStyle(.plain)
-            }
-            .padding()
+        ScrollView {
+            VStack(alignment: .leading, spacing: 24) {
+                // API Key
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Gemini API Key")
+                        .font(.subheadline.weight(.medium))
+                        .foregroundStyle(Theme.textPrimary)
 
-            Rectangle()
-                .fill(Theme.separator)
-                .frame(height: 1)
-
-            ScrollView {
-                VStack(alignment: .leading, spacing: 24) {
-                    // API Key
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("Gemini API Key")
-                            .font(.subheadline.weight(.medium))
-                            .foregroundStyle(Theme.textPrimary)
-
-                        HStack(spacing: 8) {
-                            Group {
-                                if showKey {
-                                    TextField("Enter your Gemini API key", text: $apiKey)
-                                } else {
-                                    SecureField("Enter your Gemini API key", text: $apiKey)
-                                }
+                    HStack(spacing: 8) {
+                        Group {
+                            if showKey {
+                                TextField("Enter your Gemini API key", text: $apiKey)
+                            } else {
+                                SecureField("Enter your Gemini API key", text: $apiKey)
                             }
-                            .textFieldStyle(.plain)
-                            .font(.system(size: 13, design: .monospaced))
-                            .padding(8)
-                            .background(.ultraThinMaterial)
-                            .cornerRadius(6)
-                            .accessibilityIdentifier("settings-api-key")
+                        }
+                        .textFieldStyle(.plain)
+                        .font(.system(size: 13, design: .monospaced))
+                        .padding(8)
+                        .background(Theme.surfaceElevated)
+                        .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+                        .accessibilityIdentifier("settings-api-key")
 
+                        Button {
+                            showKey.toggle()
+                        } label: {
+                            Image(systemName: showKey ? "eye.slash" : "eye")
+                                .font(.system(size: 12))
+                                .foregroundStyle(Theme.textMuted)
+                                .frame(width: 28, height: 28)
+                                .background(Theme.surfaceElevated)
+                                .clipShape(Circle())
+                        }
+                        .buttonStyle(.plain)
+                    }
+
+                    Text("Get a key from Google AI Studio.")
+                        .font(.caption2)
+                        .foregroundStyle(Theme.textMuted)
+                }
+
+                // Custom Prompt
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Custom Instructions")
+                        .font(.subheadline.weight(.medium))
+                        .foregroundStyle(Theme.textPrimary)
+
+                    TextEditor(text: $customPrompt)
+                        .font(.system(size: 12))
+                        .scrollContentBackground(.hidden)
+                        .frame(minHeight: 60, maxHeight: 100)
+                        .padding(8)
+                        .background(Theme.surfaceElevated)
+                        .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+
+                    Text("e.g. Ignore all YouTube and social media activity. Focus only on coding and design work.")
+                        .font(.caption2)
+                        .foregroundStyle(Theme.textMuted)
+                        .italic()
+                }
+
+                // Task Granularity
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Task Granularity")
+                        .font(.subheadline.weight(.medium))
+                        .foregroundStyle(Theme.textPrimary)
+
+                    HStack(spacing: 0) {
+                        ForEach(TaskGranularity.allCases, id: \.self) { level in
                             Button {
-                                showKey.toggle()
+                                withAnimation(.easeInOut(duration: 0.15)) {
+                                    granularity = level
+                                }
                             } label: {
-                                Image(systemName: showKey ? "eye.slash" : "eye")
-                                    .font(.system(size: 12))
-                                    .foregroundStyle(Theme.textMuted)
-                                    .frame(width: 28, height: 28)
-                                    .background(.ultraThinMaterial)
-                                    .clipShape(Circle())
+                                Text(level.displayName)
+                                    .font(.system(size: 12, weight: granularity == level ? .semibold : .regular))
+                                    .foregroundStyle(granularity == level ? Theme.textPrimary : Theme.textSecondary)
+                                    .frame(maxWidth: .infinity)
+                                    .padding(.vertical, 7)
+                                    .background(
+                                        RoundedRectangle(cornerRadius: 6, style: .continuous)
+                                            .fill(granularity == level ? Theme.selectedSurface : Color.clear)
+                                    )
+                                    .contentShape(Rectangle())
                             }
                             .buttonStyle(.plain)
                         }
-
-                        Text("Get a key from Google AI Studio.")
-                            .font(.caption2)
-                            .foregroundStyle(Theme.textMuted)
                     }
+                    .padding(3)
+                    .background(
+                        RoundedRectangle(cornerRadius: 8, style: .continuous)
+                            .fill(Theme.surfaceElevated)
+                    )
+                    .accessibilityIdentifier("settings-granularity")
 
-                    // Custom Prompt
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("Custom Instructions")
-                            .font(.subheadline.weight(.medium))
-                            .foregroundStyle(Theme.textPrimary)
-
-                        TextEditor(text: $customPrompt)
-                            .font(.system(size: 12))
-                            .scrollContentBackground(.hidden)
-                            .frame(minHeight: 60, maxHeight: 100)
-                            .padding(8)
-                            .background(.ultraThinMaterial)
-                            .cornerRadius(6)
-
-                        Text("e.g. Ignore all YouTube and social media activity. Focus only on coding and design work.")
-                            .font(.caption2)
-                            .foregroundStyle(Theme.textMuted)
-                            .italic()
-                    }
-
-                    // Task Granularity
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("Task Granularity")
-                            .font(.subheadline.weight(.medium))
-                            .foregroundStyle(Theme.textPrimary)
-
-                        HStack(spacing: 0) {
-                            ForEach(TaskGranularity.allCases, id: \.self) { level in
-                                Button {
-                                    withAnimation(.easeInOut(duration: 0.15)) {
-                                        granularity = level
-                                    }
-                                } label: {
-                                    Text(level.displayName)
-                                        .font(.system(size: 12, weight: granularity == level ? .semibold : .regular))
-                                        .foregroundStyle(granularity == level ? Theme.textPrimary : Theme.textSecondary)
-                                        .frame(maxWidth: .infinity)
-                                        .padding(.vertical, 7)
-                                        .background(
-                                            RoundedRectangle(cornerRadius: 6, style: .continuous)
-                                                .fill(granularity == level ? Theme.selectedSurface : Color.clear)
-                                        )
-                                        .contentShape(Rectangle())
-                                }
-                                .buttonStyle(.plain)
-                            }
-                        }
-                        .padding(3)
-                        .background(
-                            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                                .fill(.ultraThinMaterial)
-                        )
-                        .accessibilityIdentifier("settings-granularity")
-
-                        Text(granularity.description)
-                            .font(.caption2)
-                            .foregroundStyle(Theme.textMuted)
-                    }
-
-                    // Data
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("Data")
-                            .font(.subheadline.weight(.medium))
-                            .foregroundStyle(Theme.textPrimary)
-
-                        Button {
-                            showClearConfirmation = true
-                        } label: {
-                            Text("Clear All Data")
-                                .font(.system(size: 12, weight: .medium))
-                                .foregroundStyle(Theme.statusError)
-                        }
-                        .buttonStyle(.plain)
-                        .accessibilityIdentifier("settings-clear-data")
-
-                        Text("Permanently deletes all tasks, activities, screenshots, and memory. Your settings and API key are kept.")
-                            .font(.caption2)
-                            .foregroundStyle(Theme.textMuted)
-                    }
-
-                    // Save
-                    HStack(spacing: 12) {
-                        Spacer()
-
-                        Button {
-                            viewModel.updateGeminiKey(apiKey)
-                            let trimmed = customPrompt.trimmingCharacters(in: .whitespacesAndNewlines)
-                            SettingsManager.shared.customPrompt = trimmed.isEmpty ? nil : trimmed
-                            SettingsManager.shared.granularity = granularity
-                            Analytics.settingChanged("granularity", value: granularity.displayName)
-                            saved = true
-                            hideSavedAfterDelay()
-                        } label: {
-                            HStack(spacing: 4) {
-                                if saved {
-                                    Image(systemName: "checkmark")
-                                        .font(.system(size: 10, weight: .bold))
-                                }
-                                Text(saved ? "Saved" : "Save")
-                            }
-                            .font(.system(size: 12, weight: .medium))
-                            .foregroundStyle(.white)
-                            .padding(.horizontal, 16)
-                            .padding(.vertical, 6)
-                            .background(saved ? Theme.statusActive : Theme.accent)
-                            .clipShape(Capsule())
-                        }
-                        .buttonStyle(.plain)
-                        .accessibilityIdentifier("settings-save")
-                        .animation(.easeInOut(duration: 0.2), value: saved)
-                    }
+                    Text(granularity.description)
+                        .font(.caption2)
+                        .foregroundStyle(Theme.textMuted)
                 }
-                .padding()
+
+                // Data
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Data")
+                        .font(.subheadline.weight(.medium))
+                        .foregroundStyle(Theme.textPrimary)
+
+                    Button {
+                        showClearConfirmation = true
+                    } label: {
+                        Text("Clear All Data")
+                            .font(.system(size: 12, weight: .medium))
+                            .foregroundStyle(Theme.statusError)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityIdentifier("settings-clear-data")
+
+                    Text("Permanently deletes all tasks, activities, screenshots, and memory. Your settings and API key are kept.")
+                        .font(.caption2)
+                        .foregroundStyle(Theme.textMuted)
+                }
+
+                // Save
+                HStack(spacing: 12) {
+                    Spacer()
+
+                    Button {
+                        viewModel.updateGeminiKey(apiKey)
+                        let trimmed = customPrompt.trimmingCharacters(in: .whitespacesAndNewlines)
+                        SettingsManager.shared.customPrompt = trimmed.isEmpty ? nil : trimmed
+                        SettingsManager.shared.granularity = granularity
+                        Analytics.settingChanged("granularity", value: granularity.displayName)
+                        saved = true
+                        hideSavedAfterDelay()
+                    } label: {
+                        HStack(spacing: 4) {
+                            if saved {
+                                Image(systemName: "checkmark")
+                                    .font(.system(size: 10, weight: .bold))
+                            }
+                            Text(saved ? "Saved" : "Save")
+                        }
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 6)
+                        .background(saved ? Theme.statusActive : Theme.accent)
+                        .clipShape(Capsule())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityIdentifier("settings-save")
+                    .animation(.easeInOut(duration: 0.2), value: saved)
+                }
             }
+            .padding(20)
         }
-        .frame(width: 480, height: 600)
-        .background(.ultraThinMaterial)
+        .frame(width: 460, height: 560)
+        .background(Theme.primaryBackground)
+        .toolbarBackground(Theme.secondaryBackground, for: .automatic)
         .onAppear {
             apiKey = SettingsManager.shared.geminiApiKey ?? ""
             showKey = !apiKey.isEmpty

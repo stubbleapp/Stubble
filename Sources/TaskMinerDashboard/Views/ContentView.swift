@@ -12,7 +12,6 @@ private enum ToolbarLayout {
 struct ContentView: View {
     @Environment(DashboardViewModel.self) var viewModel
     @State private var selectedTab = 1
-    @State private var showSettings = false
 
     /// Tracks whether the Option (⌥) key is currently held down.
     @State private var optionKeyHeld = false
@@ -100,27 +99,10 @@ struct ContentView: View {
                     .disabled(viewModel.tasks.isEmpty)
                     .opacity(viewModel.tasks.isEmpty ? 0.4 : 1)
 
-                    Button {
-                        showSettings = true
-                    } label: {
-                        Image(systemName: "gearshape.fill")
-                            .font(.system(size: 13, weight: .medium))
-                            .foregroundStyle(Theme.textSecondary)
-                            .frame(width: ToolbarLayout.iconButtonSize, height: ToolbarLayout.iconButtonSize)
-                            .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel("Settings")
-                    .accessibilityIdentifier("content-settings")
-
                     PauseControlView(iconSize: ToolbarLayout.iconButtonSize)
                 }
                 .padding(.trailing, ToolbarLayout.toolbarTrailingPadding)
             }
-        }
-        .sheet(isPresented: $showSettings) {
-            SettingsView()
-                .environment(viewModel)
         }
         .onAppear {
             // Monitor Option key press/release to reveal the hidden Screens tab
@@ -184,10 +166,10 @@ struct SegmentedPicker: View {
                     withAnimation(.easeInOut(duration: 0.15)) { selection = index }
                 } label: {
                     Text(title)
-                        .font(.system(size: 12, weight: isSelected ? .semibold : .regular))
+                        .font(.system(size: 12, weight: isSelected || isHighlighted ? .semibold : .regular))
                         .foregroundStyle(
-                            isSelected ? Theme.textPrimary
-                            : isHighlighted ? Theme.accent
+                            isHighlighted ? .white
+                            : isSelected ? Theme.textPrimary
                             : Theme.textSecondary
                         )
                         .padding(.horizontal, segmentPaddingH)
@@ -197,8 +179,8 @@ struct SegmentedPicker: View {
                         .background(
                             RoundedRectangle(cornerRadius: 6, style: .continuous)
                                 .fill(
-                                    isSelected ? Theme.selectedSurface
-                                    : isHighlighted ? Theme.accent.opacity(0.08)
+                                    isHighlighted ? Theme.accent
+                                    : isSelected ? Theme.selectedSurface
                                     : Color.clear
                                 )
                         )
