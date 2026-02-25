@@ -408,9 +408,14 @@ class AppDelegate {
                 Logger.error("Screenshot save failed to \(path.path)")
                 return
             }
-            let ocrText = self.ocrEngine.recognizeText(in: image)
+            var ocrText = self.ocrEngine.recognizeText(in: image)
             if let text = ocrText {
                 Logger.debug("OCR extracted \(text.count) chars from screenshot")
+                // Cap OCR text to prevent huge DB entries from dense screenshots
+                if text.count > 50_000 {
+                    ocrText = String(text.prefix(50_000))
+                    Logger.debug("OCR text capped at 50k chars")
+                }
             }
             let record = ScreenshotRecord(
                 timestamp: now,

@@ -81,14 +81,20 @@ class WindowTitleMonitor {
         let appElement = AXUIElementCreateApplication(pid)
         let refcon = Unmanaged.passUnretained(self).toOpaque()
 
-        AXObserverAddNotification(
+        let r1 = AXObserverAddNotification(
             observer, appElement,
             kAXFocusedWindowChangedNotification as CFString, refcon
         )
-        AXObserverAddNotification(
+        let r2 = AXObserverAddNotification(
             observer, appElement,
             kAXTitleChangedNotification as CFString, refcon
         )
+
+        // Only keep the observer if at least one notification registered
+        guard r1 == .success || r2 == .success else {
+            Logger.debug("AXObserver: both notifications failed for pid \(pid)")
+            return
+        }
 
         CFRunLoopAddSource(
             CFRunLoopGetMain(),
@@ -97,7 +103,7 @@ class WindowTitleMonitor {
         )
 
         self.observer = observer
-        Logger.debug("AXObserver set up for pid \(pid)")
+        Logger.debug("AXObserver set up for pid \(pid) (focus: \(r1 == .success), title: \(r2 == .success))")
     }
 
     private func tearDownObserver() {

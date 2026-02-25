@@ -16,6 +16,7 @@ class DatabaseManager {
         self.db = dbPointer
         sqlite3_busy_timeout(dbPointer, 5000)
         try execute("PRAGMA journal_mode=WAL")
+        try execute("PRAGMA wal_autocheckpoint=1000")
         try execute("PRAGMA foreign_keys=ON")
         try createSchema()
         runMigrations()
@@ -539,11 +540,10 @@ class DatabaseManager {
     }
 
     func close() {
-        if let db = db {
-            sqlite3_close(db)
-            Logger.debug("Database closed")
-        }
-        db = nil
+        guard let db = db else { return }
+        self.db = nil
+        sqlite3_close(db)
+        Logger.debug("Database closed")
     }
 
     // MARK: - Helpers

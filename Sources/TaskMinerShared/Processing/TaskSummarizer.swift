@@ -440,21 +440,15 @@ public final class TaskSummarizer: Sendable {
         var daySummary: String?
         do {
             let parsed = try JSONSerialization.jsonObject(with: data)
-            if let arr = parsed as? [[String: Any]] {
-                array = arr
-            } else if let obj = parsed as? [String: Any] {
+            if let obj = parsed as? [String: Any] {
                 daySummary = obj["day_summary"] as? String
                 if let arr = obj["tasks"] as? [[String: Any]] {
                     array = arr
-                } else if let arr = obj["results"] as? [[String: Any]] {
-                    array = arr
-                } else if let arr = obj.values.compactMap({ $0 as? [[String: Any]] }).first {
-                    array = arr
                 } else {
-                    throw GeminiError.parseError("JSON object has no task array. Keys: \(Array(obj.keys)). Preview: \(String(jsonStr.prefix(300)))")
+                    throw GeminiError.parseError("JSON object missing \"tasks\" array. Keys: \(Array(obj.keys).sorted()). Preview: \(String(jsonStr.prefix(300)))")
                 }
             } else {
-                throw GeminiError.parseError("Unexpected JSON type. Preview: \(String(jsonStr.prefix(300)))")
+                throw GeminiError.parseError("Expected JSON object with \"tasks\" key, got \(type(of: parsed)). Preview: \(String(jsonStr.prefix(300)))")
             }
         } catch let error as GeminiError {
             throw error
@@ -477,7 +471,7 @@ public final class TaskSummarizer: Sendable {
             else { return nil }
 
             let description = dict["description"] as? String ?? ""
-            let confidence = dict["confidence"] as? Double ?? 0.5
+            let confidence = min(1.0, max(0.0, dict["confidence"] as? Double ?? 0.5))
             let appNames = dict["app_names"] as? [String] ?? []
             let appNamesJSON = (try? JSONSerialization.data(withJSONObject: appNames))
                 .flatMap { String(data: $0, encoding: .utf8) } ?? "[]"
@@ -574,10 +568,19 @@ public final class TaskSummarizer: Sendable {
         let parts = timeStr.split(separator: ":").compactMap { Int($0) }
         guard parts.count >= 2 else { return nil }
 
+        let hour = parts[0]
+        let minute = parts[1]
+        let second = parts.count > 2 ? parts[2] : 0
+
+        // Validate ranges — reject garbage values from AI (e.g. "25:70")
+        guard (0...23).contains(hour),
+              (0...59).contains(minute),
+              (0...59).contains(second) else { return nil }
+
         return Calendar.current.date(
-            bySettingHour: parts[0],
-            minute: parts[1],
-            second: parts.count > 2 ? parts[2] : 0,
+            bySettingHour: hour,
+            minute: minute,
+            second: second,
             of: day
         )
     }

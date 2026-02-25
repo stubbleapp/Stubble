@@ -12,13 +12,13 @@ final class AppIconResolver {
     /// Returns the app icon for the given bundle ID.
     /// When `bundleId` is nil or the app can't be found, returns `nil`
     /// so the view layer can show an appropriate fallback.
+    /// Note: cache misses are NOT stored, so newly-installed apps are found on next lookup.
     func icon(for bundleId: String?, size: CGFloat = 32) -> NSImage? {
         guard let bundleId else { return nil }
 
         if let cached = cache[bundleId] { return cached }
 
         guard let appURL = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleId) else {
-            cache[bundleId] = nil
             return nil
         }
 

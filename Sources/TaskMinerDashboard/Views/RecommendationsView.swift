@@ -24,6 +24,7 @@ struct RecommendationsView: View {
                     .buttonStyle(.plain)
                     .disabled(viewModel.isGeneratingRecommendations)
                     .opacity(viewModel.isGeneratingRecommendations ? 0.4 : 1)
+                    .accessibilityLabel("Refresh tips")
                 }
             }
             .padding(.horizontal, 20)

@@ -58,6 +58,10 @@ extension DashboardViewModel {
                 )
 
                 self.chatMessages.append(ChatMessage(role: .assistant, content: response))
+                // Keep chat history bounded to prevent unbounded memory growth
+                if self.chatMessages.count > 50 {
+                    self.chatMessages.removeFirst(self.chatMessages.count - 50)
+                }
                 self.isChatLoading = false
             } catch {
                 self.chatError = error.localizedDescription

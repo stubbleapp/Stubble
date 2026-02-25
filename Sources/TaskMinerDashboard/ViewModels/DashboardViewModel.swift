@@ -85,9 +85,28 @@ final class DashboardViewModel {
             self.configurationError = "Application Support unavailable: \(error.localizedDescription)"
         }
         let baseDir = config?.dataDirectory ?? FileManager.default.temporaryDirectory
-        self.dbReader = config.flatMap { try? DatabaseReader(path: $0.databasePath) }
+        if let config {
+            do {
+                self.dbReader = try DatabaseReader(path: config.databasePath)
+            } catch {
+                self.dbReader = nil
+                Logger.error("Failed to open database for reading: \(error.localizedDescription)")
+                self.configurationError = "Database error: \(error.localizedDescription)"
+            }
+        } else {
+            self.dbReader = nil
+        }
         self.pauseController = PauseController(dataDirectory: baseDir)
-        self.taskWriter = config.flatMap { try? TaskWriter(path: $0.databasePath) }
+        if let config {
+            do {
+                self.taskWriter = try TaskWriter(path: config.databasePath)
+            } catch {
+                self.taskWriter = nil
+                Logger.error("Failed to open database for writing: \(error.localizedDescription)")
+            }
+        } else {
+            self.taskWriter = nil
+        }
         self.memoryStore = UserMemoryStore(filePath: config?.memoryPath ?? baseDir.appendingPathComponent("memory.json"))
 
         // Initialize AI summarization: Keychain first, then env (same as CLI).

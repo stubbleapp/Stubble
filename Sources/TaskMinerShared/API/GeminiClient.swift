@@ -113,7 +113,6 @@ public final class GeminiClient: Sendable {
     ) async throws -> String {
         var components = URLComponents(string: baseURL)
         components?.path = "/v1beta/models/\(model):generateContent"
-        components?.queryItems = [URLQueryItem(name: "key", value: apiKey)]
         guard let url = components?.url else {
             throw GeminiError.invalidURL
         }
@@ -135,6 +134,7 @@ public final class GeminiClient: Sendable {
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue(apiKey, forHTTPHeaderField: "x-goog-api-key")
         request.httpBody = jsonData
         request.timeoutInterval = 120
 

@@ -10,6 +10,8 @@ import TaskMinerShared
 public enum DaemonMain {
     /// File descriptor for the PID lock — held open for the daemon's entire lifetime.
     private static var lockFd: Int32 = -1
+    /// Path to the PID file — stored as static for atexit cleanup.
+    private static var pidFilePath: String = ""
 
     public static func run() -> Never {
         Logger.enableFileLogging()
@@ -37,8 +39,8 @@ public enum DaemonMain {
 
         // MARK: - Singleton lock (prevent multiple daemons)
 
-        let pidPath = config.dataDirectory.appendingPathComponent("daemon.pid").path
-        lockFd = open(pidPath, O_WRONLY | O_CREAT, 0o600)
+        pidFilePath = config.dataDirectory.appendingPathComponent("daemon.pid").path
+        lockFd = open(pidFilePath, O_WRONLY | O_CREAT, 0o600)
         guard lockFd >= 0 else {
             Logger.error("Cannot open PID file: \(String(cString: strerror(errno)))")
             exit(1)
@@ -52,7 +54,17 @@ public enum DaemonMain {
         ftruncate(lockFd, 0)
         let pidStr = "\(ProcessInfo.processInfo.processIdentifier)\n"
         pidStr.withCString { ptr in _ = write(lockFd, ptr, strlen(ptr)) }
-        // lockFd stays open — the OS releases the lock when the process exits
+        // lockFd stays open — the OS releases the lock when the process exits.
+        // atexit ensures cleanup even if initialization below fails (exit(1) paths).
+        atexit {
+            if DaemonMain.lockFd >= 0 {
+                close(DaemonMain.lockFd)
+                DaemonMain.lockFd = -1
+            }
+            if !DaemonMain.pidFilePath.isEmpty {
+                unlink(DaemonMain.pidFilePath)
+            }
+        }
 
         // NOTE: No permission checks here. The Dashboard's setup wizard handles prompting.
         // The daemon gracefully handles missing permissions at runtime:
@@ -90,11 +102,7 @@ public enum DaemonMain {
 
         let shutdownHandler: () -> Void = {
             appDelegate.shutdown()
-            // Release PID lock and clean up file
-            if lockFd >= 0 {
-                close(lockFd)
-                unlink(pidPath)
-            }
+            // PID lock cleanup is handled by atexit
             CFRunLoopStop(CFRunLoopGetMain())
         }
 

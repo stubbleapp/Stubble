@@ -111,7 +111,9 @@ public final class UserMemoryStore: Sendable {
 
             // Cap at 50 entries — drop oldest if needed
             if existing.count > 50 {
+                let dropped = existing.count - 50
                 existing = Array(existing.suffix(50))
+                Logger.info("UserMemoryStore: truncated \(dropped) oldest entries to stay within 50 limit")
             }
 
             saveImpl(existing)
