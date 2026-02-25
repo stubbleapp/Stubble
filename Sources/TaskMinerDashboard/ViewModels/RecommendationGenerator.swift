@@ -19,22 +19,25 @@ final class RecommendationGenerator: Sendable {
     ///   - projectActivities: Current day's project activity clusters
     ///   - appsUsed: Map of app name → approximate total seconds used
     ///   - memoryContext: Known facts about the user from the memory store
+    ///   - activityLog: Today's granular activity log (app sessions with window titles)
     /// - Returns: Array of 2-5 recommendations
     func generate(
         recentTasks: [String: [TaskRecord]],
         projectActivities: [ProjectActivity],
         appsUsed: [String: TimeInterval],
-        memoryContext: String?
+        memoryContext: String?,
+        activityLog: String? = nil
     ) async throws -> [Recommendation] {
         let prompt = buildPrompt(
             recentTasks: recentTasks,
             projectActivities: projectActivities,
             appsUsed: appsUsed,
-            memoryContext: memoryContext
+            memoryContext: memoryContext,
+            activityLog: activityLog
         )
 
         let systemInstruction = """
-        You are a productivity assistant embedded in a desktop activity tracker called Stubble. \
+        You are a knowledgeable productivity assistant embedded in a desktop activity tracker called Stubble. \
         You provide highly specific, actionable recommendations based on a user's ACTUAL recent \
         computer activity. Every recommendation MUST directly relate to something the user worked on. \
         Never give generic productivity advice that could apply to anyone. \
@@ -48,12 +51,15 @@ final class RecommendationGenerator: Sendable {
         Rules: \
         - Produce between 2 and 5 recommendations (fewer is better if quality is higher) \
         - Each MUST reference specific work the user actually did in the data provided \
+        - Use window titles and activity details to understand WHAT the user was actually doing, not just which app \
         - URLs must be real, well-known, and relevant (official docs, popular tutorials, tool homepages) \
         - The "reason" field must cite specific tasks, projects, or apps from the data \
         - Never recommend apps the user already uses heavily (check the apps list) \
         - Focus on the most recent activity for freshness \
-        - Prefer recommendations that save time, prevent mistakes, or deepen expertise \
-        - If the user has been working on a specific technology, recommend authoritative resources for it \
+        - Prefer recommendations that: deepen expertise on topics they're actively working on, \
+          introduce tools that solve problems they appear to be facing, or suggest best practices \
+          for technologies they're using \
+        - Avoid obvious or generic suggestions like "use a password manager" or "take breaks" \
         \
         Respond with a JSON object. Do not include any text outside the JSON.
         """
@@ -87,7 +93,8 @@ final class RecommendationGenerator: Sendable {
         recentTasks: [String: [TaskRecord]],
         projectActivities: [ProjectActivity],
         appsUsed: [String: TimeInterval],
-        memoryContext: String?
+        memoryContext: String?,
+        activityLog: String?
     ) -> String {
         var lines: [String] = []
 
@@ -133,6 +140,13 @@ final class RecommendationGenerator: Sendable {
                     lines.append("- \(app): \(mins)m")
                 }
             }
+            lines.append("")
+        }
+
+        // Detailed activity log — window titles reveal specific documents, URLs, and content
+        if let log = activityLog, !log.isEmpty {
+            lines.append("## Today's Detailed Activity (window titles)")
+            lines.append(log)
             lines.append("")
         }
 

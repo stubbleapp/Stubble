@@ -55,6 +55,7 @@ struct SettingsView: View {
                             .padding(8)
                             .background(.ultraThinMaterial)
                             .cornerRadius(6)
+                            .accessibilityIdentifier("settings-api-key")
 
                             Button {
                                 showKey.toggle()
@@ -126,6 +127,7 @@ struct SettingsView: View {
                             RoundedRectangle(cornerRadius: 8, style: .continuous)
                                 .fill(.ultraThinMaterial)
                         )
+                        .accessibilityIdentifier("settings-granularity")
 
                         Text(granularity.description)
                             .font(.caption2)
@@ -146,6 +148,7 @@ struct SettingsView: View {
                                 .foregroundStyle(Theme.statusError)
                         }
                         .buttonStyle(.plain)
+                        .accessibilityIdentifier("settings-clear-data")
 
                         Text("Permanently deletes all tasks, activities, screenshots, and memory. Your settings and API key are kept.")
                             .font(.caption2)
@@ -180,6 +183,7 @@ struct SettingsView: View {
                             .clipShape(Capsule())
                         }
                         .buttonStyle(.plain)
+                        .accessibilityIdentifier("settings-save")
                         .animation(.easeInOut(duration: 0.2), value: saved)
                     }
                 }

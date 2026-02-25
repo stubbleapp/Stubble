@@ -18,7 +18,7 @@ The AI summarisation is optional. Without a Gemini key everything still works --
 ## Requirements
 
 - macOS 14.0 (Sonoma) or later
-- A [Gemini API key](https://aistudio.google.com/apikey) (free tier works fine) -- optional, for AI features
+- A [Gemini API key](https://aistudio.google.com/apikey) (free tier works fine) -- required, for AI features
 
 ## Installation
 

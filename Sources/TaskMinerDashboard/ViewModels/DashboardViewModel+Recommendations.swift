@@ -31,13 +31,17 @@ extension DashboardViewModel {
         // Memory context
         let memoryContext = memoryStore.contextString()
 
+        // Build granular activity log for richer recommendations
+        let activityLog = buildActivityLog()
+
         Task {
             do {
                 let results = try await generator.generate(
                     recentTasks: recentTasks,
                     projectActivities: currentProjectActivities,
                     appsUsed: appsUsed,
-                    memoryContext: memoryContext
+                    memoryContext: memoryContext,
+                    activityLog: activityLog
                 )
                 self.recommendations = results
                 self.isGeneratingRecommendations = false
@@ -79,6 +83,24 @@ extension DashboardViewModel {
         }
 
         return result
+    }
+
+    /// Build a compact activity log from today's grouped activities, including window titles.
+    /// This gives recommendations access to the same granular detail as chat — specific documents,
+    /// URLs, repo names, etc. — which produces much more relevant suggestions.
+    private func buildActivityLog() -> String? {
+        guard !groupedActivities.isEmpty else { return nil }
+        var lines: [String] = []
+        for group in groupedActivities {
+            let start = group.startTime.map { SharedFormatters.timeFormatter.string(from: $0) } ?? "?"
+            let end = group.endTime.map { SharedFormatters.timeFormatter.string(from: $0) } ?? "?"
+            let durMins = Int(group.totalDuration) / 60
+            lines.append("- [\(start)–\(end)] \(group.appName) (\(durMins)m)")
+            for title in group.windowTitles.prefix(3) {
+                lines.append("  · \(title)")
+            }
+        }
+        return lines.joined(separator: "\n")
     }
 
     /// Build a map of app name → total seconds used across all provided tasks.

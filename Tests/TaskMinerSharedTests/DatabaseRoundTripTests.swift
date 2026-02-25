@@ -1,0 +1,494 @@
+import XCTest
+import SQLite3
+@testable import TaskMinerShared
+
+/// Tests that verify data written by TaskWriter can be read back correctly by DatabaseReader.
+/// Uses a temporary SQLite database created fresh for each test.
+final class DatabaseRoundTripTests: XCTestCase {
+
+    private var tempDir: URL!
+    private var dbPath: URL!
+
+    override func setUp() {
+        super.setUp()
+        tempDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("StubbleDBTests-\(UUID().uuidString)")
+        try! FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
+        dbPath = tempDir.appendingPathComponent("test.db")
+
+        // Bootstrap the database schema by opening a DatabaseReader (which runs migrations)
+        // We need to do this on the MainActor since DatabaseReader is @MainActor
+    }
+
+    override func tearDown() {
+        try? FileManager.default.removeItem(at: tempDir)
+        super.tearDown()
+    }
+
+    // Helper: create the schema by opening a reader (which runs migrations)
+    @MainActor
+    private func createSchema() throws -> DatabaseReader {
+        // First create the database file with the activities/screenshots tables
+        // since DatabaseReader.init runs migrations but needs base tables
+        createBaseTables()
+        return try DatabaseReader(path: dbPath)
+    }
+
+    /// Create base tables that the daemon normally creates (DatabaseManager).
+    /// DatabaseReader's migrations add columns/tables ON TOP of these.
+    private func createBaseTables() {
+        var db: OpaquePointer?
+        guard sqlite3_open(dbPath.path, &db) == SQLITE_OK else { return }
+        defer { sqlite3_close(db) }
+
+        let sqls = [
+            """
+            CREATE TABLE IF NOT EXISTS activities (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                timestamp TEXT NOT NULL,
+                end_time TEXT,
+                app_name TEXT NOT NULL,
+                bundle_id TEXT,
+                window_title TEXT,
+                duration REAL,
+                is_idle INTEGER DEFAULT 0
+            )
+            """,
+            "CREATE INDEX IF NOT EXISTS idx_activities_timestamp ON activities(timestamp)",
+            "CREATE INDEX IF NOT EXISTS idx_activities_bundle ON activities(bundle_id)",
+            """
+            CREATE TABLE IF NOT EXISTS screenshots (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                timestamp TEXT NOT NULL,
+                file_path TEXT NOT NULL,
+                file_size INTEGER,
+                activity_id INTEGER,
+                trigger_type TEXT DEFAULT 'manual',
+                FOREIGN KEY (activity_id) REFERENCES activities(id)
+            )
+            """,
+            "CREATE INDEX IF NOT EXISTS idx_screenshots_timestamp ON screenshots(timestamp)",
+            """
+            CREATE TABLE IF NOT EXISTS daily_summaries (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                date TEXT NOT NULL UNIQUE,
+                total_active_seconds REAL DEFAULT 0,
+                total_idle_seconds REAL DEFAULT 0,
+                app_usage_json TEXT DEFAULT '{}',
+                top_windows_json TEXT DEFAULT '[]',
+                screenshot_count INTEGER DEFAULT 0,
+                generated_at TEXT NOT NULL
+            )
+            """,
+        ]
+
+        for sql in sqls {
+            sqlite3_exec(db, sql, nil, nil, nil)
+        }
+    }
+
+    /// Insert an activity record directly via SQL (simulating what the daemon does)
+    private func insertActivity(db: OpaquePointer?, record: ActivityRecord) -> Int64 {
+        let sql = """
+        INSERT INTO activities (timestamp, end_time, app_name, bundle_id, window_title, duration, is_idle)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+        """
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return -1 }
+        defer { sqlite3_finalize(stmt) }
+
+        sqliteBindText(stmt, 1, SharedFormatters.iso8601.string(from: record.timestamp))
+        if let endTime = record.endTime {
+            sqliteBindText(stmt, 2, SharedFormatters.iso8601.string(from: endTime))
+        } else {
+            sqlite3_bind_null(stmt, 2)
+        }
+        sqliteBindText(stmt, 3, record.appName)
+        if let bundleId = record.bundleId {
+            sqliteBindText(stmt, 4, bundleId)
+        } else {
+            sqlite3_bind_null(stmt, 4)
+        }
+        if let title = record.windowTitle {
+            sqliteBindText(stmt, 5, title)
+        } else {
+            sqlite3_bind_null(stmt, 5)
+        }
+        if let dur = record.duration {
+            sqlite3_bind_double(stmt, 6, dur)
+        } else {
+            sqlite3_bind_null(stmt, 6)
+        }
+        sqlite3_bind_int(stmt, 7, record.isIdle ? 1 : 0)
+
+        guard sqlite3_step(stmt) == SQLITE_DONE else { return -1 }
+        return sqlite3_last_insert_rowid(db)
+    }
+
+    // MARK: - Task Round Trip
+
+    @MainActor
+    func testTaskWriteAndRead() throws {
+        let reader = try createSchema()
+        let writer = try TaskWriter(path: dbPath)
+
+        let date = SharedFormatters.dayFormatter.date(from: "2025-06-15")!
+        let cal = Calendar.current
+        let start = cal.date(bySettingHour: 9, minute: 0, second: 0, of: date)!
+        let end = cal.date(bySettingHour: 11, minute: 30, second: 0, of: date)!
+
+        let task = TaskRecord(
+            date: "2025-06-15",
+            startTime: start,
+            endTime: end,
+            title: "Developing SwiftUI settings",
+            description: "Working on the settings view layout.",
+            appNames: "[\"Xcode\",\"Safari\"]",
+            confidence: 0.85,
+            relevantLinks: "[\"https://developer.apple.com\"]",
+            activeDuration: 7200
+        )
+
+        let insertedId = try writer.insertTask(task)
+        XCTAssertGreaterThan(insertedId, 0)
+
+        let tasks = reader.tasks(for: date)
+        XCTAssertEqual(tasks.count, 1)
+
+        let loaded = tasks[0]
+        XCTAssertEqual(loaded.date, "2025-06-15")
+        XCTAssertEqual(loaded.title, "Developing SwiftUI settings")
+        XCTAssertEqual(loaded.description, "Working on the settings view layout.")
+        XCTAssertEqual(loaded.appNamesList, ["Xcode", "Safari"])
+        XCTAssertEqual(loaded.confidence, 0.85, accuracy: 0.01)
+        XCTAssertEqual(loaded.linksList.count, 1)
+        XCTAssertEqual(loaded.activeDuration, 7200)
+    }
+
+    @MainActor
+    func testBulkTaskInsert() throws {
+        let reader = try createSchema()
+        let writer = try TaskWriter(path: dbPath)
+
+        let date = SharedFormatters.dayFormatter.date(from: "2025-06-15")!
+        let cal = Calendar.current
+
+        let tasks = (0..<5).map { i in
+            TaskRecord(
+                date: "2025-06-15",
+                startTime: cal.date(bySettingHour: 9 + i, minute: 0, second: 0, of: date)!,
+                endTime: cal.date(bySettingHour: 10 + i, minute: 0, second: 0, of: date)!,
+                title: "Task \(i)",
+                description: "Description \(i)"
+            )
+        }
+
+        let count = try writer.insertTasks(tasks)
+        XCTAssertEqual(count, 5)
+
+        let loaded = reader.tasks(for: date)
+        XCTAssertEqual(loaded.count, 5)
+    }
+
+    @MainActor
+    func testDeleteTasksForDate() throws {
+        let reader = try createSchema()
+        let writer = try TaskWriter(path: dbPath)
+
+        let date = SharedFormatters.dayFormatter.date(from: "2025-06-15")!
+
+        let task = TaskRecord(
+            date: "2025-06-15",
+            startTime: date,
+            endTime: date.addingTimeInterval(3600),
+            title: "To Delete",
+            description: ""
+        )
+        _ = try writer.insertTask(task)
+        XCTAssertEqual(reader.tasks(for: date).count, 1)
+
+        try writer.deleteTasks(for: "2025-06-15")
+        XCTAssertEqual(reader.tasks(for: date).count, 0)
+    }
+
+    @MainActor
+    func testUpdateTask() throws {
+        let reader = try createSchema()
+        let writer = try TaskWriter(path: dbPath)
+
+        let date = SharedFormatters.dayFormatter.date(from: "2025-06-15")!
+
+        let task = TaskRecord(
+            date: "2025-06-15",
+            startTime: date,
+            endTime: date.addingTimeInterval(3600),
+            title: "Original Title",
+            description: "Original Description"
+        )
+        let id = try writer.insertTask(task)
+
+        try writer.updateTask(id: id, title: "Updated Title", description: "Updated Description")
+
+        let loaded = reader.tasks(for: date)
+        XCTAssertEqual(loaded.count, 1)
+        XCTAssertEqual(loaded[0].title, "Updated Title")
+        XCTAssertEqual(loaded[0].description, "Updated Description")
+    }
+
+    @MainActor
+    func testDeleteSingleTask() throws {
+        let reader = try createSchema()
+        let writer = try TaskWriter(path: dbPath)
+
+        let date = SharedFormatters.dayFormatter.date(from: "2025-06-15")!
+
+        let task1 = TaskRecord(date: "2025-06-15", startTime: date, endTime: date.addingTimeInterval(3600), title: "Keep", description: "")
+        let task2 = TaskRecord(date: "2025-06-15", startTime: date.addingTimeInterval(3600), endTime: date.addingTimeInterval(7200), title: "Delete", description: "")
+
+        _ = try writer.insertTask(task1)
+        let deleteId = try writer.insertTask(task2)
+
+        try writer.deleteTask(id: deleteId)
+
+        let loaded = reader.tasks(for: date)
+        XCTAssertEqual(loaded.count, 1)
+        XCTAssertEqual(loaded[0].title, "Keep")
+    }
+
+    // MARK: - Project Activity Round Trip
+
+    @MainActor
+    func testProjectActivityWriteAndRead() throws {
+        let reader = try createSchema()
+        let writer = try TaskWriter(path: dbPath)
+
+        let date = SharedFormatters.dayFormatter.date(from: "2025-06-15")!
+        let cal = Calendar.current
+        let start = cal.date(bySettingHour: 9, minute: 0, second: 0, of: date)!
+        let end = cal.date(bySettingHour: 17, minute: 0, second: 0, of: date)!
+
+        let project = ProjectActivityRecord(
+            date: "2025-06-15",
+            name: "Stubble Development",
+            summary: "Main project work on the macOS app.",
+            totalDuration: 18000,
+            appNames: "[\"Xcode\",\"Terminal\"]",
+            taskTitles: "[\"Coding\",\"Testing\"]",
+            startTime: start,
+            endTime: end,
+            colorIndex: 2
+        )
+
+        let id = try writer.insertProjectActivity(project)
+        XCTAssertGreaterThan(id, 0)
+
+        let loaded = reader.projectActivities(for: date)
+        XCTAssertEqual(loaded.count, 1)
+        XCTAssertEqual(loaded[0].name, "Stubble Development")
+        XCTAssertEqual(loaded[0].summary, "Main project work on the macOS app.")
+        XCTAssertEqual(loaded[0].totalDuration, 18000, accuracy: 0.1)
+        XCTAssertEqual(loaded[0].appNamesList, ["Xcode", "Terminal"])
+        XCTAssertEqual(loaded[0].taskTitlesList, ["Coding", "Testing"])
+        XCTAssertEqual(loaded[0].colorIndex, 2)
+    }
+
+    @MainActor
+    func testDeleteProjectActivities() throws {
+        let reader = try createSchema()
+        let writer = try TaskWriter(path: dbPath)
+
+        let date = SharedFormatters.dayFormatter.date(from: "2025-06-15")!
+
+        let project = ProjectActivityRecord(
+            date: "2025-06-15",
+            name: "Test",
+            summary: "",
+            totalDuration: 3600,
+            startTime: date,
+            endTime: date.addingTimeInterval(3600)
+        )
+
+        _ = try writer.insertProjectActivity(project)
+        XCTAssertEqual(reader.projectActivities(for: date).count, 1)
+
+        try writer.deleteProjectActivities(for: "2025-06-15")
+        XCTAssertEqual(reader.projectActivities(for: date).count, 0)
+    }
+
+    // MARK: - Activity Queries
+
+    @MainActor
+    func testActivitiesForDate() throws {
+        let reader = try createSchema()
+
+        // Insert activities directly (simulating daemon)
+        var db: OpaquePointer?
+        sqlite3_open(dbPath.path, &db)
+        defer { sqlite3_close(db) }
+
+        let date = SharedFormatters.dayFormatter.date(from: "2025-06-15")!
+        let cal = Calendar.current
+        let time1 = cal.date(bySettingHour: 9, minute: 0, second: 0, of: date)!
+        let time2 = cal.date(bySettingHour: 10, minute: 0, second: 0, of: date)!
+
+        let activity1 = ActivityRecord(
+            timestamp: time1,
+            appName: "Xcode",
+            bundleId: "com.apple.dt.Xcode",
+            windowTitle: "File.swift",
+            duration: 3600,
+            isIdle: false
+        )
+        let activity2 = ActivityRecord(
+            timestamp: time2,
+            appName: "Safari",
+            bundleId: "com.google.Chrome",
+            windowTitle: "Stack Overflow",
+            duration: 1800,
+            isIdle: false
+        )
+
+        _ = insertActivity(db: db, record: activity1)
+        _ = insertActivity(db: db, record: activity2)
+
+        let loaded = reader.activities(for: date)
+        XCTAssertEqual(loaded.count, 2)
+        XCTAssertEqual(loaded[0].appName, "Xcode")
+        XCTAssertEqual(loaded[1].appName, "Safari")
+    }
+
+    @MainActor
+    func testActivitiesFilteredByDate() throws {
+        let reader = try createSchema()
+
+        var db: OpaquePointer?
+        sqlite3_open(dbPath.path, &db)
+        defer { sqlite3_close(db) }
+
+        let date1 = SharedFormatters.dayFormatter.date(from: "2025-06-15")!
+        let date2 = SharedFormatters.dayFormatter.date(from: "2025-06-16")!
+
+        _ = insertActivity(db: db, record: ActivityRecord(
+            timestamp: date1.addingTimeInterval(3600 * 9),
+            appName: "Xcode", bundleId: nil, duration: 3600
+        ))
+        _ = insertActivity(db: db, record: ActivityRecord(
+            timestamp: date2.addingTimeInterval(3600 * 9),
+            appName: "Safari", bundleId: nil, duration: 1800
+        ))
+
+        let day1Activities = reader.activities(for: date1)
+        let day2Activities = reader.activities(for: date2)
+
+        XCTAssertEqual(day1Activities.count, 1)
+        XCTAssertEqual(day1Activities[0].appName, "Xcode")
+        XCTAssertEqual(day2Activities.count, 1)
+        XCTAssertEqual(day2Activities[0].appName, "Safari")
+    }
+
+    // MARK: - computeSummary
+
+    @MainActor
+    func testComputeSummary() throws {
+        let reader = try createSchema()
+
+        var db: OpaquePointer?
+        sqlite3_open(dbPath.path, &db)
+        defer { sqlite3_close(db) }
+
+        let date = SharedFormatters.dayFormatter.date(from: "2025-06-15")!
+
+        _ = insertActivity(db: db, record: ActivityRecord(
+            timestamp: date.addingTimeInterval(3600 * 9),
+            appName: "Xcode", bundleId: nil, duration: 3600, isIdle: false
+        ))
+        _ = insertActivity(db: db, record: ActivityRecord(
+            timestamp: date.addingTimeInterval(3600 * 10),
+            appName: "Idle", bundleId: nil, duration: 600, isIdle: true
+        ))
+
+        let summary = reader.computeSummary(for: date)
+
+        XCTAssertEqual(summary.activeSeconds, 3600, accuracy: 0.1)
+        XCTAssertEqual(summary.idleSeconds, 600, accuracy: 0.1)
+        XCTAssertEqual(summary.activityCount, 2)
+    }
+
+    // MARK: - appNameToBundleIdMap
+
+    @MainActor
+    func testAppNameToBundleIdMap() throws {
+        let reader = try createSchema()
+
+        var db: OpaquePointer?
+        sqlite3_open(dbPath.path, &db)
+        defer { sqlite3_close(db) }
+
+        let date = SharedFormatters.dayFormatter.date(from: "2025-06-15")!
+
+        _ = insertActivity(db: db, record: ActivityRecord(
+            timestamp: date.addingTimeInterval(3600 * 9),
+            appName: "Xcode", bundleId: "com.apple.dt.Xcode", duration: 60
+        ))
+        _ = insertActivity(db: db, record: ActivityRecord(
+            timestamp: date.addingTimeInterval(3600 * 10),
+            appName: "Safari", bundleId: "com.apple.Safari", duration: 60
+        ))
+
+        let map = reader.appNameToBundleIdMap()
+
+        XCTAssertEqual(map["Xcode"], "com.apple.dt.Xcode")
+        XCTAssertEqual(map["Safari"], "com.apple.Safari")
+    }
+
+    // MARK: - Null active_duration
+
+    @MainActor
+    func testTaskWithNullActiveDuration() throws {
+        let reader = try createSchema()
+        let writer = try TaskWriter(path: dbPath)
+
+        let date = SharedFormatters.dayFormatter.date(from: "2025-06-15")!
+
+        let task = TaskRecord(
+            date: "2025-06-15",
+            startTime: date,
+            endTime: date.addingTimeInterval(3600),
+            title: "No active duration",
+            description: "",
+            activeDuration: nil
+        )
+
+        _ = try writer.insertTask(task)
+        let loaded = reader.tasks(for: date)
+
+        XCTAssertEqual(loaded.count, 1)
+        XCTAssertNil(loaded[0].activeDuration)
+        // duration computed property should fall back to span time
+        XCTAssertEqual(loaded[0].duration, 3600, accuracy: 1.0)
+    }
+
+    // MARK: - Empty Results
+
+    @MainActor
+    func testEmptyDatabaseReturnsEmptyArrays() throws {
+        let reader = try createSchema()
+
+        let date = Date()
+        XCTAssertTrue(reader.activities(for: date).isEmpty)
+        XCTAssertTrue(reader.tasks(for: date).isEmpty)
+        XCTAssertTrue(reader.screenshots(for: date).isEmpty)
+        XCTAssertTrue(reader.projectActivities(for: date).isEmpty)
+    }
+
+    // MARK: - Transaction Rollback
+
+    @MainActor
+    func testEmptyBulkInsertReturnsZero() throws {
+        _ = try createSchema()
+        let writer = try TaskWriter(path: dbPath)
+
+        let count = try writer.insertTasks([])
+        XCTAssertEqual(count, 0)
+    }
+}

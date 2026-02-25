@@ -32,15 +32,16 @@ extension DashboardViewModel {
         Task {
             do {
                 let systemInstruction = """
-                You are a helpful assistant embedded in a desktop activity tracker called Stubble. \
-                You answer questions about the user's computer activity, tasks, and project activities for the day. \
-                Be concise and conversational — keep responses short unless asked for detail. \
-                Use markdown formatting (bold, italic, lists) to make responses clear and readable. \
+                You are a friendly personal assistant embedded in a desktop activity tracker called Stubble. \
+                You know about the user's day — their tasks, apps, and how they spent their time. \
+                Be warm, casual, and concise — like a helpful colleague who's been watching the day unfold. \
+                Keep responses short and punchy unless the user asks for detail. \
+                Use markdown formatting (bold, italic, lists) when it helps readability. \
                 Use the provided task data, project activity context, and activity summaries to give accurate answers. \
                 If the user asks about time, calculate it from the task start/end times provided. \
                 Format durations as hours and minutes (e.g. "2h 15m"). \
                 Never make up tasks, projects, or times that aren't in the context. \
-                If you don't have enough information, say so.
+                If you don't have enough information, just say so honestly.
                 """
 
                 let prompt = """
@@ -76,9 +77,9 @@ extension DashboardViewModel {
         isChatLoading = false
     }
 
-    /// Build a text block summarizing the current day's tasks and project activities for chat context.
+    /// Build a text block summarizing the current day's tasks, activities, and window titles for chat context.
     func buildChatTaskContext() -> String {
-        guard !tasks.isEmpty else { return "No tasks recorded for this day." }
+        guard !activities.isEmpty || !tasks.isEmpty else { return "No activity recorded for this day." }
 
         var lines: [String] = []
         lines.append("Date: \(SharedFormatters.longDateFormatter.string(from: selectedDate))")
@@ -91,6 +92,23 @@ extension DashboardViewModel {
         let hours = totalActive / 3600
         let mins = (totalActive % 3600) / 60
         lines.append("Total active time: \(hours)h \(mins)m")
+
+        // Detailed activity log — this is the most granular data, with exact window titles and durations
+        if !groupedActivities.isEmpty {
+            lines.append("")
+            lines.append("Activity log (chronological — each entry is a continuous session in one app):")
+            for group in groupedActivities {
+                let start = group.startTime.map { SharedFormatters.timeFormatter.string(from: $0) } ?? "?"
+                let end = group.endTime.map { SharedFormatters.timeFormatter.string(from: $0) } ?? "?"
+                let durMins = Int(group.totalDuration) / 60
+                lines.append("- [\(start)–\(end)] \(group.appName) (\(durMins)m)")
+                // Include window titles — these have the real detail (URLs, document names, etc.)
+                let titles = group.windowTitles.prefix(5)
+                for title in titles {
+                    lines.append("  · \(title)")
+                }
+            }
+        }
 
         // Project activities (higher-level grouping)
         if !projectActivities.isEmpty {
@@ -107,28 +125,26 @@ extension DashboardViewModel {
                 if !activity.appNames.isEmpty {
                     lines.append("  Apps: \(activity.appNames.joined(separator: ", "))")
                 }
-                if !activity.taskTitles.isEmpty {
-                    lines.append("  Tasks: \(activity.taskTitles.joined(separator: "; "))")
-                }
             }
         }
 
-        // Individual tasks (granular detail)
-        lines.append("")
-        lines.append("Tasks:")
-
-        for task in tasks {
-            let start = SharedFormatters.timeFormatter.string(from: task.startTime)
-            let end = SharedFormatters.timeFormatter.string(from: task.endTime)
-            let duration = Int(task.duration)
-            let durMins = duration / 60
-            let apps = task.appNamesList.joined(separator: ", ")
-            lines.append("- [\(start)–\(end)] (\(durMins)m) \(task.title)")
-            if !task.description.isEmpty {
-                lines.append("  \(task.description)")
-            }
-            if !apps.isEmpty {
-                lines.append("  Apps: \(apps)")
+        // AI-generated tasks (higher-level interpretation)
+        if !tasks.isEmpty {
+            lines.append("")
+            lines.append("Tasks:")
+            for task in tasks {
+                let start = SharedFormatters.timeFormatter.string(from: task.startTime)
+                let end = SharedFormatters.timeFormatter.string(from: task.endTime)
+                let duration = Int(task.duration)
+                let durMins = duration / 60
+                let apps = task.appNamesList.joined(separator: ", ")
+                lines.append("- [\(start)–\(end)] (\(durMins)m) \(task.title)")
+                if !task.description.isEmpty {
+                    lines.append("  \(task.description)")
+                }
+                if !apps.isEmpty {
+                    lines.append("  Apps: \(apps)")
+                }
             }
         }
 

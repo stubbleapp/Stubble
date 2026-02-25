@@ -45,6 +45,14 @@ let package = Package(
             linkerSettings: [
                 .linkedLibrary("sqlite3")
             ]
-        )
+        ),
+        // Unit tests for shared library
+        .testTarget(
+            name: "TaskMinerSharedTests",
+            dependencies: ["TaskMinerShared"],
+            linkerSettings: [
+                .linkedLibrary("sqlite3")
+            ]
+        ),
     ]
 )

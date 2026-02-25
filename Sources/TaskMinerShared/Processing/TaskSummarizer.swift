@@ -138,18 +138,47 @@ public final class TaskSummarizer: Sendable {
 
     // MARK: - Memory Extraction
 
+    /// System processes and utilities that should never be recorded as user-relevant apps.
+    private static let ignoredAppNames: Set<String> = [
+        "Idle", "SecurityAgent", "coreautha", "coreauth", "Problem Reporter",
+        "loginwindow", "UserNotificationCenter", "CoreServicesUIAgent",
+        "System Preferences", "System Settings", "Finder", "Preview",
+        "ColorSync Utility", "Digital Colour Meter", "Disk Utility",
+        "Activity Monitor", "Console", "Keychain Access",
+        "Installer", "Software Update", "System Information",
+        "AirDrop", "Bluetooth File Exchange", "Migration Assistant",
+        "VoiceOver Utility", "Screenshot", "Stickies",
+    ]
+
     /// Ask the AI to identify new facts about the user from today's activity.
     private func extractMemory(from activities: [SummarizationInput], existingMemory: String?) async -> [String] {
-        let appNames = Set(activities.map { $0.appName }).sorted()
-        let windowTitles = activities.compactMap { $0.windowTitle }.prefix(20)
+        // Filter out system processes and idle entries before sending to AI
+        let meaningful = activities.filter { activity in
+            !activity.isIdle && !Self.ignoredAppNames.contains(activity.appName)
+        }
+        guard !meaningful.isEmpty else { return [] }
+
+        let appNames = Set(meaningful.map { $0.appName }).sorted()
+        let windowTitles = meaningful.compactMap { $0.windowTitle }.prefix(30)
 
         var prompt = """
-        Based on the following desktop activity, identify factual observations about this person \
-        that would be useful to remember for future sessions. Focus on:
-        - Project names and what they involve
-        - Technologies, languages, and tools used regularly
-        - Work patterns (e.g., "primarily works in Swift using Xcode")
-        - Key repositories or codebases
+        Based on the following desktop activity, identify DURABLE facts about this person \
+        that would be useful context for weeks or months from now. Focus on:
+        - Project names and what they involve (e.g., "Building a macOS app called Stubble using SwiftUI")
+        - Technologies, languages, and frameworks used (e.g., "Works with Swift, SQLite, and ScreenCaptureKit")
+        - Professional role or domain (e.g., "Works in marketing at a tech company")
+        - Key repositories, codebases, or services they maintain
+        - Recurring workflows or habits observed across multiple sessions
+
+        DO NOT include:
+        - "Uses [app name]" entries — knowing someone uses Chrome or Terminal is not useful
+        - Transient activities (reading a specific article, checking email count, browsing a recipe)
+        - System processes or utility apps (Finder, System Settings, Keychain Access, etc.)
+        - One-time research topics unless they clearly relate to an ongoing project
+        - Anything that would be stale or irrelevant within a week
+
+        The bar for inclusion is HIGH. Each entry must be a lasting fact that helps personalize \
+        future AI responses. Prefer 0-3 high-quality entries over many low-quality ones.
 
         Apps used: \(appNames.joined(separator: ", "))
         Sample window titles: \(windowTitles.joined(separator: " | "))
@@ -158,24 +187,28 @@ public final class TaskSummarizer: Sendable {
         if let existing = existingMemory, !existing.isEmpty {
             prompt += """
 
-            Already known (do NOT repeat these):
+            Already known (do NOT repeat or rephrase these — also avoid entries that are \
+            semantically equivalent even if worded differently):
             \(existing)
 
-            Only return NEW facts not already covered above.
+            Only return genuinely NEW facts not already covered above.
             """
         }
 
         prompt += """
 
         Respond with a JSON array of short factual strings. Each should be a single concise sentence.
-        If there is nothing new to learn, return an empty array [].
-        Example: ["Works on a macOS app called Stubble using SwiftUI", "Uses Gemini API for AI features"]
+        If there is nothing meaningfully new to learn, return an empty array [].
+        Example: ["Building a macOS activity tracker called Stubble using SwiftUI and SQLite", \
+        "Uses Gemini API for AI-powered task summarization"]
         """
 
         let systemInstruction = """
-        You extract factual observations about a person from their computer activity. \
+        You extract durable, high-value factual observations about a person from their computer activity. \
         Return ONLY a JSON array of strings. No markdown, no explanation. \
-        Each entry must be a short, factual, third-person statement. \
+        Each entry must be a short, factual, third-person statement about WHO they are or WHAT they build — \
+        not what app they opened or what page they visited. \
+        Quality over quantity — an empty array [] is better than low-value entries. \
         Never include sensitive data like passwords, tokens, or personal messages.
         """
 
@@ -213,7 +246,8 @@ public final class TaskSummarizer: Sendable {
 
     /// Pre-aggregate consecutive activity entries that share the same app into blocks.
     /// This prevents the AI from creating a new task per screenshot interval.
-    private struct ActivityBlock {
+    // internal for testability — used by TaskMinerSharedTests
+    struct ActivityBlock {
         let appName: String
         var startTime: Date
         var endTime: Date
@@ -222,7 +256,8 @@ public final class TaskSummarizer: Sendable {
         var ocrSamples: [String]
     }
 
-    private func aggregateActivities(_ activities: [SummarizationInput]) -> [ActivityBlock] {
+    // internal for testability
+    func aggregateActivities(_ activities: [SummarizationInput]) -> [ActivityBlock] {
         // Phase 1: Merge consecutive entries with the same app name
         var rawBlocks: [ActivityBlock] = []
 
@@ -272,7 +307,8 @@ public final class TaskSummarizer: Sendable {
 
     /// Merge short blocks (<60s) with nearby blocks of the same app (within 5 min gap).
     /// This prevents rapid app-switching from creating dozens of micro-blocks.
-    private func coalesceShortBlocks(_ blocks: [ActivityBlock]) -> [ActivityBlock] {
+    // internal for testability
+    func coalesceShortBlocks(_ blocks: [ActivityBlock]) -> [ActivityBlock] {
         guard blocks.count > 1 else { return blocks }
         var result = blocks
         var changed = true
@@ -428,7 +464,8 @@ public final class TaskSummarizer: Sendable {
 
     // MARK: - Response Parsing
 
-    private func parseResponse(_ response: String, date: Date) throws -> SummarizationResult {
+    // internal for testability
+    func parseResponse(_ response: String, date: Date) throws -> SummarizationResult {
         let jsonStr = JSONSanitizer.sanitize(response)
         Logger.debug("Gemini response (\(jsonStr.count) chars): \(String(jsonStr.prefix(500)))")
 
@@ -500,7 +537,8 @@ public final class TaskSummarizer: Sendable {
 
     /// Post-processing: merge tasks that share the same title into a single task
     /// spanning the full time range, combining descriptions and apps.
-    private static func mergeDuplicateTasks(_ tasks: [TaskRecord]) -> [TaskRecord] {
+    // internal for testability
+    static func mergeDuplicateTasks(_ tasks: [TaskRecord]) -> [TaskRecord] {
         guard tasks.count > 1 else { return tasks }
 
         var groups: [String: [TaskRecord]] = [:]
@@ -564,7 +602,8 @@ public final class TaskSummarizer: Sendable {
         }
     }
 
-    private func parseTime(_ timeStr: String, relativeTo day: Date) -> Date? {
+    // internal for testability
+    func parseTime(_ timeStr: String, relativeTo day: Date) -> Date? {
         let parts = timeStr.split(separator: ":").compactMap { Int($0) }
         guard parts.count >= 2 else { return nil }
 

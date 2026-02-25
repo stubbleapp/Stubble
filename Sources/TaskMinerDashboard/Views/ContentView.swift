@@ -80,6 +80,7 @@ struct ContentView: View {
                     selection: $selectedTab
                 )
                 .frame(maxWidth: 500)
+                .accessibilityIdentifier("content-tab-picker")
             }
 
             ToolbarItem(placement: .primaryAction) {
@@ -95,6 +96,7 @@ struct ContentView: View {
                     }
                     .buttonStyle(.plain)
                     .accessibilityLabel("Export Tasks")
+                    .accessibilityIdentifier("content-export")
                     .help("Export tasks as CSV")
                     .disabled(viewModel.tasks.isEmpty)
                     .opacity(viewModel.tasks.isEmpty ? 0.4 : 1)
@@ -110,6 +112,7 @@ struct ContentView: View {
                     }
                     .buttonStyle(.plain)
                     .accessibilityLabel("Settings")
+                    .accessibilityIdentifier("content-settings")
 
                     PauseControlView(iconSize: ToolbarLayout.iconButtonSize)
                 }

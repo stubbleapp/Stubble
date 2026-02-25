@@ -214,10 +214,32 @@ final class MenuBarDelegate: NSObject, NSApplicationDelegate {
     /// per executable path. Using the same binary path means the daemon inherits the
     /// dashboard's permissions automatically — no need to grant twice.
     private func startDaemon() {
+        // Don't start a second daemon if one is already running
+        if let existing = daemonProcess, existing.isRunning {
+            Logger.info("Daemon already running (PID \(existing.processIdentifier))")
+            return
+        }
+
         let binaryPath = ProcessInfo.processInfo.arguments[0]
+        Logger.info("Starting daemon — binary: \(binaryPath)")
 
         guard FileManager.default.isExecutableFile(atPath: binaryPath) else {
+            Logger.error("Daemon binary not executable at path: \(binaryPath)")
             return
+        }
+
+        // Clean up stale PID file from a previous crash (flock is released on process exit,
+        // but the file itself can linger after SIGKILL or system crash).
+        if let config = try? SharedConfiguration() {
+            let pidPath = config.dataDirectory.appendingPathComponent("daemon.pid").path
+            if FileManager.default.fileExists(atPath: pidPath),
+               let pidStr = try? String(contentsOfFile: pidPath, encoding: .utf8).trimmingCharacters(in: .whitespacesAndNewlines),
+               let pid = Int32(pidStr), pid > 0 {
+                if kill(pid, 0) != 0 {
+                    Logger.info("Cleaning stale PID file (PID \(pid) not running)")
+                    try? FileManager.default.removeItem(atPath: pidPath)
+                }
+            }
         }
 
         let process = Process()
@@ -226,16 +248,42 @@ final class MenuBarDelegate: NSObject, NSApplicationDelegate {
         // Inherit the environment so Gemini key etc. are available
         process.environment = ProcessInfo.processInfo.environment
 
-        // Don't let stdout/stderr from the daemon pollute the dashboard
+        // Capture daemon stderr to a dedicated file so startup errors aren't lost.
         process.standardOutput = FileHandle.nullDevice
-        process.standardError = FileHandle.nullDevice
+        if let config = try? SharedConfiguration() {
+            let stderrPath = config.dataDirectory.appendingPathComponent("daemon-stderr.log")
+            FileManager.default.createFile(atPath: stderrPath.path, contents: nil)
+            if let handle = FileHandle(forWritingAtPath: stderrPath.path) {
+                handle.seekToEndOfFile()
+                process.standardError = handle
+            } else {
+                process.standardError = FileHandle.nullDevice
+            }
+        } else {
+            process.standardError = FileHandle.nullDevice
+        }
 
         do {
             try process.run()
             daemonProcess = process
             Logger.info("Started daemon (PID \(process.processIdentifier))")
+
+            // Detect unexpected early exit — the most common failure mode on fresh installs
+            process.terminationHandler = { [weak self] proc in
+                let status = proc.terminationStatus
+                if status != 0 {
+                    Logger.error("Daemon exited unexpectedly (exit code \(status)) — check daemon-stderr.log")
+                } else {
+                    Logger.info("Daemon exited (status 0)")
+                }
+                Task { @MainActor in
+                    if self?.daemonProcess?.processIdentifier == proc.processIdentifier {
+                        self?.daemonProcess = nil
+                    }
+                }
+            }
         } catch {
-            Logger.error("Failed to start daemon: \(error.localizedDescription)")
+            Logger.error("Failed to launch daemon process: \(error.localizedDescription)")
         }
     }
 

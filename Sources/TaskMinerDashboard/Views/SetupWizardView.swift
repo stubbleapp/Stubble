@@ -11,25 +11,27 @@ struct SetupWizardView: View {
     @Environment(DashboardViewModel.self) var viewModel
     var onComplete: () -> Void
 
-    @State private var currentPage = 0
+    /// Central flow controller — business logic is testable via SetupFlowControllerTests.
+    @State private var flow = SetupFlowController()
+
+    /// Combined permission flag — PermissionsPage writes here, synced to flow controller.
     @State private var permissionsGranted = false
 
-    // API key validation (owned here so Continue button can trigger it)
-    @State private var isValidating = false
-    @State private var apiKeyError: String?
-    @State private var apiKeyValidated = false
-
-    private let totalPages = 4
-
     var body: some View {
+        @Bindable var flow = flow
+
         VStack(spacing: 0) {
             // Page content
             Group {
-                switch currentPage {
+                switch flow.currentPage {
                 case 0: WelcomePage()
-                case 1: ApiKeyPage(error: apiKeyError, isValidating: isValidating)
+                    .accessibilityIdentifier("wizard-welcome")
+                case 1: ApiKeyPage(apiKey: $flow.apiKey, error: flow.apiKeyError, isValidating: flow.isValidating)
+                    .accessibilityIdentifier("wizard-api-key")
                 case 2: PermissionsPage(allGranted: $permissionsGranted)
+                    .accessibilityIdentifier("wizard-permissions")
                 case 3: PreferencesPage(onComplete: finish)
+                    .accessibilityIdentifier("wizard-preferences")
                 default: EmptyView()
                 }
             }
@@ -39,40 +41,42 @@ struct SetupWizardView: View {
             VStack(spacing: 16) {
                 // Progress dots
                 HStack(spacing: 8) {
-                    ForEach(0..<totalPages, id: \.self) { index in
+                    ForEach(0..<flow.totalPages, id: \.self) { index in
                         Circle()
-                            .fill(index == currentPage ? Theme.accent : Theme.textQuaternary.opacity(0.5))
+                            .fill(index == flow.currentPage ? Theme.accent : Theme.textQuaternary.opacity(0.5))
                             .frame(width: 7, height: 7)
+                            .accessibilityIdentifier("wizard-progress-dot-\(index)")
                     }
                 }
 
                 // Navigation buttons
                 HStack {
-                    if currentPage > 0 {
+                    if flow.canGoBack {
                         Button("Back") {
                             withAnimation(.easeInOut(duration: 0.25)) {
-                                currentPage -= 1
+                                _ = flow.goBack()
                             }
                         }
                         .buttonStyle(.plain)
                         .font(.system(size: 13, weight: .medium))
                         .foregroundStyle(Theme.textSecondary)
+                        .accessibilityIdentifier("wizard-back")
                     }
 
                     Spacer()
 
-                    if currentPage < totalPages - 1 {
+                    if !flow.isOnLastPage {
                         Button {
                             handleContinue()
                         } label: {
                             HStack(spacing: 4) {
-                                if isValidating {
+                                if flow.isValidating {
                                     ProgressView()
                                         .controlSize(.small)
                                         .tint(.white)
                                     Text("Verifying…")
                                 } else {
-                                    Text(currentPage == 0 ? "Get Started" : "Continue")
+                                    Text(flow.continueButtonLabel)
                                     Image(systemName: "arrow.right")
                                         .font(.system(size: 11, weight: .semibold))
                                 }
@@ -81,11 +85,12 @@ struct SetupWizardView: View {
                             .foregroundStyle(.white)
                             .padding(.horizontal, 20)
                             .padding(.vertical, 8)
-                            .background(continueButtonEnabled ? Theme.accent : Theme.accent.opacity(0.35))
+                            .background(flow.canContinue ? Theme.accent : Theme.accent.opacity(0.35))
                             .clipShape(Capsule())
                         }
                         .buttonStyle(.plain)
-                        .disabled(!continueButtonEnabled)
+                        .disabled(!flow.canContinue)
+                        .accessibilityIdentifier("wizard-continue")
                     }
                 }
             }
@@ -94,73 +99,58 @@ struct SetupWizardView: View {
         }
         .frame(width: 560, height: 480)
         .background(Theme.primaryBackground)
-    }
-
-    private var continueButtonEnabled: Bool {
-        switch currentPage {
-        case 1:
-            let hasKey = !(SettingsManager.shared.geminiApiKey ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-            return hasKey && !isValidating
-        case 2:
-            return permissionsGranted
-        default:
-            return true
+        .onChange(of: permissionsGranted) { _, granted in
+            // Sync combined permission flag to the flow controller
+            flow.accessibilityGranted = granted
+            flow.screenRecordingGranted = granted
         }
     }
 
     private func handleContinue() {
-        if currentPage == 1 {
+        switch flow.handleContinue() {
+        case .advance:
+            break // flow controller already advanced
+        case .validate:
             validateApiKeyThenAdvance()
-        } else {
-            advance()
-        }
-    }
-
-    private func advance() {
-        withAnimation(.easeInOut(duration: 0.25)) {
-            currentPage += 1
+        case .blocked:
+            break
         }
     }
 
     private func validateApiKeyThenAdvance() {
-        let key = (SettingsManager.shared.geminiApiKey ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !key.isEmpty else {
-            apiKeyError = "Please enter your API key first."
+        if let error = flow.validateApiKeyFormat() {
+            flow.setApiKeyError(error)
             return
         }
 
-        isValidating = true
-        apiKeyError = nil
+        let key = flow.apiKey.trimmingCharacters(in: CharacterSet.whitespacesAndNewlines)
+        flow.beginValidation()
 
         Task {
             do {
                 guard let client = GeminiClient.fromAPIKey(key) else {
-                    isValidating = false
-                    apiKeyError = "Invalid key format."
+                    flow.cancelValidation("Invalid key format.")
                     return
                 }
                 let _ = try await client.generateText(
                     prompt: "Reply with the single word: ok",
                     systemInstruction: nil
                 )
-                isValidating = false
-                apiKeyValidated = true
-                advance()
+                flow.handleValidationSuccess()
             } catch {
-                isValidating = false
-                let desc = error.localizedDescription.lowercased()
-                if desc.contains("403") || desc.contains("401") || desc.contains("api key") || desc.contains("permission") {
-                    apiKeyError = "This API key is invalid. Please check it and try again."
-                } else if desc.contains("timeout") || desc.contains("network") || desc.contains("internet") {
-                    apiKeyError = "Network error — check your internet connection and try again."
-                } else {
-                    apiKeyError = "Could not verify the key — please try again."
-                }
+                flow.handleValidationFailure(error)
             }
         }
     }
 
     private func finish() {
+        // Ensure the API key is persisted before completing setup.
+        // The onChange handler on ApiKeyPage should have already saved it,
+        // but this guards against edge cases (e.g. paste without triggering onChange).
+        let key = flow.apiKey.trimmingCharacters(in: CharacterSet.whitespacesAndNewlines)
+        if !key.isEmpty {
+            SettingsManager.shared.geminiApiKey = key
+        }
         SettingsManager.shared.hasCompletedSetup = true
         onComplete()
     }
@@ -274,10 +264,10 @@ private struct WelcomePage: View {
 // MARK: - Page 2: API Key
 
 private struct ApiKeyPage: View {
+    @Binding var apiKey: String
     let error: String?
     let isValidating: Bool
 
-    @State private var apiKey: String = ""
     @State private var showKey = false
 
     var body: some View {
@@ -340,6 +330,7 @@ private struct ApiKeyPage: View {
                     .padding(10)
                     .background(.ultraThinMaterial)
                     .cornerRadius(8)
+                    .accessibilityIdentifier("wizard-api-key-input")
 
                     Button {
                         showKey.toggle()
@@ -352,6 +343,7 @@ private struct ApiKeyPage: View {
                             .clipShape(Circle())
                     }
                     .buttonStyle(.plain)
+                    .accessibilityIdentifier("wizard-api-key-toggle")
                 }
 
                 // Error message
@@ -363,6 +355,7 @@ private struct ApiKeyPage: View {
                             .font(.system(size: 12))
                     }
                     .foregroundStyle(Theme.statusError)
+                    .accessibilityIdentifier("wizard-api-key-error")
                 }
             }
             .padding(.horizontal, 60)
@@ -373,7 +366,7 @@ private struct ApiKeyPage: View {
             apiKey = SettingsManager.shared.geminiApiKey ?? ""
         }
         .onChange(of: apiKey) { _, newValue in
-            // Save to SettingsManager so parent can read it for validation
+            // Persist to settings.json so the daemon and GeminiClient can read it
             let trimmed = newValue.trimmingCharacters(in: .whitespacesAndNewlines)
             if !trimmed.isEmpty {
                 SettingsManager.shared.geminiApiKey = trimmed
@@ -444,6 +437,7 @@ private struct PermissionsPage: View {
                         PermissionManager.openAccessibilitySettings()
                     }
                 )
+                .accessibilityIdentifier("wizard-perm-accessibility")
 
                 PermissionRow(
                     icon: "camera.metering.spot",
@@ -454,6 +448,7 @@ private struct PermissionsPage: View {
                         PermissionManager.openScreenRecordingSettings()
                     }
                 )
+                .accessibilityIdentifier("wizard-perm-screen-recording")
             }
             .padding(.horizontal, 50)
 
@@ -466,6 +461,7 @@ private struct PermissionsPage: View {
                         .foregroundStyle(Theme.statusActive)
                 }
                 .padding(.top, 20)
+                .accessibilityIdentifier("wizard-perms-granted")
             } else {
                 Text("Grant permissions in System Settings, then return here.\nThe status will update automatically.")
                     .font(.caption)
@@ -544,6 +540,7 @@ private struct PreferencesPage: View {
                 .toggleStyle(.switch)
                 .tint(Theme.accent)
                 .padding(.horizontal, 60)
+                .accessibilityIdentifier("wizard-launch-at-login")
                 .onChange(of: launchAtLogin) { _, enabled in
                     updateLoginItem(enabled: enabled)
                 }
@@ -564,6 +561,7 @@ private struct PreferencesPage: View {
             }
             .buttonStyle(.plain)
             .padding(.bottom, 8)
+            .accessibilityIdentifier("wizard-finish")
         }
     }
 
