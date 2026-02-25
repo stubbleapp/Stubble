@@ -136,23 +136,35 @@ echo ""
 # ─── Create GitHub Release ──────────────────────────────────────
 echo "🚀 Creating GitHub Release $TAG..."
 
+# Collect assets to upload
+UPLOAD_ASSETS=("$ZIP_PATH" "$APPCAST_PATH")
+
+# Include DMG if it exists (for website distribution)
+# Upload both versioned (Stubble-1.3.0.dmg) and stable (Stubble.dmg) names
+# so the website can use a permanent link: /latest/download/Stubble.dmg
+DMG_PATH="$OUTPUT_DIR/Stubble-$VERSION.dmg"
+STABLE_DMG_PATH="$OUTPUT_DIR/Stubble.dmg"
+if [ -f "$DMG_PATH" ]; then
+    cp "$DMG_PATH" "$STABLE_DMG_PATH"
+    UPLOAD_ASSETS+=("$DMG_PATH" "$STABLE_DMG_PATH")
+    echo "   Including DMG for website distribution"
+fi
+
 # Check if release already exists
 if gh release view "$TAG" --repo "$GITHUB_REPO" &>/dev/null; then
     echo "   Release $TAG already exists — uploading assets (overwriting)..."
     gh release upload "$TAG" \
-        "$ZIP_PATH" \
-        "$APPCAST_PATH" \
+        "${UPLOAD_ASSETS[@]}" \
         --repo "$GITHUB_REPO" \
         --clobber
 else
     gh release create "$TAG" \
-        "$ZIP_PATH" \
-        "$APPCAST_PATH" \
+        "${UPLOAD_ASSETS[@]}" \
         --repo "$GITHUB_REPO" \
         --title "Stubble $TAG" \
         --notes "Stubble $VERSION
 
-Download **$ZIP_NAME**, unzip, and drag to Applications.
+Download **Stubble-$VERSION.dmg** and drag to Applications.
 
 Right-click → Open the first time to bypass Gatekeeper." \
         --latest
@@ -161,9 +173,13 @@ fi
 echo ""
 echo "✅ Published!"
 echo ""
-echo "   Release: https://github.com/$GITHUB_REPO/releases/tag/$TAG"
-echo "   Appcast: https://github.com/$GITHUB_REPO/releases/download/$TAG/appcast.xml"
-echo "   Archive: $DOWNLOAD_URL"
+echo "   Release:  https://github.com/$GITHUB_REPO/releases/tag/$TAG"
+echo "   Appcast:  https://github.com/$GITHUB_REPO/releases/download/$TAG/appcast.xml"
+echo "   Archive:  $DOWNLOAD_URL"
+if [ -f "$DMG_PATH" ]; then
+echo "   DMG:      https://github.com/$GITHUB_REPO/releases/download/$TAG/Stubble-$VERSION.dmg"
+echo "   DMG (stable): https://github.com/$GITHUB_REPO/releases/latest/download/Stubble.dmg"
+fi
 echo ""
 echo "   Sparkle will find updates via SUFeedURL in Info.plist:"
 echo "   https://github.com/$GITHUB_REPO/releases/latest/download/appcast.xml"

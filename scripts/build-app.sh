@@ -228,9 +228,6 @@ else
 fi
 
 echo ""
-echo "── Publishing an update ──────────────────────────────────────"
-echo "   cd $OUTPUT_DIR && zip -r $APP_NAME-$VERSION.zip $APP_NAME.app"
-echo "   # Sign the zip with Sparkle's sign_update tool:"
-echo "   #   .build/artifacts/sparkle/Sparkle/bin/sign_update $APP_NAME-$VERSION.zip"
-echo "   # Then run generate_appcast on your updates folder."
+echo "── To publish a release ────────────────────────────────────"
+echo "   bash scripts/publish-update.sh"
 echo ""

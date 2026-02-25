@@ -13,7 +13,15 @@ struct ContentView: View {
     @Environment(DashboardViewModel.self) var viewModel
     @State private var selectedTab = 0
     @State private var showSettings = false
-    @State private var showScreensTab = SettingsManager.shared.showScreensTab
+
+    /// Tracks whether the Option (⌥) key is currently held down.
+    @State private var optionKeyHeld = false
+    /// The Screens tab is visible when Option is held OR while the user is on it.
+    @State private var showScreensTab = false
+    /// NSEvent monitor reference so we can remove it on disappear.
+    @State private var flagsMonitor: Any?
+
+    private let screensTabIndex = 3
 
     private var tabItems: [String] {
         var items = ["Timeline", "Activities", "Tips"]
@@ -108,15 +116,44 @@ struct ContentView: View {
                 .padding(.trailing, ToolbarLayout.toolbarTrailingPadding)
             }
         }
-        .sheet(isPresented: $showSettings, onDismiss: {
-            showScreensTab = SettingsManager.shared.showScreensTab
-            // If Screens tab was hidden while selected, reset to first tab
-            if !showScreensTab && selectedTab >= tabItems.count {
-                selectedTab = 0
-            }
-        }) {
+        .sheet(isPresented: $showSettings) {
             SettingsView()
                 .environment(viewModel)
+        }
+        .onAppear {
+            // Monitor Option key press/release to reveal the hidden Screens tab
+            flagsMonitor = NSEvent.addLocalMonitorForEvents(matching: .flagsChanged) { event in
+                let isOption = event.modifierFlags.contains(.option)
+                if isOption != optionKeyHeld {
+                    optionKeyHeld = isOption
+                    if isOption {
+                        // Option pressed → reveal Screens tab
+                        withAnimation(.easeInOut(duration: 0.15)) {
+                            showScreensTab = true
+                        }
+                    } else if selectedTab != screensTabIndex {
+                        // Option released while NOT on Screens → hide it
+                        withAnimation(.easeInOut(duration: 0.15)) {
+                            showScreensTab = false
+                        }
+                    }
+                }
+                return event
+            }
+        }
+        .onDisappear {
+            if let monitor = flagsMonitor {
+                NSEvent.removeMonitor(monitor)
+                flagsMonitor = nil
+            }
+        }
+        .onChange(of: selectedTab) { _, newTab in
+            // User navigated away from Screens → hide the tab (unless Option still held)
+            if newTab != screensTabIndex && !optionKeyHeld {
+                withAnimation(.easeInOut(duration: 0.15)) {
+                    showScreensTab = false
+                }
+            }
         }
     }
 }

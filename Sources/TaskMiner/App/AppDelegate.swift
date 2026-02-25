@@ -164,6 +164,8 @@ class AppDelegate {
     ]
 
     private func handleAppChange(app: NSRunningApplication) {
+        guard !pauseController.isPaused else { return }
+
         let appName = app.localizedName ?? "Unknown"
         let bundleId = app.bundleIdentifier
 
@@ -199,6 +201,7 @@ class AppDelegate {
     }
 
     private func handleTitleChange(newTitle: String) {
+        guard !pauseController.isPaused else { return }
         guard let current = currentActivity else { return }
 
         // Only create a new activity if the title actually differs
@@ -292,6 +295,7 @@ class AppDelegate {
 
     /// Shared handler for idle transitions from both HID polling and system events.
     private func handleIdleTransition(_ transition: IdleDetector.IdleTransition) {
+        guard !pauseController.isPaused else { return }
         switch transition {
         case .becameIdle:
             Logger.info("User became idle (\(Int(idleDetector.idleTime))s)")
@@ -370,6 +374,7 @@ class AppDelegate {
 
     private func takeScreenshot(trigger: ScreenshotTrigger) {
         guard !isShuttingDown else { return }
+        guard !pauseController.isPaused else { return }
 
         // Attempt the actual capture — this is the real permission test.
         // NOTE: We deliberately do NOT gate on CGPreflightScreenCaptureAccess() because
