@@ -43,9 +43,9 @@ final class RecommendationGenerator: Sendable {
         Your output has three parts: \
         1. greeting_context: A warm, personal 1-2 sentence greeting that shows you know what they're \
            working on. Reference their specific projects or goals by name. End with a natural transition. \
-        2. suggested_questions: 3-4 questions the user might want to ask about their recent work. \
-           These must be deeply specific — referencing their actual projects, technologies, and challenges. \
-           Frame as the user's voice (e.g. "How should I handle the migration to ScreenCaptureKit?"). \
+        2. suggested_questions: 3-4 SHORT questions (max 6-8 words each) the user might ask about their work. \
+           Keep them punchy and concise — e.g. "Best WAL checkpoint strategy?", "Handle TCC after rebuild?". \
+           Reference their actual projects and technologies but stay brief. \
         3. recommendations: 3-6 actionable items (see categories below). \
         \
         Categories: \
@@ -268,9 +268,9 @@ final class RecommendationGenerator: Sendable {
         {
           "greeting_context": "You've been deep into the Stubble permission system and SQLite layer this week — here are some things that might help.",
           "suggested_questions": [
-            "How should I handle TCC permission changes across app updates?",
-            "What's the best WAL checkpoint strategy for my SQLite usage pattern?",
-            "Are there better approaches to cross-process memory sharing on macOS?"
+            "Handle TCC after rebuild?",
+            "Best WAL checkpoint strategy?",
+            "Cross-process memory on macOS?"
           ],
           "recommendations": [
             {
@@ -286,7 +286,7 @@ final class RecommendationGenerator: Sendable {
 
         Top-level fields:
         - greeting_context: 1-2 warm, personal sentences that reference the user's actual projects by name
-        - suggested_questions: 3-4 deeply specific questions tied to their current work and challenges
+        - suggested_questions: 3-4 SHORT questions (max 6-8 words each) tied to their current work
 
         Recommendation fields:
         - category: one of "article", "tool", "best_practice", "workflow", "learning"

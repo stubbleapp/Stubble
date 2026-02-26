@@ -4,7 +4,7 @@ set -euo pipefail
 # ─── Configuration ───────────────────────────────────────────────
 APP_NAME="Stubble"
 BUNDLE_ID="com.samattias.stubble"
-VERSION="${1:-1.3.0}"                       # pass version as first arg, e.g. ./build-app.sh 1.3.0
+VERSION="${1:-1.6.0}"                       # pass version as first arg, e.g. ./build-app.sh 1.6.0
 BUILD_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 OUTPUT_DIR="$BUILD_DIR/build"
 APP_BUNDLE="$OUTPUT_DIR/$APP_NAME.app"

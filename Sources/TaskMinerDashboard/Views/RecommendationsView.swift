@@ -136,7 +136,7 @@ struct RecommendationsView: View {
                 if let context = viewModel.greetingContext {
                     Text(context)
                         .font(.system(size: 13))
-                        .foregroundStyle(Theme.textMuted)
+                        .foregroundStyle(Theme.textPrimary)
                         .lineSpacing(2)
                         .fixedSize(horizontal: false, vertical: true)
                 }
@@ -146,16 +146,12 @@ struct RecommendationsView: View {
 
             Button(action: { viewModel.generateRecommendations() }) {
                 Image(systemName: "arrow.clockwise")
-                    .font(.system(size: 13, weight: .medium))
-                    .foregroundStyle(Theme.textMuted)
+                    .font(.system(size: 14, weight: .medium))
+                    .foregroundStyle(Theme.accent)
                     .symbolEffect(.bounce, value: viewModel.isGeneratingRecommendations)
-                    .frame(width: 28, height: 28)
-                    .background(.ultraThinMaterial)
+                    .frame(width: 32, height: 32)
+                    .background(Theme.accent.opacity(0.08))
                     .clipShape(Circle())
-                    .overlay(
-                        Circle()
-                            .strokeBorder(Theme.cardBorder, lineWidth: 0.5)
-                    )
             }
             .buttonStyle(.plain)
             .disabled(viewModel.isGeneratingRecommendations)
@@ -233,7 +229,7 @@ struct RecommendationsView: View {
 
     private var recommendationCardsSection: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text("Recommended for you")
+            Text("Recommended")
                 .font(.system(size: 13, weight: .semibold))
                 .foregroundStyle(Theme.textPrimary)
                 .padding(.horizontal, 24)
@@ -248,35 +244,29 @@ struct RecommendationsView: View {
                 }
                 .padding(.horizontal, 24)
             }
+            .scrollClipDisabled(true)
         }
     }
 
     // MARK: - Question Pills (horizontal scroll)
 
     private var questionPills: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 8) {
-                ForEach(viewModel.suggestedQuestions, id: \.self) { question in
-                    Button {
-                        viewModel.pendingChatQuestion = question
-                    } label: {
-                        Text(question)
-                            .font(.system(size: 12, weight: .medium))
-                            .foregroundStyle(Theme.textPrimary)
-                            .padding(.horizontal, 14)
-                            .padding(.vertical, 8)
-                            .background(.ultraThinMaterial)
-                            .clipShape(Capsule())
-                            .overlay(
-                                Capsule()
-                                    .strokeBorder(Theme.cardBorder, lineWidth: 0.5)
-                            )
-                    }
-                    .buttonStyle(.plain)
+        FlowLayout(spacing: 8) {
+            ForEach(viewModel.suggestedQuestions, id: \.self) { question in
+                Button {
+                    viewModel.pendingChatQuestion = question
+                } label: {
+                    Text(question)
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(Theme.textPrimary)
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 8)
+                        .modifier(LiquidGlassPillModifier())
                 }
+                .buttonStyle(.plain)
             }
-            .padding(.horizontal, 24)
         }
+        .padding(.horizontal, 24)
     }
 
     // MARK: - Markdown Helpers
@@ -340,16 +330,10 @@ private struct ProjectsExpandableView: View {
         VStack(alignment: .leading, spacing: 0) {
             // Section header
             HStack {
-                Text("Projects")
+                Text("Activities")
                     .font(.system(size: 13, weight: .semibold))
                     .foregroundStyle(Theme.textPrimary)
                 Spacer()
-                Text(formatDuration(viewModel.activeSeconds))
-                    .font(.system(size: 12, weight: .medium).monospacedDigit())
-                    .foregroundStyle(Theme.textMuted)
-                Text("active")
-                    .font(.system(size: 12))
-                    .foregroundStyle(Theme.textQuaternary)
             }
             .padding(.bottom, 10)
 
@@ -366,7 +350,7 @@ private struct ProjectsExpandableView: View {
                     }
                 } label: {
                     HStack(spacing: 4) {
-                        Text(showAll ? "Show less" : "Show all \(projects.count) projects")
+                        Text(showAll ? "Show less" : "Show all \(projects.count) activities")
                             .font(.system(size: 12, weight: .medium))
                         Image(systemName: showAll ? "chevron.up" : "chevron.down")
                             .font(.system(size: 9, weight: .semibold))
@@ -469,11 +453,7 @@ private struct ProjectRow: View {
         }
         .background(
             RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .fill(.ultraThinMaterial)
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .strokeBorder(Theme.cardBorder, lineWidth: 0.5)
+                .fill(Color.clear)
         )
     }
 }
@@ -541,18 +521,49 @@ private struct RecommendationCard: View {
         }
         .padding(14)
         .frame(width: 220, height: 170, alignment: .topLeading)
-        .background(
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .fill(.ultraThinMaterial)
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .strokeBorder(Theme.cardBorder, lineWidth: 0.5)
-        )
+        .modifier(LiquidGlassCardModifier())
         .onHover { hovering in
             withAnimation(.easeInOut(duration: 0.15)) {
                 isHovering = hovering
             }
+        }
+    }
+}
+
+// MARK: - Liquid Glass Card Modifier
+
+private struct LiquidGlassCardModifier: ViewModifier {
+    func body(content: Content) -> some View {
+        if #available(macOS 26, *) {
+            content
+                .glassEffect(.regular.interactive(), in: .rect(cornerRadius: 12, style: .continuous))
+        } else {
+            content
+                .background(
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .fill(.ultraThinMaterial)
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .strokeBorder(Theme.cardBorder, lineWidth: 0.5)
+                )
+        }
+    }
+}
+
+private struct LiquidGlassPillModifier: ViewModifier {
+    func body(content: Content) -> some View {
+        if #available(macOS 26, *) {
+            content
+                .glassEffect(.regular.interactive(), in: .capsule)
+        } else {
+            content
+                .background(.ultraThinMaterial)
+                .clipShape(Capsule())
+                .overlay(
+                    Capsule()
+                        .strokeBorder(Theme.cardBorder, lineWidth: 0.5)
+                )
         }
     }
 }

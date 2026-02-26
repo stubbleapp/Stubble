@@ -61,11 +61,9 @@ struct ChatOverlayView: View {
             withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) { isExpanded = true }
         } label: {
             HStack(spacing: 10) {
-                Image(systemName: "sparkles")
-                    .font(.system(size: 13, weight: .medium))
-                    .foregroundStyle(Theme.accent.opacity(0.7))
+                StubbleIconView(size: 18)
 
-                Text("Ask about your day\u{2026}")
+                Text("Ask Stubble\u{2026}")
                     .font(.system(size: 13))
                     .foregroundStyle(Theme.textMuted)
 
@@ -108,7 +106,7 @@ struct ChatOverlayView: View {
 
             ChatTextField(
                 text: $inputText,
-                placeholder: "Ask about your day\u{2026}",
+                placeholder: "Ask Stubble\u{2026}",
                 onSubmit: sendMessage
             )
             .frame(height: 22)
@@ -133,9 +131,7 @@ struct ChatOverlayView: View {
         VStack(spacing: 0) {
             // Header
             HStack {
-                Image(systemName: "sparkles")
-                    .font(.system(size: 11, weight: .medium))
-                    .foregroundStyle(Theme.accent.opacity(0.6))
+                StubbleIconView(size: 14)
 
                 Text("Chat")
                     .font(.system(size: 12, weight: .semibold))
@@ -314,6 +310,19 @@ struct ChatOverlayView: View {
                 proxy.scrollTo(last.id, anchor: .bottom)
             }
         }
+    }
+}
+
+// MARK: - Stubble App Icon
+
+private struct StubbleIconView: View {
+    let size: CGFloat
+
+    var body: some View {
+        Image(nsImage: NSApp.applicationIconImage)
+            .resizable()
+            .aspectRatio(contentMode: .fit)
+            .frame(width: size, height: size)
     }
 }
 
