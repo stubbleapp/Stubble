@@ -56,26 +56,34 @@ enum TimelineItem: Identifiable {
 
                 // Skip if tasks are contiguous or overlapping (already clipped above)
                 if interTaskGap > 0 {
-                    // Try matching idle records first (ground truth)
-                    var matchedIdle = false
+                    // Collect all idle records that overlap this inter-task window,
+                    // then merge into a single gap so we never show consecutive "Away" items.
+                    var mergedStart: Date?
+                    var mergedEnd: Date?
+                    var matchedIndices: [Int] = []
+
                     for (gapIndex, gap) in idleGaps.enumerated() where !usedGaps.contains(gapIndex) {
                         // Use <= for boundary-exact matches (idle starting exactly at next task)
                         if gap.end > windowStart && gap.start <= windowEnd {
-                            let duration = gap.end.timeIntervalSince(gap.start)
-                            items.append(.gap(
-                                id: "idle-\(gapIndex)",
-                                startTime: gap.start,
-                                endTime: gap.end,
-                                duration: duration
-                            ))
-                            usedGaps.insert(gapIndex)
-                            matchedIdle = true
+                            mergedStart = min(mergedStart ?? gap.start, gap.start)
+                            mergedEnd = max(mergedEnd ?? gap.end, gap.end)
+                            matchedIndices.append(gapIndex)
                         }
                     }
 
-                    // Fallback: infer gap from task boundaries if no idle records matched
-                    // and the gap is significant (>= 2 minutes)
-                    if !matchedIdle && interTaskGap >= 120 {
+                    if let start = mergedStart, let end = mergedEnd {
+                        // Emit one combined idle gap for this window
+                        let duration = end.timeIntervalSince(start)
+                        items.append(.gap(
+                            id: "idle-\(index)",
+                            startTime: start,
+                            endTime: end,
+                            duration: duration
+                        ))
+                        for gi in matchedIndices { usedGaps.insert(gi) }
+                    } else if interTaskGap >= 120 {
+                        // Fallback: infer gap from task boundaries if no idle records matched
+                        // and the gap is significant (>= 2 minutes)
                         items.append(.gap(
                             id: "inferred-\(index)",
                             startTime: windowStart,

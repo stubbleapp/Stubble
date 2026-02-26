@@ -129,11 +129,19 @@ struct RecommendationsView: View {
     private var headerSection: some View {
         HStack(alignment: .top) {
             VStack(alignment: .leading, spacing: 4) {
-                Text("Hey, \(firstName)")
-                    .font(.system(size: 22, weight: .bold))
-                    .foregroundStyle(Theme.textPrimary)
+                if viewModel.isViewingToday {
+                    Text("Hey, \(firstName)")
+                        .font(.system(size: 22, weight: .bold))
+                        .foregroundStyle(Theme.textPrimary)
+                } else {
+                    Text(SharedFormatters.headerDateFormatter.string(from: viewModel.selectedDate))
+                        .font(.system(size: 22, weight: .bold))
+                        .foregroundStyle(Theme.textPrimary)
+                }
 
-                if let context = viewModel.greetingContext {
+                // Only show the greeting context teaser for today —
+                // past days have a full day summary card below instead.
+                if viewModel.isViewingToday, let context = viewModel.greetingContext {
                     Text(context)
                         .font(.system(size: 13))
                         .foregroundStyle(Theme.textPrimary)

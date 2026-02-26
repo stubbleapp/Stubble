@@ -169,37 +169,26 @@ struct SettingsView: View {
                         .foregroundStyle(Theme.textMuted)
                 }
 
-                // Save
+                // Save indicator (settings auto-save on change)
                 HStack(spacing: 12) {
                     Spacer()
 
-                    Button {
-                        viewModel.updateGeminiKey(apiKey)
-                        let trimmed = customPrompt.trimmingCharacters(in: .whitespacesAndNewlines)
-                        SettingsManager.shared.customPrompt = trimmed.isEmpty ? nil : trimmed
-                        SettingsManager.shared.granularity = granularity
-                        Analytics.settingChanged("granularity", value: granularity.displayName)
-                        saved = true
-                        hideSavedAfterDelay()
-                    } label: {
+                    if saved {
                         HStack(spacing: 4) {
-                            if saved {
-                                Image(systemName: "checkmark")
-                                    .font(.system(size: 10, weight: .bold))
-                            }
-                            Text(saved ? "Saved" : "Save")
+                            Image(systemName: "checkmark")
+                                .font(.system(size: 10, weight: .bold))
+                            Text("Saved")
+                                .font(.system(size: 12, weight: .medium))
                         }
-                        .font(.system(size: 12, weight: .medium))
                         .foregroundStyle(.white)
                         .padding(.horizontal, 16)
                         .padding(.vertical, 6)
-                        .background(saved ? Theme.statusActive : Theme.accent)
+                        .background(Theme.statusActive)
                         .clipShape(Capsule())
+                        .transition(.opacity)
                     }
-                    .buttonStyle(.plain)
-                    .accessibilityIdentifier("settings-save")
-                    .animation(.easeInOut(duration: 0.2), value: saved)
                 }
+                .animation(.easeInOut(duration: 0.2), value: saved)
             }
             .padding(20)
         }
@@ -212,6 +201,20 @@ struct SettingsView: View {
             customPrompt = SettingsManager.shared.customPrompt ?? ""
             granularity = SettingsManager.shared.granularity
             loadMemoryEntries()
+        }
+        .onChange(of: apiKey) {
+            viewModel.updateGeminiKey(apiKey)
+            showSavedIndicator()
+        }
+        .onChange(of: customPrompt) {
+            let trimmed = customPrompt.trimmingCharacters(in: .whitespacesAndNewlines)
+            SettingsManager.shared.customPrompt = trimmed.isEmpty ? nil : trimmed
+            showSavedIndicator()
+        }
+        .onChange(of: granularity) {
+            SettingsManager.shared.granularity = granularity
+            Analytics.settingChanged("granularity", value: granularity.displayName)
+            showSavedIndicator()
         }
         .alert("Clear All Data?", isPresented: $showClearConfirmation) {
             Button("Cancel", role: .cancel) {}
@@ -379,7 +382,8 @@ struct SettingsView: View {
         return "\(days)d ago"
     }
 
-    private func hideSavedAfterDelay() {
+    private func showSavedIndicator() {
+        saved = true
         DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
             saved = false
         }

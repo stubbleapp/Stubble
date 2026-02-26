@@ -144,20 +144,30 @@ class IdleDetector {
     // MARK: - Force Helpers
 
     private func forceIdle() {
-        guard systemForcedIdle != true else { return }
-        systemForcedIdle = true
-        let transition = checkTransition()
-        if transition == .becameIdle {
-            onSystemIdleTransition?(transition)
+        // DistributedNotificationCenter delivers on the posting thread (not
+        // guaranteed main). Dispatch to main to avoid data races on
+        // systemForcedIdle/wasIdle and to satisfy the dispatchPrecondition
+        // assertions in AppDelegate's handleIdleTransition.
+        let work = {
+            guard self.systemForcedIdle != true else { return }
+            self.systemForcedIdle = true
+            let transition = self.checkTransition()
+            if transition == .becameIdle {
+                self.onSystemIdleTransition?(transition)
+            }
         }
+        if Thread.isMainThread { work() } else { DispatchQueue.main.async(execute: work) }
     }
 
     private func forceActive() {
-        systemForcedIdle = nil // clear override, let HID polling take over
-        let transition = checkTransition()
-        if transition == .becameActive {
-            onSystemIdleTransition?(transition)
+        let work = {
+            self.systemForcedIdle = nil // clear override, let HID polling take over
+            let transition = self.checkTransition()
+            if transition == .becameActive {
+                self.onSystemIdleTransition?(transition)
+            }
         }
+        if Thread.isMainThread { work() } else { DispatchQueue.main.async(execute: work) }
     }
 
     enum IdleTransition: Equatable {

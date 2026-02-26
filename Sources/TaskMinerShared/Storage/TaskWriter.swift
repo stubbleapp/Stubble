@@ -10,7 +10,7 @@ public class TaskWriter {
         var dbPointer: OpaquePointer?
         let rc = sqlite3_open_v2(
             path.path, &dbPointer,
-            SQLITE_OPEN_READWRITE | SQLITE_OPEN_NOMUTEX,
+            SQLITE_OPEN_READWRITE | SQLITE_OPEN_FULLMUTEX,
             nil
         )
         guard rc == SQLITE_OK else {

@@ -39,7 +39,7 @@ public class DatabaseReader {
     }
 
     /// Current schema version. Bump this when adding new migrations.
-    private static let schemaVersion = 8
+    private static let schemaVersion = 9
 
     /// Apply schema migrations so the dashboard works even if the CLI hasn't run yet.
     /// Uses PRAGMA user_version to track which migrations have already run.
@@ -161,6 +161,27 @@ public class DatabaseReader {
             if !execMigration(digestSql, label: "8: create ocr_digests table") {
                 migrationFailed = true
             }
+        }
+
+        if currentVersion < 9 {
+            if !execMigration("ALTER TABLE activities ADD COLUMN browser_url TEXT",
+                              label: "9a: add browser_url", ignoreDuplicate: true) { migrationFailed = true }
+            if !execMigration("ALTER TABLE activities ADD COLUMN document_path TEXT",
+                              label: "9b: add document_path", ignoreDuplicate: true) { migrationFailed = true }
+            if !execMigration("ALTER TABLE activities ADD COLUMN focused_element_role TEXT",
+                              label: "9c: add focused_element_role", ignoreDuplicate: true) { migrationFailed = true }
+            let fileEventsSql = """
+            CREATE TABLE IF NOT EXISTS file_events (
+                id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                timestamp   TEXT NOT NULL,
+                file_path   TEXT NOT NULL,
+                event_type  TEXT NOT NULL DEFAULT 'modified',
+                activity_id INTEGER,
+                FOREIGN KEY (activity_id) REFERENCES activities(id)
+            )
+            """
+            if !execMigration(fileEventsSql, label: "9d: create file_events table") { migrationFailed = true }
+            sqlite3_exec(db, "CREATE INDEX IF NOT EXISTS idx_file_events_timestamp ON file_events(timestamp)", nil, nil, nil)
         }
 
         // Only bump the version if all migrations succeeded — failed migrations

@@ -122,6 +122,10 @@ cat > "$APP_BUNDLE/Contents/Info.plist" << PLIST
     <string>Stubble uses Accessibility to read window titles so it can describe what you're working on.</string>
     <key>NSScreenCaptureUsageDescription</key>
     <string>Stubble captures periodic screenshots to understand what you're working on. Screenshots are stored locally and never uploaded.</string>
+    <key>NSCalendarsUsageDescription</key>
+    <string>Stubble reads your calendar to provide meeting context in your daily activity summary. Event data stays on your device.</string>
+    <key>NSCalendarsFullAccessUsageDescription</key>
+    <string>Stubble reads your calendar to provide meeting context in your daily activity summary. Event data stays on your device.</string>
 $SPARKLE_PLIST_ENTRIES
     <key>TelemetryDeckAppID</key>
     <string>$TELEMETRY_DECK_APP_ID</string>
@@ -139,37 +143,44 @@ echo -n "APPL????" > "$APP_BUNDLE/Contents/PkgInfo"
 # --options runtime enables the hardened runtime (required for notarization).
 # --timestamp requests a secure timestamp from Apple (required for notarization).
 SPARKLE_FW="$APP_BUNDLE/Contents/Frameworks/Sparkle.framework"
+SIGN_FAILED=0
 if [ -d "$SPARKLE_FW" ]; then
     echo "🔏 Signing Sparkle nested binaries (inside-out)..."
 
     # 1) XPC services (deepest nested)
-    find "$SPARKLE_FW" -name "*.xpc" -type d | while read -r xpc; do
-        codesign --force --sign "$CODESIGN_IDENTITY" --options runtime --timestamp "$xpc" 2>&1 || echo "   ⚠️  Failed: $xpc"
-    done
+    while IFS= read -r -d '' xpc; do
+        codesign --force --sign "$CODESIGN_IDENTITY" --options runtime --timestamp "$xpc" 2>&1 || SIGN_FAILED=1
+    done < <(find "$SPARKLE_FW" -name "*.xpc" -type d -print0)
 
     # 2) Nested apps (Updater.app)
-    find "$SPARKLE_FW" -name "*.app" -type d | while read -r app; do
-        codesign --force --sign "$CODESIGN_IDENTITY" --options runtime --timestamp "$app" 2>&1 || echo "   ⚠️  Failed: $app"
-    done
+    while IFS= read -r -d '' app; do
+        codesign --force --sign "$CODESIGN_IDENTITY" --options runtime --timestamp "$app" 2>&1 || SIGN_FAILED=1
+    done < <(find "$SPARKLE_FW" -name "*.app" -type d -print0)
 
     # 3) Standalone executables (Autoupdate)
-    find "$SPARKLE_FW" -name "Autoupdate" -type f | while read -r exe; do
-        codesign --force --sign "$CODESIGN_IDENTITY" --options runtime --timestamp "$exe" 2>&1 || echo "   ⚠️  Failed: $exe"
-    done
+    while IFS= read -r -d '' exe; do
+        codesign --force --sign "$CODESIGN_IDENTITY" --options runtime --timestamp "$exe" 2>&1 || SIGN_FAILED=1
+    done < <(find "$SPARKLE_FW" -name "Autoupdate" -type f -print0)
 
     # 4) The framework itself
-    codesign --force --sign "$CODESIGN_IDENTITY" --options runtime --timestamp "$SPARKLE_FW" 2>&1 || echo "   ⚠️  Sparkle framework signing failed"
+    codesign --force --sign "$CODESIGN_IDENTITY" --options runtime --timestamp "$SPARKLE_FW" 2>&1 || SIGN_FAILED=1
 fi
 
 # 5) The main app bundle (outermost)
-codesign --force --sign "$CODESIGN_IDENTITY" --options runtime --timestamp "$APP_BUNDLE" 2>&1 || echo "⚠️  App signing failed"
+codesign --force --sign "$CODESIGN_IDENTITY" --options runtime --timestamp "$APP_BUNDLE" 2>&1 || SIGN_FAILED=1
+
+if [ "$SIGN_FAILED" -ne 0 ]; then
+    echo "❌ One or more code signing steps failed"
+    exit 1
+fi
 
 # Verify (strict checks match what notarization expects)
 if codesign --verify --strict "$APP_BUNDLE" 2>&1; then
     echo "🔏 Signed with Developer ID + secure timestamp (✅ ready for notarization)"
 else
-    echo "⚠️  Signature verification failed:"
+    echo "❌ Signature verification failed:"
     codesign --verify --verbose "$APP_BUNDLE" 2>&1
+    exit 1
 fi
 
 echo ""

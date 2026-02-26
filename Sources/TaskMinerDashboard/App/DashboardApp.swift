@@ -10,7 +10,12 @@ struct DashboardApp: App {
     @State private var hasCompletedSetup = SettingsManager.shared.hasCompletedSetup
     @StateObject private var updater = SoftwareUpdater()
 
+    /// Guard against SwiftUI calling init() multiple times on this struct.
+    private static var didInitialize = false
+
     init() {
+        guard !Self.didInitialize else { return }
+        Self.didInitialize = true
         Analytics.initialize()
         Analytics.appLaunched()
         Self.ensureLaunchAtLogin()

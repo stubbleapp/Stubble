@@ -23,7 +23,9 @@ let package = Package(
             dependencies: ["TaskMinerShared"],
             path: "Sources/TaskMiner",
             linkerSettings: [
-                .linkedLibrary("sqlite3")
+                .linkedLibrary("sqlite3"),
+                .linkedFramework("EventKit"),
+                .linkedFramework("CoreServices"),
             ]
         ),
         // Standalone CLI wrapper (for `swift run TaskMiner`)

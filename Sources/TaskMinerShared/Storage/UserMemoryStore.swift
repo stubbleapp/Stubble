@@ -101,9 +101,13 @@ struct MemoryFile: Codable {
 
 /// Persistent store for user memory — categorized facts about the user's
 /// projects, habits, and workflows. Backed by a JSON file on disk.
-public final class UserMemoryStore: Sendable {
+public final class UserMemoryStore: @unchecked Sendable {
     private let filePath: URL
     private let lockPath: URL
+    /// In-process lock to prevent data races between concurrent async tasks.
+    /// flock() alone is per-file-descriptor, not per-file within the same process,
+    /// so two tasks opening separate FileHandles would both acquire the flock.
+    private let inProcessLock = NSLock()
 
     public init(filePath: URL) {
         self.filePath = filePath
@@ -113,6 +117,9 @@ public final class UserMemoryStore: Sendable {
     // MARK: - File Locking
 
     private func withFileLock<T>(_ body: () -> T) -> T {
+        inProcessLock.lock()
+        defer { inProcessLock.unlock() }
+
         FileManager.default.createFile(atPath: lockPath.path, contents: nil)
         guard let lockFd = FileHandle(forWritingAtPath: lockPath.path) else {
             return body()

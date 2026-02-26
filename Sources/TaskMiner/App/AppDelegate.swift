@@ -12,6 +12,8 @@ class AppDelegate {
     private let screenshotCapture: ScreenshotCapture
     private let screenshotStorage: ScreenshotStorage
     private let ocrEngine: OCREngine
+    private let fileActivityMonitor: FileActivityMonitor
+    private let calendarMonitor: CalendarMonitor
     /// Lazy-initialized so the daemon doesn't hit the Keychain on startup.
     /// The Dashboard prompts for Keychain access first; by the time the daemon
     /// needs it (15 min later for the first summarization), the user has already
@@ -54,6 +56,8 @@ class AppDelegate {
             maxAgeDays: config.maxScreenshotAgeDays
         )
         self.ocrEngine = OCREngine()
+        self.fileActivityMonitor = FileActivityMonitor()
+        self.calendarMonitor = CalendarMonitor()
     }
 
     func start() {
@@ -74,8 +78,18 @@ class AppDelegate {
             self?.handleIdleTransition(transition)
         }
 
+        // Wire up file activity callback
+        fileActivityMonitor.onFileChanges = { [weak self] events in
+            guard let self else { return }
+            self.db.insertFileEvents(events, activityId: self.currentActivityId)
+        }
+
         // Start monitoring
         activityMonitor.start()
+        fileActivityMonitor.start()
+
+        // Request calendar access (non-blocking, user sees permission prompt once)
+        calendarMonitor.requestAccess()
 
         // Bootstrap with current frontmost app
         if let frontApp = activityMonitor.currentApp() {
@@ -140,6 +154,7 @@ class AppDelegate {
         activityMonitor.stop()
         windowTitleMonitor.stop()
         idleDetector.stopSystemEventObservers()
+        fileActivityMonitor.stop()
 
         // Finalize current activity
         finalizeCurrentActivity()
@@ -211,12 +226,18 @@ class AppDelegate {
         // Finalize current
         finalizeCurrentActivity()
 
+        // Capture extended AX context at the moment of title change
+        let ctx = windowTitleMonitor.lastContext
+
         // Start new with same app but new title
         let record = ActivityRecord(
             appName: current.appName,
             bundleId: current.bundleId,
             windowTitle: newTitle,
-            isIdle: false
+            isIdle: false,
+            browserURL: ctx.browserURL,
+            documentPath: ctx.documentPath,
+            focusedElementRole: ctx.focusedElementRole
         )
         currentActivity = record
         do {
@@ -304,7 +325,12 @@ class AppDelegate {
             Logger.debug("Daily memory review: decay pass completed")
         }
 
-        // 6. Tiered screenshot pruning:
+        // 6. Reset daily tracked app launches at midnight
+        if today != lastSummaryDate {
+            activityMonitor.resetLaunchedApps()
+        }
+
+        // 7. Tiered screenshot pruning:
         //    - Tier 1: delete image files beyond the latest 100 (keep OCR text in DB)
         //    - Tier 2: delete entire DB rows older than 30 days
         let prunedPaths = db.pruneScreenshotImages(keepLatest: 100)
@@ -312,6 +338,7 @@ class AppDelegate {
             screenshotStorage.cleanupFiles(relativePaths: prunedPaths)
         }
         db.deleteScreenshotsOlderThan(days: 30)
+        db.deleteFileEventsOlderThan(days: 30)
     }
 
     // MARK: - Idle Transition Handling
@@ -356,10 +383,17 @@ class AppDelegate {
             isIdle: isIdle
         )
 
-        // Read window title for non-idle activities
+        // Read window title + extended AX context for non-idle activities
         if !isIdle && pid != 0 {
+            windowTitleMonitor.currentBundleId = bundleId
             windowTitleMonitor.updateFocusedApp(pid: pid)
             record.windowTitle = windowTitleMonitor.title.isEmpty ? nil : windowTitleMonitor.title
+
+            // Populate extended context from AX
+            let ctx = windowTitleMonitor.lastContext
+            record.browserURL = ctx.browserURL
+            record.documentPath = ctx.documentPath
+            record.focusedElementRole = ctx.focusedElementRole
         }
 
         currentActivity = record
@@ -489,6 +523,12 @@ class AppDelegate {
             return
         }
 
+        // Gather file events for the summarization window
+        let fileEvents = db.recentFileEvents(from: startTime, to: endTime, limit: 100)
+
+        // Gather calendar context for the day
+        let calContext = calendarMonitor.eventsContext(from: startTime, to: endTime)
+
         // Load settings from shared settings file (reuse config.shared, no redundant init)
         let cliSettings: CLISettings? = {
             guard let data = try? Data(contentsOf: self.config.shared.settingsPath),
@@ -510,7 +550,9 @@ class AppDelegate {
                     date: endTime,
                     customPrompt: cliSettings?.customPrompt,
                     memoryContext: memoryContext,
-                    granularity: cliSettings?.granularity ?? .medium
+                    granularity: cliSettings?.granularity ?? .medium,
+                    fileEvents: fileEvents,
+                    calendarContext: calContext
                 )
                 guard !result.tasks.isEmpty else { return }
                 await MainActor.run {

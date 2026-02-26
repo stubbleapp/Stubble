@@ -86,7 +86,7 @@ class DatabaseManager {
     }
 
     /// Current schema version — kept in sync with DatabaseReader's migrations.
-    private static let schemaVersion = 8
+    private static let schemaVersion = 9
 
     private func runMigrations() {
         let currentVersion = getUserVersion()
@@ -190,6 +190,37 @@ class DatabaseManager {
             }
         }
 
+        if currentVersion < 9 {
+            // Extended activity context: browser URLs, document paths, focused element roles
+            if !execMigration("ALTER TABLE activities ADD COLUMN browser_url TEXT",
+                              label: "9a: add browser_url", ignoreDuplicate: true) {
+                migrationFailed = true
+            }
+            if !execMigration("ALTER TABLE activities ADD COLUMN document_path TEXT",
+                              label: "9b: add document_path", ignoreDuplicate: true) {
+                migrationFailed = true
+            }
+            if !execMigration("ALTER TABLE activities ADD COLUMN focused_element_role TEXT",
+                              label: "9c: add focused_element_role", ignoreDuplicate: true) {
+                migrationFailed = true
+            }
+            // File activity events table — stores aggregated file system change events
+            let fileEventsSql = """
+            CREATE TABLE IF NOT EXISTS file_events (
+                id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                timestamp   TEXT NOT NULL,
+                file_path   TEXT NOT NULL,
+                event_type  TEXT NOT NULL DEFAULT 'modified',
+                activity_id INTEGER,
+                FOREIGN KEY (activity_id) REFERENCES activities(id)
+            )
+            """
+            if !execMigration(fileEventsSql, label: "9d: create file_events table") {
+                migrationFailed = true
+            }
+            sqlite3_exec(db, "CREATE INDEX IF NOT EXISTS idx_file_events_timestamp ON file_events(timestamp)", nil, nil, nil)
+        }
+
         // Only bump the version if all migrations succeeded — failed migrations
         // will be retried on the next launch.
         if migrationFailed {
@@ -234,8 +265,9 @@ class DatabaseManager {
     func insertActivity(_ record: ActivityRecord) throws -> Int64 {
         guard let db = db else { throw DatabaseError.closed }
         let sql = """
-        INSERT INTO activities (timestamp, end_time, app_name, bundle_id, window_title, duration, is_idle)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO activities (timestamp, end_time, app_name, bundle_id, window_title, duration, is_idle,
+                                browser_url, document_path, focused_element_role)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """
         var stmt: OpaquePointer?
         guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
@@ -275,6 +307,10 @@ class DatabaseManager {
 
         sqlite3_bind_int(stmt, 7, record.isIdle ? 1 : 0)
 
+        if let url = record.browserURL { sqliteBindText(stmt, 8, url) } else { sqlite3_bind_null(stmt, 8) }
+        if let doc = record.documentPath { sqliteBindText(stmt, 9, doc) } else { sqlite3_bind_null(stmt, 9) }
+        if let role = record.focusedElementRole { sqliteBindText(stmt, 10, role) } else { sqlite3_bind_null(stmt, 10) }
+
         guard sqlite3_step(stmt) == SQLITE_DONE else {
             throw DatabaseError.executionFailed(lastError)
         }
@@ -298,6 +334,68 @@ class DatabaseManager {
 
         guard sqlite3_step(stmt) == SQLITE_DONE else {
             throw DatabaseError.executionFailed(lastError)
+        }
+    }
+
+    // MARK: - File Events
+
+    /// Insert a batch of file change events observed by FSEvents.
+    func insertFileEvents(_ events: [(path: String, type: String)], activityId: Int64?) {
+        guard db != nil else { return }
+        let sql = "INSERT INTO file_events (timestamp, file_path, event_type, activity_id) VALUES (?, ?, ?, ?)"
+        let now = SharedFormatters.iso8601.string(from: Date())
+
+        for event in events {
+            var stmt: OpaquePointer?
+            guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { continue }
+            defer { sqlite3_finalize(stmt) }
+            sqliteBindText(stmt, 1, now)
+            sqliteBindText(stmt, 2, event.path)
+            sqliteBindText(stmt, 3, event.type)
+            if let aid = activityId { sqlite3_bind_int64(stmt, 4, aid) } else { sqlite3_bind_null(stmt, 4) }
+            sqlite3_step(stmt)
+        }
+    }
+
+    /// Fetch recently modified file paths for a time range (used by summarization).
+    func recentFileEvents(from start: Date, to end: Date, limit: Int = 100) -> [String] {
+        guard db != nil else { return [] }
+        let startStr = SharedFormatters.iso8601.string(from: start)
+        let endStr = SharedFormatters.iso8601.string(from: end)
+        let sql = """
+        SELECT DISTINCT file_path FROM file_events
+        WHERE timestamp >= ? AND timestamp < ?
+        ORDER BY timestamp DESC LIMIT ?
+        """
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return [] }
+        defer { sqlite3_finalize(stmt) }
+        sqliteBindText(stmt, 1, startStr)
+        sqliteBindText(stmt, 2, endStr)
+        sqlite3_bind_int(stmt, 3, Int32(limit))
+
+        var paths: [String] = []
+        while sqlite3_step(stmt) == SQLITE_ROW {
+            if let cStr = sqlite3_column_text(stmt, 0) {
+                paths.append(String(cString: cStr))
+            }
+        }
+        return paths
+    }
+
+    /// Prune file events older than the given number of days.
+    func deleteFileEventsOlderThan(days: Int) {
+        guard db != nil else { return }
+        guard let cutoff = Calendar.current.date(byAdding: .day, value: -days, to: Date()) else { return }
+        let cutoffStr = SharedFormatters.iso8601.string(from: cutoff)
+        let sql = "DELETE FROM file_events WHERE timestamp < ?"
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return }
+        defer { sqlite3_finalize(stmt) }
+        sqliteBindText(stmt, 1, cutoffStr)
+        if sqlite3_step(stmt) == SQLITE_DONE {
+            let deleted = sqlite3_changes(db)
+            if deleted > 0 { Logger.info("Deleted \(deleted) file event(s) older than \(days) days") }
         }
     }
 
@@ -553,7 +651,8 @@ class DatabaseManager {
 
         let sql = """
         SELECT a.app_name, a.bundle_id, a.window_title, a.timestamp, a.duration, a.is_idle,
-               s.ocr_text, s.timestamp as screenshot_time
+               s.ocr_text, s.timestamp as screenshot_time,
+               a.browser_url, a.document_path, a.focused_element_role
         FROM activities a
         LEFT JOIN screenshots s ON s.activity_id = a.id
         WHERE a.timestamp >= ? AND a.timestamp < ?
@@ -578,7 +677,10 @@ class DatabaseManager {
                 timestamp: sqlite3_column_text(stmt, 3).flatMap { SharedFormatters.iso8601.date(from: String(cString: $0)) } ?? Date(),
                 duration: sqlite3_column_type(stmt, 4) != SQLITE_NULL ? sqlite3_column_double(stmt, 4) : nil,
                 isIdle: sqlite3_column_int(stmt, 5) != 0,
-                ocrText: sqlite3_column_text(stmt, 6).map { String(cString: $0) }
+                ocrText: sqlite3_column_text(stmt, 6).map { String(cString: $0) },
+                browserURL: sqlite3_column_text(stmt, 8).map { String(cString: $0) },
+                documentPath: sqlite3_column_text(stmt, 9).map { String(cString: $0) },
+                focusedElementRole: sqlite3_column_text(stmt, 10).map { String(cString: $0) }
             )
             results.append(input)
         }

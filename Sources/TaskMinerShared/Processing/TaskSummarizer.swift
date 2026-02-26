@@ -10,6 +10,11 @@ public struct SummarizationInput: Sendable {
     public let isIdle: Bool
     public let ocrText: String?
 
+    // Extended context (migration 9)
+    public let browserURL: String?
+    public let documentPath: String?
+    public let focusedElementRole: String?
+
     public init(
         appName: String,
         bundleId: String?,
@@ -17,7 +22,10 @@ public struct SummarizationInput: Sendable {
         timestamp: Date,
         duration: TimeInterval?,
         isIdle: Bool,
-        ocrText: String?
+        ocrText: String?,
+        browserURL: String? = nil,
+        documentPath: String? = nil,
+        focusedElementRole: String? = nil
     ) {
         self.appName = appName
         self.bundleId = bundleId
@@ -26,6 +34,9 @@ public struct SummarizationInput: Sendable {
         self.duration = duration
         self.isIdle = isIdle
         self.ocrText = ocrText
+        self.browserURL = browserURL
+        self.documentPath = documentPath
+        self.focusedElementRole = focusedElementRole
     }
 }
 
@@ -52,11 +63,13 @@ public final class TaskSummarizer: Sendable {
         date: Date,
         customPrompt: String? = nil,
         memoryContext: String? = nil,
-        granularity: TaskGranularity = .medium
+        granularity: TaskGranularity = .medium,
+        fileEvents: [String] = [],
+        calendarContext: String? = nil
     ) async throws -> SummarizationResult {
         guard !activities.isEmpty else { return SummarizationResult(tasks: [], daySummary: nil, newMemoryEntries: []) }
 
-        let prompt = buildPrompt(from: activities, granularity: granularity)
+        let prompt = buildPrompt(from: activities, granularity: granularity, fileEvents: fileEvents, calendarContext: calendarContext)
 
         let userRules: String
         if let custom = customPrompt?.trimmingCharacters(in: .whitespacesAndNewlines), !custom.isEmpty {
@@ -306,6 +319,8 @@ public final class TaskSummarizer: Sendable {
         var windowTitles: [String]
         var totalDuration: TimeInterval
         var ocrSamples: [String]
+        var browserURLs: [String] = []
+        var documentPaths: [String] = []
     }
 
     // internal for testability
@@ -330,6 +345,12 @@ public final class TaskSummarizer: Sendable {
                         last.ocrSamples.append(trimmed)
                     }
                 }
+                if let url = activity.browserURL, !url.isEmpty, !last.browserURLs.contains(url) {
+                    last.browserURLs.append(url)
+                }
+                if let doc = activity.documentPath, !doc.isEmpty, !last.documentPaths.contains(doc) {
+                    last.documentPaths.append(doc)
+                }
                 rawBlocks[rawBlocks.count - 1] = last
             } else {
                 // Start a new block
@@ -343,7 +364,9 @@ public final class TaskSummarizer: Sendable {
                     endTime: activity.timestamp.addingTimeInterval(dur),
                     windowTitles: [title],
                     totalDuration: dur,
-                    ocrSamples: ocrSamples
+                    ocrSamples: ocrSamples,
+                    browserURLs: activity.browserURL.map { [$0] } ?? [],
+                    documentPaths: activity.documentPath.map { [$0] } ?? []
                 ))
             }
         }
@@ -414,6 +437,12 @@ public final class TaskSummarizer: Sendable {
                     for ocr in block.ocrSamples where merged.ocrSamples.count < 5 {
                         merged.ocrSamples.append(ocr)
                     }
+                    for url in block.browserURLs where !merged.browserURLs.contains(url) {
+                        merged.browserURLs.append(url)
+                    }
+                    for doc in block.documentPaths where !merged.documentPaths.contains(doc) {
+                        merged.documentPaths.append(doc)
+                    }
                     result[target] = merged
                     result.remove(at: i)
                     changed = true
@@ -431,7 +460,12 @@ public final class TaskSummarizer: Sendable {
     /// Shorter blocks are likely accidental clicks, closing apps, or brief tab switches.
     private static let minBlockDuration: TimeInterval = 5
 
-    private func buildPrompt(from activities: [SummarizationInput], granularity: TaskGranularity = .medium) -> String {
+    private func buildPrompt(
+        from activities: [SummarizationInput],
+        granularity: TaskGranularity = .medium,
+        fileEvents: [String] = [],
+        calendarContext: String? = nil
+    ) -> String {
         let blocks = aggregateActivities(activities)
             .filter { $0.totalDuration >= Self.minBlockDuration }
 
@@ -450,12 +484,35 @@ public final class TaskSummarizer: Sendable {
 
         var ocrSections: [(time: String, text: String)] = []
 
+        // Collect browser URLs and document paths across all blocks
+        var allBrowserURLs: [String] = []
+        var allDocumentPaths: [String] = []
+
         for block in blocks {
             let start = SharedFormatters.timeSecondsFormatter.string(from: block.startTime)
             let end = SharedFormatters.timeSecondsFormatter.string(from: block.endTime)
             let dur = "\(Int(block.totalDuration))s"
             let titles = DataSanitizer.sanitizeAll(Array(block.windowTitles.prefix(5))).joined(separator: " | ")
-            lines.append("[\(start)–\(end)] \(block.appName) (\(dur)) — \(titles)")
+
+            var line = "[\(start)–\(end)] \(block.appName) (\(dur)) — \(titles)"
+
+            // Append browser URL inline if available
+            if let url = block.browserURLs.first {
+                line += " [URL: \(url)]"
+            }
+            // Append document path inline if available
+            if let doc = block.documentPaths.first {
+                line += " [Doc: \(doc)]"
+            }
+
+            lines.append(line)
+
+            for url in block.browserURLs where !allBrowserURLs.contains(url) {
+                allBrowserURLs.append(url)
+            }
+            for doc in block.documentPaths where !allDocumentPaths.contains(doc) {
+                allDocumentPaths.append(doc)
+            }
 
             // Collect OCR samples (limit total to 20), sanitized to strip sensitive patterns
             for ocr in block.ocrSamples where ocrSections.count < 20 {
@@ -471,6 +528,40 @@ public final class TaskSummarizer: Sendable {
                 lines.append("[\(sample.time)] \(sample.text)")
                 lines.append("---")
             }
+        }
+
+        // Browser URLs summary (deduplicated across all blocks)
+        if !allBrowserURLs.isEmpty {
+            lines.append("")
+            lines.append("## Browser URLs Visited")
+            for url in allBrowserURLs.prefix(30) {
+                lines.append("- \(url)")
+            }
+        }
+
+        // Document paths summary
+        if !allDocumentPaths.isEmpty {
+            lines.append("")
+            lines.append("## Documents Opened")
+            for doc in allDocumentPaths.prefix(20) {
+                lines.append("- \(doc)")
+            }
+        }
+
+        // File system activity (from FSEvents)
+        if !fileEvents.isEmpty {
+            lines.append("")
+            lines.append("## Files Modified (filesystem)")
+            for path in fileEvents.prefix(40) {
+                lines.append("- \(path)")
+            }
+        }
+
+        // Calendar context
+        if let cal = calendarContext, !cal.isEmpty {
+            lines.append("")
+            lines.append("## Calendar Events")
+            lines.append(cal)
         }
 
         lines.append("</screen_content>")
