@@ -337,7 +337,7 @@ struct ActivityBarSegment: View {
     let continuesUp: Bool
     let continuesDown: Bool
 
-    private let capRadius: CGFloat = 1.5
+    private let capRadius: CGFloat = 2.0
     private let inset: CGFloat = 4 // visual breathing room at start/end of a run
 
     var body: some View {

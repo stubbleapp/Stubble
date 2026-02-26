@@ -247,15 +247,11 @@ enum TimelineItem: Identifiable {
 @MainActor
 extension Array where Element == TimelineItem {
     /// Activity names overlapping the nearest task before `index`.
-    /// When a gap separates tasks, still returns the current task's own names
-    /// so the bar extends continuously into the gap's dotted segment.
+    /// Returns empty when separated by a gap so the solid bar gets a rounded cap.
     func prevTaskActivityNames(before index: Int, viewModel: DashboardViewModel) -> Set<String> {
         let prevIndex = index - 1
         guard prevIndex >= 0 else { return [] }
         if case .gap = self[prevIndex] {
-            if case .task(let record, _, _) = self[index] {
-                return viewModel.overlappingActivityNames(for: record)
-            }
             return []
         }
         if case .task(let record, _, _) = self[prevIndex] {
@@ -265,15 +261,11 @@ extension Array where Element == TimelineItem {
     }
 
     /// Activity names overlapping the nearest task after `index`.
-    /// When a gap separates tasks, still returns the current task's own names
-    /// so the bar extends continuously into the gap's dotted segment.
+    /// Returns empty when separated by a gap so the solid bar gets a rounded cap.
     func nextTaskActivityNames(after index: Int, viewModel: DashboardViewModel) -> Set<String> {
         let nextIndex = index + 1
         guard nextIndex < count else { return [] }
         if case .gap = self[nextIndex] {
-            if case .task(let record, _, _) = self[index] {
-                return viewModel.overlappingActivityNames(for: record)
-            }
             return []
         }
         if case .task(let record, _, _) = self[nextIndex] {
@@ -526,14 +518,17 @@ struct IdleGapView: View {
 private struct DottedBarSegment: View {
     let color: Color
 
+    private let dotStrokeWidth: CGFloat = 4
+    private let verticalInset: CGFloat = 4 // gap between solid bar edge and first/last dot
+
     var body: some View {
         GeometryReader { geo in
             Path { p in
                 let midX = geo.size.width / 2
-                p.move(to: CGPoint(x: midX, y: 0))
-                p.addLine(to: CGPoint(x: midX, y: geo.size.height))
+                p.move(to: CGPoint(x: midX, y: verticalInset))
+                p.addLine(to: CGPoint(x: midX, y: geo.size.height - verticalInset))
             }
-            .stroke(color, style: StrokeStyle(lineWidth: 4, lineCap: .round, dash: [0.01, 6]))
+            .stroke(color, style: StrokeStyle(lineWidth: dotStrokeWidth, lineCap: .round, dash: [0.01, 6]))
         }
     }
 }
