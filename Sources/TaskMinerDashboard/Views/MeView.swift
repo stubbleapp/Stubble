@@ -87,7 +87,7 @@ struct MeView: View {
     private var headerSection: some View {
         VStack(alignment: .leading, spacing: 4) {
             Text("Your Profile")
-                .font(.system(size: 22, weight: .bold))
+                .font(Theme.headerFont(size: 24))
                 .foregroundStyle(Theme.textPrimary)
 
             Text("Here\u{2019}s what Stubble knows about you")

@@ -9,7 +9,7 @@ struct ActivitiesView: View {
             // Date title + refresh
             HStack {
                 Text(SharedFormatters.headerDateFormatter.string(from: viewModel.selectedDate))
-                    .font(.system(size: 22, weight: .bold, design: .default))
+                    .font(Theme.headerFont(size: 24))
                     .foregroundStyle(Theme.textPrimary)
 
                 Spacer()

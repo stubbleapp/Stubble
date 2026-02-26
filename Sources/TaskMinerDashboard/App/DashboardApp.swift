@@ -16,6 +16,7 @@ struct DashboardApp: App {
     init() {
         guard !Self.didInitialize else { return }
         Self.didInitialize = true
+        Theme.registerFonts()
         Analytics.initialize()
         Analytics.appLaunched()
         Self.ensureLaunchAtLogin()

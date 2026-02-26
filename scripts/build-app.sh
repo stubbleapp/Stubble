@@ -65,6 +65,14 @@ if [ -f "$LOGO_SRC" ]; then
     cp "$LOGO_SRC" "$APP_BUNDLE/Contents/Resources/logo.png"
 fi
 
+# Copy custom fonts
+FONTS_DIR="$BUILD_DIR/Resources/Fonts"
+if [ -d "$FONTS_DIR" ]; then
+    mkdir -p "$APP_BUNDLE/Contents/Resources/Fonts"
+    cp "$FONTS_DIR"/*.ttf "$APP_BUNDLE/Contents/Resources/Fonts/" 2>/dev/null
+    echo "🔤 Custom fonts copied"
+fi
+
 # ─── Bundle Sparkle.framework ────────────────────────────────────
 # SPM builds Sparkle as a dynamic framework; we need to embed it in the .app
 SPARKLE_FRAMEWORK=$(find "$BUILD_DIR/.build" -name "Sparkle.framework" -type d 2>/dev/null | head -1)
@@ -126,6 +134,8 @@ cat > "$APP_BUNDLE/Contents/Info.plist" << PLIST
     <string>Stubble reads your calendar to provide meeting context in your daily activity summary. Event data stays on your device.</string>
     <key>NSCalendarsFullAccessUsageDescription</key>
     <string>Stubble reads your calendar to provide meeting context in your daily activity summary. Event data stays on your device.</string>
+    <key>ATSApplicationFontsPath</key>
+    <string>Fonts</string>
 $SPARKLE_PLIST_ENTRIES
     <key>TelemetryDeckAppID</key>
     <string>$TELEMETRY_DECK_APP_ID</string>

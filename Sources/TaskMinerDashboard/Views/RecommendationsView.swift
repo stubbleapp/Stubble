@@ -131,11 +131,11 @@ struct RecommendationsView: View {
             VStack(alignment: .leading, spacing: 4) {
                 if viewModel.isViewingToday {
                     Text("Hey, \(firstName)")
-                        .font(.system(size: 22, weight: .bold))
+                        .font(Theme.headerFont(size: 24))
                         .foregroundStyle(Theme.textPrimary)
                 } else {
                     Text(SharedFormatters.headerDateFormatter.string(from: viewModel.selectedDate))
-                        .font(.system(size: 22, weight: .bold))
+                        .font(Theme.headerFont(size: 24))
                         .foregroundStyle(Theme.textPrimary)
                 }
 

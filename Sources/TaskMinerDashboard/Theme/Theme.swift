@@ -1,10 +1,46 @@
 import SwiftUI
 import AppKit
+import CoreText
 
 /// Adaptive color palette — works in both light and dark mode.
 /// Dark: deep grays, clear hierarchy, orange-red accent.
 /// Light: clean whites/grays with the same accent and status colors.
 enum Theme {
+
+    // MARK: - Custom Fonts
+
+    /// Register bundled Cormorant fonts at runtime.
+    /// In the .app bundle this is handled by ATSApplicationFontsPath in Info.plist,
+    /// but during development (swift build) there's no Info.plist so we register manually.
+    static func registerFonts() {
+        let fontNames = ["Cormorant-Bold", "Cormorant-SemiBold", "Cormorant-Medium"]
+        for name in fontNames {
+            // Try bundle first (for .app), then fall back to source tree (for swift build)
+            if let url = Bundle.main.url(forResource: name, withExtension: "ttf", subdirectory: "Fonts") {
+                CTFontManagerRegisterFontsForURL(url as CFURL, .process, nil)
+            } else {
+                // Development fallback: find font relative to the binary's location
+                let devPath = URL(fileURLWithPath: #filePath)
+                    .deletingLastPathComponent() // Theme/
+                    .deletingLastPathComponent() // TaskMinerDashboard/
+                    .deletingLastPathComponent() // Sources/
+                    .deletingLastPathComponent() // project root
+                    .appendingPathComponent("Resources/Fonts/\(name).ttf")
+                if FileManager.default.fileExists(atPath: devPath.path) {
+                    CTFontManagerRegisterFontsForURL(devPath as CFURL, .process, nil)
+                }
+            }
+        }
+    }
+
+    /// Cormorant serif font for header titles — playful, editorial feel.
+    /// Falls back to the system serif if Cormorant isn't available.
+    static func headerFont(size: CGFloat) -> Font {
+        if NSFont(name: "Cormorant-Bold", size: size) != nil {
+            return .custom("Cormorant-Bold", size: size)
+        }
+        return .system(size: size, weight: .bold, design: .serif)
+    }
 
     // MARK: - Adaptive Color Helper
 

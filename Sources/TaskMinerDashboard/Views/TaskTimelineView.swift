@@ -107,6 +107,32 @@ enum TimelineItem: Identifiable {
             items.append(.task(task, isFirst: isFirst, isLast: false))
         }
 
+        // Deduplicate titles: when consecutive tasks (ignoring gaps) share
+        // the same title, rename duplicates to "… (continued)". This handles
+        // both AI non-compliance and splitTasksAroundIdlePeriods fragments.
+        var seenTitles: Set<String> = []
+        for i in items.indices {
+            guard case .task(let record, let isFirst, let isLast) = items[i] else { continue }
+            let normalised = record.title.trimmingCharacters(in: .whitespaces).lowercased()
+            if seenTitles.contains(normalised) {
+                let renamed = TaskRecord(
+                    id: record.id,
+                    date: record.date,
+                    startTime: record.startTime,
+                    endTime: record.endTime,
+                    title: record.title + " (continued)",
+                    description: record.description,
+                    appNames: record.appNames,
+                    confidence: record.confidence,
+                    relevantLinks: record.relevantLinks,
+                    activeDuration: record.activeDuration
+                )
+                items[i] = .task(renamed, isFirst: isFirst, isLast: isLast)
+            } else {
+                seenTitles.insert(normalised)
+            }
+        }
+
         // Fix isLast on the final item
         if let lastIndex = items.indices.last {
             if case .task(let record, let isFirst, _) = items[lastIndex] {
@@ -332,7 +358,7 @@ struct TaskTimelineView: View {
             // Date title + regenerate
             HStack {
                 Text(SharedFormatters.headerDateFormatter.string(from: viewModel.selectedDate))
-                    .font(.system(size: 22, weight: .bold, design: .default))
+                    .font(Theme.headerFont(size: 24))
                     .foregroundStyle(Theme.textPrimary)
 
                 Spacer()
