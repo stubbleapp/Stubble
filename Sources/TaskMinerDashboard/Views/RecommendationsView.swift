@@ -391,9 +391,7 @@ private struct ProjectRow: View {
                 }
             } label: {
                 HStack(spacing: 10) {
-                    RoundedRectangle(cornerRadius: 2, style: .continuous)
-                        .fill(activityColor)
-                        .frame(width: 4, height: 18)
+                    ActivityHaloDot(color: activityColor, size: 20)
 
                     Text(activity.name)
                         .font(.system(size: 13, weight: .medium))

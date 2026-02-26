@@ -11,11 +11,9 @@ struct ProjectActivityCardView: View {
 
     var body: some View {
         HStack(alignment: .top, spacing: 0) {
-            // Color bar
-            RoundedRectangle(cornerRadius: 2, style: .continuous)
-                .fill(activityColor)
-                .frame(width: 4)
-                .padding(.vertical, 4)
+            // Color halo
+            ActivityHaloDot(color: activityColor, size: 20)
+                .padding(.top, 8)
 
             VStack(alignment: .leading, spacing: 6) {
                 // Row 1: Project name + duration

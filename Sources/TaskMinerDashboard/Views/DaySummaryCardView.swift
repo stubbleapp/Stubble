@@ -46,9 +46,7 @@ struct DaySummaryCardView: View {
                 VStack(alignment: .leading, spacing: 6) {
                     ForEach(Array(topActivities.enumerated()), id: \.offset) { _, item in
                         HStack(spacing: 6) {
-                            RoundedRectangle(cornerRadius: 2, style: .continuous)
-                                .fill(item.color)
-                                .frame(width: 4, height: 14)
+                            ActivityHaloDot(color: item.color, size: 18)
                             Text(item.name)
                                 .font(.system(size: 12, weight: .medium))
                                 .foregroundStyle(Theme.textPrimary)

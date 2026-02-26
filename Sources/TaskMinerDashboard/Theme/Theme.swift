@@ -199,3 +199,31 @@ enum Theme {
     static let triggerManual = Color(red: 0.62, green: 0.48, blue: 0.75)
 
 }
+
+// MARK: - Activity Halo Dot
+
+/// A round halo indicator matching the Stubble logo style — solid core with
+/// a soft radial glow in the given activity color.
+struct ActivityHaloDot: View {
+    let color: Color
+    var size: CGFloat = 12
+
+    var body: some View {
+        Circle()
+            .fill(
+                RadialGradient(
+                    gradient: Gradient(stops: [
+                        .init(color: color, location: 0.0),
+                        .init(color: color, location: 0.35),
+                        .init(color: color.opacity(0.4), location: 0.55),
+                        .init(color: color.opacity(0.08), location: 0.8),
+                        .init(color: color.opacity(0.0), location: 1.0),
+                    ]),
+                    center: .center,
+                    startRadius: 0,
+                    endRadius: size / 2
+                )
+            )
+            .frame(width: size, height: size)
+    }
+}

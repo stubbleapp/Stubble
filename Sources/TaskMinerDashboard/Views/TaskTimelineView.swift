@@ -9,9 +9,7 @@ enum TimelineItem: Identifiable {
     var id: String {
         switch self {
         case .task(let record, _, _):
-            // Include start time to distinguish split task fragments that share the same DB id
-            let ts = Int(record.startTime.timeIntervalSince1970)
-            return "task-\(record.id ?? 0)-\(ts)"
+            return "task-\(record.id ?? 0)"
         case .gap(let id, _, _, _):
             return id
         }
@@ -31,17 +29,10 @@ enum TimelineItem: Identifiable {
 
         let idleGaps = consolidateIdlePeriods(idleActivities, minDuration: minIdleDuration)
 
-        // 1. Split tasks that span across idle periods so away gaps become visible
-        //    regardless of task granularity. This is display-only — no DB changes.
-        let split = splitTasksAroundIdlePeriods(
-            tasks.sorted { $0.startTime < $1.startTime },
-            idleGaps: idleGaps
-        )
+        // Sort by start time — AI regeneration can produce out-of-order tasks
+        let sorted = tasks.sorted { $0.startTime < $1.startTime }
 
-        // 2. Sort by start time — AI regeneration can produce out-of-order tasks
-        let sorted = split.sorted { $0.startTime < $1.startTime }
-
-        // 3. Compute effective end times — clip overlapping tasks so window is never inverted.
+        // Compute effective end times — clip overlapping tasks so window is never inverted.
         //    If task[i].endTime > task[i+1].startTime, clip it to task[i+1].startTime.
         //    This keeps overlap resolution local to the display layer (TaskRecord is unchanged).
         var effectiveEndTimes = sorted.map(\.endTime)
@@ -107,32 +98,6 @@ enum TimelineItem: Identifiable {
             items.append(.task(task, isFirst: isFirst, isLast: false))
         }
 
-        // Deduplicate titles: when consecutive tasks (ignoring gaps) share
-        // the same title, rename duplicates to "… (continued)". This handles
-        // both AI non-compliance and splitTasksAroundIdlePeriods fragments.
-        var seenTitles: Set<String> = []
-        for i in items.indices {
-            guard case .task(let record, let isFirst, let isLast) = items[i] else { continue }
-            let normalised = record.title.trimmingCharacters(in: .whitespaces).lowercased()
-            if seenTitles.contains(normalised) {
-                let renamed = TaskRecord(
-                    id: record.id,
-                    date: record.date,
-                    startTime: record.startTime,
-                    endTime: record.endTime,
-                    title: record.title + " (continued)",
-                    description: record.description,
-                    appNames: record.appNames,
-                    confidence: record.confidence,
-                    relevantLinks: record.relevantLinks,
-                    activeDuration: record.activeDuration
-                )
-                items[i] = .task(renamed, isFirst: isFirst, isLast: isLast)
-            } else {
-                seenTitles.insert(normalised)
-            }
-        }
-
         // Fix isLast on the final item
         if let lastIndex = items.indices.last {
             if case .task(let record, let isFirst, _) = items[lastIndex] {
@@ -148,83 +113,6 @@ enum TimelineItem: Identifiable {
     @MainActor
     static var settingsMinIdleDuration: TimeInterval {
         TimeInterval(SettingsManager.shared.minAwayMinutes * 60)
-    }
-
-    /// Minimum task fragment duration after splitting (30 seconds).
-    /// Fragments shorter than this are discarded to avoid tiny slivers.
-    private static let minFragmentDuration: TimeInterval = 30
-
-    /// Split tasks whose time ranges span across idle periods.
-    /// When the AI generates a broad task (e.g. 9:00–12:00) that encompasses
-    /// an idle period (e.g. 10:30–10:45), this splits it into two display tasks
-    /// (9:00–10:30 and 10:45–12:00) so the existing inter-task gap logic can
-    /// detect and show the away period. All task content (title, description, etc.)
-    /// is preserved in both halves. This is display-only — no DB changes.
-    private static func splitTasksAroundIdlePeriods(
-        _ tasks: [TaskRecord],
-        idleGaps: [(start: Date, end: Date)]
-    ) -> [TaskRecord] {
-        guard !idleGaps.isEmpty else { return tasks }
-
-        var result: [TaskRecord] = []
-
-        for task in tasks {
-            // Find all idle periods strictly interior to this task's time range.
-            // "Strictly interior" means the idle starts after the task starts AND
-            // ends before the task ends, with a small margin to avoid splitting
-            // at boundaries where idle and task edges coincide.
-            let margin: TimeInterval = 10 // seconds
-            let interiorIdles = idleGaps.filter { idle in
-                idle.start > task.startTime.addingTimeInterval(margin) &&
-                idle.end < task.endTime.addingTimeInterval(-margin)
-            }
-
-            guard !interiorIdles.isEmpty else {
-                result.append(task)
-                continue
-            }
-
-            // Split the task around each interior idle period.
-            // Walk through the task's time range, emitting fragments between idles.
-            var cursor = task.startTime
-            for idle in interiorIdles.sorted(by: { $0.start < $1.start }) {
-                // Fragment before this idle period
-                let fragmentEnd = idle.start
-                if fragmentEnd.timeIntervalSince(cursor) >= minFragmentDuration {
-                    result.append(TaskRecord(
-                        id: task.id,
-                        date: task.date,
-                        startTime: cursor,
-                        endTime: fragmentEnd,
-                        title: task.title,
-                        description: task.description,
-                        appNames: task.appNames,
-                        confidence: task.confidence,
-                        relevantLinks: task.relevantLinks,
-                        activeDuration: nil // recalc from span
-                    ))
-                }
-                cursor = idle.end
-            }
-
-            // Final fragment after the last idle period
-            if task.endTime.timeIntervalSince(cursor) >= minFragmentDuration {
-                result.append(TaskRecord(
-                    id: task.id,
-                    date: task.date,
-                    startTime: cursor,
-                    endTime: task.endTime,
-                    title: task.title,
-                    description: task.description,
-                    appNames: task.appNames,
-                    confidence: task.confidence,
-                    relevantLinks: task.relevantLinks,
-                    activeDuration: nil
-                ))
-            }
-        }
-
-        return result
     }
 
     /// Consolidate idle ActivityRecords into merged time ranges.
@@ -273,11 +161,15 @@ enum TimelineItem: Identifiable {
 @MainActor
 extension Array where Element == TimelineItem {
     /// Activity names overlapping the nearest task before `index`.
-    /// Returns empty when separated by a gap so the solid bar gets a rounded cap.
+    /// When separated by a gap, returns the current task's own names so the
+    /// solid bar extends flush (continuesUp = true) to meet the dotted bar.
     func prevTaskActivityNames(before index: Int, viewModel: DashboardViewModel) -> Set<String> {
         let prevIndex = index - 1
         guard prevIndex >= 0 else { return [] }
         if case .gap = self[prevIndex] {
+            if case .task(let current, _, _) = self[index] {
+                return viewModel.overlappingActivityNames(for: current)
+            }
             return []
         }
         if case .task(let record, _, _) = self[prevIndex] {
@@ -287,11 +179,15 @@ extension Array where Element == TimelineItem {
     }
 
     /// Activity names overlapping the nearest task after `index`.
-    /// Returns empty when separated by a gap so the solid bar gets a rounded cap.
+    /// When separated by a gap, returns the current task's own names so the
+    /// solid bar extends flush (continuesDown = true) to meet the dotted bar.
     func nextTaskActivityNames(after index: Int, viewModel: DashboardViewModel) -> Set<String> {
         let nextIndex = index + 1
         guard nextIndex < count else { return [] }
         if case .gap = self[nextIndex] {
+            if case .task(let current, _, _) = self[index] {
+                return viewModel.overlappingActivityNames(for: current)
+            }
             return []
         }
         if case .task(let record, _, _) = self[nextIndex] {
@@ -545,7 +441,7 @@ private struct DottedBarSegment: View {
     let color: Color
 
     private let dotStrokeWidth: CGFloat = 4
-    private let verticalInset: CGFloat = 4 // gap between solid bar edge and first/last dot
+    private let verticalInset: CGFloat = 0
 
     var body: some View {
         GeometryReader { geo in
