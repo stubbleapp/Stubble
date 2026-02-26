@@ -100,11 +100,13 @@ public final class ChatMemoryExtractor: Sendable {
                 guard !trimmed.isEmpty else { return nil }
                 let category = (dict["category"] as? String).flatMap { MemoryCategory(rawValue: $0) } ?? .workflow
                 let confidence = dict["confidence"] as? Double ?? 0.7
+                let isCorrection = dict["correction"] as? Bool ?? false
                 return MemoryEntry(
                     category: category,
                     content: trimmed,
                     confidence: confidence,
-                    source: .chatInteraction
+                    source: .chatInteraction,
+                    isCorrection: isCorrection
                 )
             }
 

@@ -38,6 +38,7 @@ class AppDelegate {
     private var lastScreenshotTime: Date = .distantPast
     private var lastSummaryDate: String = ""
     private var lastSummarizationTime: Date = .distantPast
+    private var lastMemoryReviewDate: String = ""
     private var isShuttingDown = false
 
     init(config: Configuration, db: DatabaseManager) throws {
@@ -294,7 +295,16 @@ class AppDelegate {
             lastSummaryDate = today
         }
 
-        // 5. Tiered screenshot pruning:
+        // 5. Daily memory review — run decay/pruning even on quiet days with no new entries.
+        //    Triggers once per day alongside the midnight rollover.
+        if lastMemoryReviewDate != today {
+            lastMemoryReviewDate = today
+            let memoryStore = UserMemoryStore(filePath: config.shared.memoryPath)
+            memoryStore.mergeStructured(newEntries: [])  // runs decay + pruning pass
+            Logger.debug("Daily memory review: decay pass completed")
+        }
+
+        // 6. Tiered screenshot pruning:
         //    - Tier 1: delete image files beyond the latest 100 (keep OCR text in DB)
         //    - Tier 2: delete entire DB rows older than 30 days
         let prunedPaths = db.pruneScreenshotImages(keepLatest: 100)

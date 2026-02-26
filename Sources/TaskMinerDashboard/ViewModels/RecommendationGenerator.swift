@@ -41,8 +41,11 @@ final class RecommendationGenerator: Sendable {
         from one for a web developer, even if the activity looks similar. \
         \
         Your output has three parts: \
-        1. greeting_context: A warm, personal 1-2 sentence greeting that shows you know what they're \
-           working on. Reference their specific projects or goals by name. End with a natural transition. \
+        1. greeting_context: A warm, personal 1-2 sentence contextual note that shows you know what they're \
+           working on. Reference their specific projects or goals by name. \
+           IMPORTANT: Do NOT include any greeting like "Hey", "Hi", "Hello", or the user's name — \
+           the UI already displays a greeting header. Just jump straight into the context \
+           (e.g. "You've been deep into the permission system this week..." not "Hey Sam, you've been..."). \
         2. suggested_questions: 3-4 SHORT questions (max 6-8 words each) the user might ask about their work. \
            Keep them punchy and concise — e.g. "Best WAL checkpoint strategy?", "Handle TCC after rebuild?". \
            Reference their actual projects and technologies but stay brief. \
@@ -124,15 +127,17 @@ final class RecommendationGenerator: Sendable {
         The user is reviewing a past day (\(dateLabel)). Provide a personalized retrospective. \
         \
         Your output has two parts: \
-        1. greeting_context: A warm, personal 1 sentence intro referencing the date and the main theme \
-           of the day. Use what you know about the user's projects to add context \
-           (e.g. "Last Tuesday was a deep dive into the Stubble permission system" not just "a big coding day"). \
-        2. day_summary: A comprehensive 2-4 paragraph narrative. Include: \
+        1. greeting_context: A SHORT 1-sentence teaser (under 20 words) that sets up the date and main theme. \
+           IMPORTANT: Do NOT include any greeting like "Hey", "Hi", "Hello", or the user's name — \
+           the UI already displays a greeting header. Do NOT summarize the full day here — save details \
+           for the day_summary. Just a brief hook, e.g. "A deep dive into the permission system and SQLite layer." \
+        2. day_summary: A comprehensive 2-4 paragraph narrative. This is the main content — include ALL detail here: \
            - What the user worked on and how time was split, referencing project names from the profile \
            - Notable patterns (focus blocks, context-switching, deep work vs. communication) \
            - How this day's work fits into their broader goals and ongoing projects \
            - Any interesting observations about their habits or workflow \
            Write in second person ("you"), warm and conversational. Use markdown for structure. \
+           Do NOT repeat the greeting_context — dive straight into the detail. \
         \
         Rules: \
         - Be specific — reference actual tasks, apps, and projects from the data \
@@ -266,7 +271,7 @@ final class RecommendationGenerator: Sendable {
         ## Output Format
         Respond with a JSON object:
         {
-          "greeting_context": "You've been deep into the Stubble permission system and SQLite layer this week — here are some things that might help.",
+          "greeting_context": "Deep into the Stubble permission system and SQLite layer this week — here are some things that might help.",
           "suggested_questions": [
             "Handle TCC after rebuild?",
             "Best WAL checkpoint strategy?",
@@ -285,7 +290,7 @@ final class RecommendationGenerator: Sendable {
         }
 
         Top-level fields:
-        - greeting_context: 1-2 warm, personal sentences that reference the user's actual projects by name
+        - greeting_context: 1-2 warm, personal sentences (NO greeting/name — UI shows that) that reference the user's actual projects by name
         - suggested_questions: 3-4 SHORT questions (max 6-8 words each) tied to their current work
 
         Recommendation fields:

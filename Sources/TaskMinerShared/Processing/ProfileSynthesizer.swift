@@ -71,11 +71,26 @@ public final class ProfileSynthesizer: Sendable {
     }
 
     /// Synthesize and persist the profile if entries have changed enough to warrant it.
-    /// Compares entry count and latest lastSeen against the existing profile to avoid
-    /// unnecessary API calls.
-    public func synthesizeIfNeeded(store: UserMemoryStore) async {
+    /// Throttled: only re-synthesizes when ≥3 new entries have been added, or ≥1 new
+    /// entry and ≥1 hour since last synthesis. Pass `forceRefresh: true` to bypass throttling
+    /// (e.g., after user deletes an entry).
+    public func synthesizeIfNeeded(store: UserMemoryStore, forceRefresh: Bool = false) async {
         let entries = store.load()
         guard entries.count >= 3 else { return }
+
+        if !forceRefresh {
+            let meta = store.synthesisMetadata()
+            let newCount = entries.count - (meta.entryCountAtLastSynthesis ?? 0)
+            let timeSince = Date().timeIntervalSince(meta.lastSynthesizedAt ?? .distantPast)
+
+            // Throttle: require meaningful change before re-synthesizing
+            let hasEnoughNewEntries = newCount >= 3
+            let hasNewEntryAndTimeElapsed = newCount >= 1 && timeSince > 3600  // 1 hour
+            guard hasEnoughNewEntries || hasNewEntryAndTimeElapsed else {
+                Logger.debug("ProfileSynthesizer: skipping — \(newCount) new entries, \(Int(timeSince))s since last synthesis")
+                return
+            }
+        }
 
         if let profile = await synthesize(entries: entries) {
             store.saveProfile(profile)

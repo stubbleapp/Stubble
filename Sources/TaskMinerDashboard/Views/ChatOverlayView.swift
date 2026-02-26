@@ -17,34 +17,51 @@ struct ChatOverlayView: View {
     ]
 
     var body: some View {
-        VStack(spacing: 0) {
-            // Message panel (slides up when expanded)
+        ZStack(alignment: .bottom) {
+            // Scrim — tap outside to close
             if isExpanded {
-                messagePanel
-                    .transition(.move(edge: .bottom).combined(with: .opacity))
+                Color.black.opacity(0.001)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .contentShape(Rectangle())
+                    .onTapGesture {
+                        withAnimation(.spring(response: 0.3, dampingFraction: 0.85)) {
+                            isExpanded = false
+                        }
+                    }
+                    .transition(.opacity)
             }
 
-            // Input bar — collapsed: tappable placeholder, expanded: real text field
-            if isExpanded {
-                expandedInputBar
-            } else {
-                collapsedInputBar
+            // Chat card
+            VStack(spacing: 0) {
+                // Message panel (slides up when expanded)
+                if isExpanded {
+                    messagePanel
+                        .transition(.move(edge: .bottom).combined(with: .opacity))
+                }
+
+                // Input bar — collapsed: tappable placeholder, expanded: real text field
+                if isExpanded {
+                    expandedInputBar
+                } else {
+                    collapsedInputBar
+                }
             }
+            .background(
+                RoundedRectangle(cornerRadius: isExpanded ? 20 : 14, style: .continuous)
+                    .fill(Theme.chatSurface.opacity(isExpanded ? 0.85 : 1))
+                    .shadow(color: .black.opacity(0.06), radius: 20, y: -6)
+                    .shadow(color: .black.opacity(0.04), radius: 6, y: -2)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: isExpanded ? 20 : 14, style: .continuous)
+                    .strokeBorder(Theme.chatBorder, lineWidth: 0.5)
+            )
+            .clipShape(RoundedRectangle(cornerRadius: isExpanded ? 20 : 14, style: .continuous))
+            .padding(.horizontal, 20)
+            .padding(.bottom, 16)
+            .fixedSize(horizontal: false, vertical: !isExpanded)
         }
-        .background(
-            RoundedRectangle(cornerRadius: isExpanded ? 20 : 14, style: .continuous)
-                .fill(Theme.chatSurface)
-                .shadow(color: .black.opacity(0.06), radius: 20, y: -6)
-                .shadow(color: .black.opacity(0.04), radius: 6, y: -2)
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: isExpanded ? 20 : 14, style: .continuous)
-                .strokeBorder(Theme.chatBorder, lineWidth: 0.5)
-        )
-        .clipShape(RoundedRectangle(cornerRadius: isExpanded ? 20 : 14, style: .continuous))
-        .padding(.horizontal, 20)
-        .padding(.bottom, 16)
-        .fixedSize(horizontal: false, vertical: true)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
         .animation(.spring(response: 0.35, dampingFraction: 0.85), value: isExpanded)
         .onChange(of: viewModel.pendingChatQuestion) { _, question in
             guard let question, !question.isEmpty else { return }
@@ -181,6 +198,7 @@ struct ChatOverlayView: View {
 
             // Messages or suggestions
             if viewModel.chatMessages.isEmpty && !viewModel.isChatLoading {
+                Spacer(minLength: 0)
                 suggestionsPanel
             } else {
                 messagesScrollView
@@ -258,7 +276,7 @@ struct ChatOverlayView: View {
                 }
             }
         }
-        .frame(minHeight: 60, maxHeight: 300)
+        .frame(minHeight: 60, maxHeight: .infinity)
     }
 
     // MARK: - Error Row

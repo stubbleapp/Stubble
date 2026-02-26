@@ -337,7 +337,7 @@ private struct ProjectsExpandableView: View {
             }
             .padding(.bottom, 10)
 
-            VStack(spacing: 2) {
+            VStack(spacing: 0) {
                 ForEach(visibleProjects) { activity in
                     ProjectRow(activity: activity)
                 }
@@ -404,7 +404,7 @@ private struct ProjectRow: View {
                         .rotationEffect(.degrees(isExpanded ? 90 : 0))
                 }
                 .padding(.horizontal, 12)
-                .padding(.vertical, 10)
+                .padding(.vertical, 7)
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
@@ -532,7 +532,7 @@ private struct RecommendationCard: View {
 
 // MARK: - Liquid Glass Card Modifier
 
-private struct LiquidGlassCardModifier: ViewModifier {
+struct LiquidGlassCardModifier: ViewModifier {
     func body(content: Content) -> some View {
         if #available(macOS 26, *) {
             content
@@ -551,7 +551,7 @@ private struct LiquidGlassCardModifier: ViewModifier {
     }
 }
 
-private struct LiquidGlassPillModifier: ViewModifier {
+struct LiquidGlassPillModifier: ViewModifier {
     func body(content: Content) -> some View {
         if #available(macOS 26, *) {
             content

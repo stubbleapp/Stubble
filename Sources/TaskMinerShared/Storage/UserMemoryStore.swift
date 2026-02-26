@@ -26,6 +26,8 @@ public struct MemoryEntry: Codable, Identifiable, Sendable {
     public var lastSeen: Date
     public var reinforcementCount: Int
     public var source: MemorySource
+    /// When true, this entry corrects/replaces a previously held belief.
+    public var isCorrection: Bool
 
     public init(
         id: UUID = UUID(),
@@ -35,7 +37,8 @@ public struct MemoryEntry: Codable, Identifiable, Sendable {
         firstSeen: Date = Date(),
         lastSeen: Date = Date(),
         reinforcementCount: Int = 1,
-        source: MemorySource = .activityInference
+        source: MemorySource = .activityInference,
+        isCorrection: Bool = false
     ) {
         self.id = id
         self.category = category
@@ -45,6 +48,22 @@ public struct MemoryEntry: Codable, Identifiable, Sendable {
         self.lastSeen = lastSeen
         self.reinforcementCount = reinforcementCount
         self.source = source
+        self.isCorrection = isCorrection
+    }
+
+    // Custom decoder for backward compatibility — isCorrection defaults to false
+    // when loading old memory.json files that don't have the field.
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(UUID.self, forKey: .id)
+        category = try container.decode(MemoryCategory.self, forKey: .category)
+        content = try container.decode(String.self, forKey: .content)
+        confidence = try container.decode(Double.self, forKey: .confidence)
+        firstSeen = try container.decode(Date.self, forKey: .firstSeen)
+        lastSeen = try container.decode(Date.self, forKey: .lastSeen)
+        reinforcementCount = try container.decode(Int.self, forKey: .reinforcementCount)
+        source = try container.decode(MemorySource.self, forKey: .source)
+        isCorrection = try container.decodeIfPresent(Bool.self, forKey: .isCorrection) ?? false
     }
 }
 
@@ -55,10 +74,26 @@ public struct MemoryEntry: Codable, Identifiable, Sendable {
 struct MemoryFile: Codable {
     var entries: [MemoryEntry]
     var profile: String?
+    /// Timestamp of the last profile synthesis (for throttling).
+    var lastSynthesizedAt: Date?
+    /// Entry count at the time of last synthesis (for change detection).
+    var entryCountAtLastSynthesis: Int?
 
-    init(entries: [MemoryEntry] = [], profile: String? = nil) {
+    init(entries: [MemoryEntry] = [], profile: String? = nil,
+         lastSynthesizedAt: Date? = nil, entryCountAtLastSynthesis: Int? = nil) {
         self.entries = entries
         self.profile = profile
+        self.lastSynthesizedAt = lastSynthesizedAt
+        self.entryCountAtLastSynthesis = entryCountAtLastSynthesis
+    }
+
+    // Custom decoder for backward compatibility with old memory.json files.
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        entries = try container.decode([MemoryEntry].self, forKey: .entries)
+        profile = try container.decodeIfPresent(String.self, forKey: .profile)
+        lastSynthesizedAt = try container.decodeIfPresent(Date.self, forKey: .lastSynthesizedAt)
+        entryCountAtLastSynthesis = try container.decodeIfPresent(Int.self, forKey: .entryCountAtLastSynthesis)
     }
 }
 
@@ -167,12 +202,21 @@ public final class UserMemoryStore: Sendable {
     }
 
     /// Persist an updated synthesized profile (file-locked).
+    /// Also records synthesis metadata for throttling.
     public func saveProfile(_ profile: String) {
         withFileLock {
             var file = loadFile()
             file.profile = profile
+            file.lastSynthesizedAt = Date()
+            file.entryCountAtLastSynthesis = file.entries.count
             saveImpl(file)
         }
+    }
+
+    /// Returns synthesis metadata for throttling decisions.
+    public func synthesisMetadata() -> (lastSynthesizedAt: Date?, entryCountAtLastSynthesis: Int?) {
+        let file = loadFile()
+        return (file.lastSynthesizedAt, file.entryCountAtLastSynthesis)
     }
 
     // MARK: - Context for Prompts
@@ -225,6 +269,7 @@ public final class UserMemoryStore: Sendable {
 
     /// Merge new structured entries with existing memory using heuristic
     /// deduplication: same category + high word overlap = reinforcement.
+    /// Corrections replace contradicted entries. Decay is category-aware.
     public func mergeStructured(newEntries: [MemoryEntry]) {
         withFileLock {
             var file = loadFile()
@@ -234,7 +279,35 @@ public final class UserMemoryStore: Sendable {
                 let trimmed = incoming.content.trimmingCharacters(in: .whitespacesAndNewlines)
                 guard !trimmed.isEmpty else { continue }
 
-                if let matchIdx = findBestMatch(for: incoming, in: file.entries) {
+                if incoming.isCorrection {
+                    // Correction: replace the contradicted entry (lower match threshold)
+                    if let matchIdx = findBestMatch(for: incoming, in: file.entries, threshold: 0.25) {
+                        // Replace content and reset reinforcement
+                        file.entries[matchIdx] = MemoryEntry(
+                            id: file.entries[matchIdx].id,
+                            category: incoming.category,
+                            content: trimmed,
+                            confidence: incoming.confidence,
+                            firstSeen: file.entries[matchIdx].firstSeen,
+                            lastSeen: now,
+                            reinforcementCount: 1,
+                            source: incoming.source,
+                            isCorrection: false  // correction applied, no longer flagged
+                        )
+                        Logger.debug("UserMemoryStore: correction replaced entry \(file.entries[matchIdx].id)")
+                    } else {
+                        // No match found — add as new entry
+                        file.entries.append(MemoryEntry(
+                            category: incoming.category,
+                            content: trimmed,
+                            confidence: incoming.confidence,
+                            firstSeen: now,
+                            lastSeen: now,
+                            reinforcementCount: 1,
+                            source: incoming.source
+                        ))
+                    }
+                } else if let matchIdx = findBestMatch(for: incoming, in: file.entries) {
                     // Reinforce existing entry
                     file.entries[matchIdx].lastSeen = now
                     file.entries[matchIdx].reinforcementCount += 1
@@ -251,35 +324,121 @@ public final class UserMemoryStore: Sendable {
                 }
             }
 
-            // Decay: lower confidence of stale, weakly-reinforced entries
-            for i in file.entries.indices {
-                let age = now.timeIntervalSince(file.entries[i].lastSeen)
-                let isWeak = file.entries[i].reinforcementCount <= 1
-                if isWeak && age > 30 * 86400 {
-                    file.entries[i] = MemoryEntry(
-                        id: file.entries[i].id,
-                        category: file.entries[i].category,
-                        content: file.entries[i].content,
-                        confidence: max(0.1, file.entries[i].confidence - 0.1),
-                        firstSeen: file.entries[i].firstSeen,
-                        lastSeen: file.entries[i].lastSeen,
-                        reinforcementCount: file.entries[i].reinforcementCount,
-                        source: file.entries[i].source
-                    )
-                }
-            }
+            // Category-aware confidence decay
+            applyDecay(entries: &file.entries, now: now)
 
             // Remove entries that decayed below threshold
             file.entries.removeAll { $0.confidence < 0.15 }
 
-            // Cap at 50 entries — drop lowest-confidence first
-            if file.entries.count > 50 {
-                file.entries.sort { $0.confidence > $1.confidence }
-                file.entries = Array(file.entries.prefix(50))
-            }
+            // Category-aware capacity cap (50 total)
+            applyCategoryCap(entries: &file.entries)
 
             saveImpl(file)
         }
+    }
+
+    // MARK: - Category-Aware Decay
+
+    /// Decay rate per category — reflects how quickly facts in each category become stale.
+    private static func decayRate(for category: MemoryCategory) -> Double {
+        switch category {
+        case .project:    return 0.15  // projects wrap up / change often
+        case .technology: return 0.08  // tech stacks are stickier
+        case .workflow:   return 0.06  // habits are very sticky
+        case .identity:   return 0.03  // identity rarely changes
+        case .interest:   return 0.10  // interests drift over time
+        }
+    }
+
+    /// Apply tiered confidence decay based on category and age.
+    /// Stronger-reinforced entries survive longer but still eventually decay.
+    private func applyDecay(entries: inout [MemoryEntry], now: Date) {
+        for i in entries.indices {
+            let age = now.timeIntervalSince(entries[i].lastSeen)
+            let count = entries[i].reinforcementCount
+            let rate = Self.decayRate(for: entries[i].category)
+            var penalty = 0.0
+
+            // Tier 1: >14 days, seen only once
+            if age > 14 * 86400 && count <= 1 {
+                penalty += rate * 0.5
+            }
+            // Tier 2: >30 days, seen 1-2 times
+            if age > 30 * 86400 && count <= 2 {
+                penalty += rate
+            }
+            // Tier 3: >60 days, even moderately reinforced entries start to fade
+            if age > 60 * 86400 && count <= 3 {
+                penalty += rate * 0.5
+            }
+
+            if penalty > 0 {
+                entries[i] = MemoryEntry(
+                    id: entries[i].id,
+                    category: entries[i].category,
+                    content: entries[i].content,
+                    confidence: max(0.1, entries[i].confidence - penalty),
+                    firstSeen: entries[i].firstSeen,
+                    lastSeen: entries[i].lastSeen,
+                    reinforcementCount: entries[i].reinforcementCount,
+                    source: entries[i].source,
+                    isCorrection: entries[i].isCorrection
+                )
+            }
+        }
+    }
+
+    // MARK: - Category-Aware Capacity Cap
+
+    /// Minimum reserved slots per category to ensure balanced memory.
+    private static let categoryMinimums: [MemoryCategory: Int] = [
+        .identity: 5,
+        .project: 15,
+        .technology: 12,
+        .workflow: 10,
+        .interest: 8,
+    ]
+
+    private static let maxEntries = 50
+
+    /// Enforce a 50-entry cap while respecting per-category minimums.
+    private func applyCategoryCap(entries: inout [MemoryEntry]) {
+        guard entries.count > Self.maxEntries else { return }
+
+        let grouped = Dictionary(grouping: entries.indices, by: { entries[$0].category })
+        var indicesToRemove = Set<Int>()
+
+        // Phase 1: Within each category, sort by confidence and mark excess entries
+        // (those beyond the category minimum) for potential removal, lowest-confidence first.
+        var removableByCat: [(index: Int, confidence: Double)] = []
+        for (cat, indices) in grouped {
+            let minimum = Self.categoryMinimums[cat] ?? 5
+            if indices.count > minimum {
+                let sorted = indices.sorted { entries[$0].confidence < entries[$1].confidence }
+                for idx in sorted.prefix(indices.count - minimum) {
+                    removableByCat.append((index: idx, confidence: entries[idx].confidence))
+                }
+            }
+        }
+
+        // Phase 2: Sort all removable entries by confidence ascending, remove until at cap
+        removableByCat.sort { $0.confidence < $1.confidence }
+        let excess = entries.count - Self.maxEntries
+        for item in removableByCat.prefix(excess) {
+            indicesToRemove.insert(item.index)
+        }
+
+        // Phase 3: If still over cap (all categories at minimum), drop globally lowest
+        if entries.count - indicesToRemove.count > Self.maxEntries {
+            let remaining = entries.indices.filter { !indicesToRemove.contains($0) }
+            let sorted = remaining.sorted { entries[$0].confidence < entries[$1].confidence }
+            let stillOver = (entries.count - indicesToRemove.count) - Self.maxEntries
+            for idx in sorted.prefix(stillOver) {
+                indicesToRemove.insert(idx)
+            }
+        }
+
+        entries = entries.enumerated().compactMap { indicesToRemove.contains($0.offset) ? nil : $0.element }
     }
 
     /// Legacy merge for flat string entries (backward compatibility with
@@ -296,8 +455,9 @@ public final class UserMemoryStore: Sendable {
     // MARK: - Heuristic Matching
 
     /// Find the best matching existing entry for an incoming one.
-    /// Matches on same category + >50% word overlap.
-    private func findBestMatch(for incoming: MemoryEntry, in entries: [MemoryEntry]) -> Int? {
+    /// Matches on same category + word overlap above `threshold` (default 0.5).
+    /// Corrections use a lower threshold (0.25) since corrected facts often use different words.
+    private func findBestMatch(for incoming: MemoryEntry, in entries: [MemoryEntry], threshold: Double = 0.5) -> Int? {
         let incomingWords = wordSet(incoming.content)
         var bestIdx: Int?
         var bestOverlap: Double = 0
@@ -309,7 +469,7 @@ public final class UserMemoryStore: Sendable {
             let union = incomingWords.union(existingWords)
             guard !union.isEmpty else { continue }
             let jaccard = Double(intersection.count) / Double(union.count)
-            if jaccard > 0.5 && jaccard > bestOverlap {
+            if jaccard > threshold && jaccard > bestOverlap {
                 bestOverlap = jaccard
                 bestIdx = i
             }

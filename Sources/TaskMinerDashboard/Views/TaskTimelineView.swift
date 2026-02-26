@@ -15,40 +15,73 @@ enum TimelineItem: Identifiable {
         }
     }
 
-    /// Build timeline items from tasks, inserting idle gaps from actual activity records.
+    /// Build timeline items from tasks, inserting idle gaps between them.
     ///
-    /// Idle periods are **ground truth** from the daemon (screen lock, sleep, HID inactivity).
-    /// Task boundaries are AI-generated approximations. The timeline shows idle gaps at their
-    /// real duration, positioned chronologically between tasks — never clipped or adjusted
-    /// to fit AI task boundaries.
+    /// Gap detection uses two sources:
+    /// 1. **Idle activity records** — ground truth from the daemon (screen lock, sleep, HID inactivity).
+    /// 2. **Task boundary inference** — fallback when no idle records match but a significant
+    ///    time hole exists between consecutive tasks (e.g. daemon was paused or crashed).
+    ///
+    /// Tasks are sorted by start time and overlapping boundaries are clipped so that
+    /// AI-generated task merging never produces inverted inter-task windows.
     static func build(from tasks: [TaskRecord], idleActivities: [ActivityRecord] = []) -> [TimelineItem] {
         guard !tasks.isEmpty else { return [] }
+
+        // 1. Sort by start time — AI regeneration can produce out-of-order tasks
+        let sorted = tasks.sorted { $0.startTime < $1.startTime }
+
+        // 2. Compute effective end times — clip overlapping tasks so window is never inverted.
+        //    If task[i].endTime > task[i+1].startTime, clip it to task[i+1].startTime.
+        //    This keeps overlap resolution local to the display layer (TaskRecord is unchanged).
+        var effectiveEndTimes = sorted.map(\.endTime)
+        for i in 0..<(sorted.count - 1) {
+            if effectiveEndTimes[i] > sorted[i + 1].startTime {
+                effectiveEndTimes[i] = sorted[i + 1].startTime
+            }
+        }
 
         let idleGaps = consolidateIdlePeriods(idleActivities)
 
         var items: [TimelineItem] = []
         var usedGaps: Set<Int> = []
 
-        for (index, task) in tasks.enumerated() {
+        for (index, task) in sorted.enumerated() {
             // Only show idle gaps BETWEEN tasks — never before the first
             // task (user hadn't started working) or after the last (user
             // is just done for the day).
             if index > 0 {
-                let windowStart = tasks[index - 1].endTime
+                let windowStart = effectiveEndTimes[index - 1]
                 let windowEnd = task.startTime
+                let interTaskGap = windowEnd.timeIntervalSince(windowStart)
 
-                // Insert idle gaps that overlap this inter-task window.
-                // Use real timestamps — never clip to task boundaries.
-                for (gapIndex, gap) in idleGaps.enumerated() where !usedGaps.contains(gapIndex) {
-                    if gap.end > windowStart && gap.start < windowEnd {
-                        let duration = gap.end.timeIntervalSince(gap.start)
+                // Skip if tasks are contiguous or overlapping (already clipped above)
+                if interTaskGap > 0 {
+                    // Try matching idle records first (ground truth)
+                    var matchedIdle = false
+                    for (gapIndex, gap) in idleGaps.enumerated() where !usedGaps.contains(gapIndex) {
+                        // Use <= for boundary-exact matches (idle starting exactly at next task)
+                        if gap.end > windowStart && gap.start <= windowEnd {
+                            let duration = gap.end.timeIntervalSince(gap.start)
+                            items.append(.gap(
+                                id: "idle-\(gapIndex)",
+                                startTime: gap.start,
+                                endTime: gap.end,
+                                duration: duration
+                            ))
+                            usedGaps.insert(gapIndex)
+                            matchedIdle = true
+                        }
+                    }
+
+                    // Fallback: infer gap from task boundaries if no idle records matched
+                    // and the gap is significant (>= 2 minutes)
+                    if !matchedIdle && interTaskGap >= 120 {
                         items.append(.gap(
-                            id: "idle-\(gapIndex)",
-                            startTime: gap.start,
-                            endTime: gap.end,
-                            duration: duration
+                            id: "inferred-\(index)",
+                            startTime: windowStart,
+                            endTime: windowEnd,
+                            duration: interTaskGap
                         ))
-                        usedGaps.insert(gapIndex)
                     }
                 }
             }
@@ -67,8 +100,8 @@ enum TimelineItem: Identifiable {
         return items
     }
 
-    /// Minimum idle duration to show in the timeline (5 minutes).
-    private static let minIdleDuration: TimeInterval = 300
+    /// Minimum idle duration to show in the timeline (2 minutes).
+    private static let minIdleDuration: TimeInterval = 120
 
     /// Consolidate idle ActivityRecords into merged time ranges.
     /// Handles unfinalized idle records (no end_time) by estimating
