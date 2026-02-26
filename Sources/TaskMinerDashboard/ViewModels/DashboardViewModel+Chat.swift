@@ -93,7 +93,7 @@ extension DashboardViewModel {
                 <screen_content>
                 Today's tasks and activity context:
                 \(taskContext)
-                \(memoryContext.map { "User context: \($0)" } ?? "")
+                \(memoryContext.map { "User profile: \($0)" } ?? "")
                 The user is currently viewing the "\(screenContext)" screen.
                 </screen_content>
 
@@ -113,6 +113,25 @@ extension DashboardViewModel {
 
                 // Persist the complete assistant message
                 self.persistMessage(assistantMessage)
+
+                // Extract any user-revealed facts from this exchange (fire-and-forget)
+                if !assistantMessage.content.isEmpty {
+                    let userMsg = trimmed
+                    let assistantResp = assistantMessage.content
+                    let profile = memoryContext
+                    let memStore = self.memoryStore
+                    Task.detached(priority: .utility) {
+                        let extractor = ChatMemoryExtractor(geminiClient: client)
+                        let newEntries = await extractor.extract(
+                            userMessage: userMsg,
+                            assistantResponse: assistantResp,
+                            existingProfile: profile
+                        )
+                        if !newEntries.isEmpty {
+                            memStore.mergeStructured(newEntries: newEntries)
+                        }
+                    }
+                }
 
                 // Keep chat history bounded to prevent unbounded memory growth
                 if self.chatMessages.count > 50 {
@@ -213,6 +232,13 @@ extension DashboardViewModel {
                     lines.append("  Apps: \(apps)")
                 }
             }
+        }
+
+        // OCR-derived screen content (what was actually visible on screen)
+        if let digest = loadOrBuildOCRDigest(), !digest.isEmpty {
+            lines.append("")
+            lines.append("Screen content analysis (extracted from screenshots — URLs visited, code written, documents open):")
+            lines.append(digest)
         }
 
         return lines.joined(separator: "\n")

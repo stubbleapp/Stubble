@@ -33,12 +33,12 @@ public struct SummarizationInput: Sendable {
 public struct SummarizationResult: Sendable {
     public let tasks: [TaskRecord]
     public let daySummary: String?
-    public let newMemoryEntries: [String]
+    public let newMemoryEntries: [MemoryEntry]
 }
 
 /// Builds prompts from activity data and parses Gemini responses into TaskRecords.
 public final class TaskSummarizer: Sendable {
-    private let geminiClient: GeminiClient
+    public let geminiClient: GeminiClient
 
 
     public init(geminiClient: GeminiClient) {
@@ -68,9 +68,9 @@ public final class TaskSummarizer: Sendable {
         let memorySection: String
         if let mem = memoryContext, !mem.isEmpty {
             memorySection = """
-            \nYou have the following knowledge about this person from previous sessions. \
-            Use it to produce more accurate, consistent task titles and descriptions. \
-            Reference known project names, tools, and patterns where relevant:\n\(mem)
+            \nUser profile (learned from previous sessions — use this to produce more accurate, \
+            consistent task titles and descriptions; reference known project names, tools, and \
+            patterns where relevant):\n\(mem)
             """
         } else {
             memorySection = ""
@@ -156,9 +156,8 @@ public final class TaskSummarizer: Sendable {
         "VoiceOver Utility", "Screenshot", "Stickies",
     ]
 
-    /// Ask the AI to identify new facts about the user from today's activity.
-    private func extractMemory(from activities: [SummarizationInput], existingMemory: String?) async -> [String] {
-        // Filter out system processes and idle entries before sending to AI
+    /// Ask the AI to identify new categorized facts about the user from today's activity.
+    private func extractMemory(from activities: [SummarizationInput], existingMemory: String?) async -> [MemoryEntry] {
         let meaningful = activities.filter { activity in
             !activity.isIdle && !Self.ignoredAppNames.contains(activity.appName)
         }
@@ -167,28 +166,50 @@ public final class TaskSummarizer: Sendable {
         let appNames = Set(meaningful.map { $0.appName }).sorted()
         let windowTitles = DataSanitizer.sanitizeAll(meaningful.compactMap { $0.windowTitle }).prefix(30)
 
+        // Extract OCR-derived signals for richer memory context
+        let ocrTexts = meaningful.compactMap { $0.ocrText }.filter { !$0.isEmpty }
+        let ocrURLs = OCRDigestBuilder.extractURLs(from: ocrTexts).prefix(15)
+        let ocrSymbols = OCRDigestBuilder.extractCodeSymbols(from: ocrTexts).prefix(15)
+
+        let categories = MemoryCategory.allCases.map { $0.rawValue }.joined(separator: ", ")
+
         var prompt = """
         Based on the following desktop activity, identify DURABLE facts about this person \
-        that would be useful context for weeks or months from now. Focus on:
-        - Project names and what they involve (e.g., "Building a macOS app called Stubble using SwiftUI")
-        - Technologies, languages, and frameworks used (e.g., "Works with Swift, SQLite, and ScreenCaptureKit")
-        - Professional role or domain (e.g., "Works in marketing at a tech company")
+        that would be useful context for weeks or months from now. Categorize each fact.
+
+        Categories:
+        - identity: name, job title, company, professional domain
+        - project: active projects and what they involve
+        - technology: languages, frameworks, tools, platforms they work with
+        - workflow: recurring patterns, habits, work preferences
+        - interest: topics, domains, or areas of curiosity beyond their core work
+
+        Focus on:
+        - Project names and what they involve
+        - Technologies, languages, and frameworks used
+        - Professional role or domain
         - Key repositories, codebases, or services they maintain
         - Recurring workflows or habits observed across multiple sessions
 
         DO NOT include:
         - "Uses [app name]" entries — knowing someone uses Chrome or Terminal is not useful
-        - Transient activities (reading a specific article, checking email count, browsing a recipe)
-        - System processes or utility apps (Finder, System Settings, Keychain Access, etc.)
+        - Transient activities (reading a specific article, checking email count)
+        - System processes or utility apps
         - One-time research topics unless they clearly relate to an ongoing project
         - Anything that would be stale or irrelevant within a week
 
-        The bar for inclusion is HIGH. Each entry must be a lasting fact that helps personalize \
-        future AI responses. Prefer 0-3 high-quality entries over many low-quality ones.
+        The bar for inclusion is HIGH. Prefer 0-3 high-quality entries over many low-quality ones.
 
         Apps used: \(appNames.joined(separator: ", "))
         Sample window titles: \(windowTitles.joined(separator: " | "))
         """
+
+        if !ocrURLs.isEmpty {
+            prompt += "\nURLs seen on screen: \(ocrURLs.joined(separator: ", "))"
+        }
+        if !ocrSymbols.isEmpty {
+            prompt += "\nCode symbols seen: \(ocrSymbols.joined(separator: ", "))"
+        }
 
         if let existing = existingMemory, !existing.isEmpty {
             prompt += """
@@ -203,15 +224,19 @@ public final class TaskSummarizer: Sendable {
 
         prompt += """
 
-        Respond with a JSON array of short factual strings. Each should be a single concise sentence.
+        Respond with a JSON array of objects. Each object has:
+        - "category": one of [\(categories)]
+        - "content": a short factual sentence
+        - "confidence": 0.0-1.0 how certain you are this is a durable fact
+
         If there is nothing meaningfully new to learn, return an empty array [].
-        Example: ["Building a macOS activity tracker called Stubble using SwiftUI and SQLite", \
-        "Uses Gemini API for AI-powered task summarization"]
+        Example: [{"category": "project", "content": "Building a macOS activity tracker called Stubble using SwiftUI and SQLite", "confidence": 0.9}]
         """
 
         let systemInstruction = """
         You extract durable, high-value factual observations about a person from their computer activity. \
-        Return ONLY a JSON array of strings. No markdown, no explanation. \
+        Return ONLY a JSON array of objects with "category", "content", and "confidence" fields. \
+        No markdown, no explanation. \
         Each entry must be a short, factual, third-person statement about WHO they are or WHAT they build — \
         not what app they opened or what page they visited. \
         Quality over quantity — an empty array [] is better than low-value entries. \
@@ -232,20 +257,37 @@ public final class TaskSummarizer: Sendable {
                 Logger.debug("Memory extraction: could not parse response")
                 return []
             }
-            // Response should be a JSON array of strings, but handle object wrapper too
-            let arr: [String]
-            if let direct = parsed as? [String] {
-                arr = direct
+
+            let dictArray: [[String: Any]]
+            if let direct = parsed as? [[String: Any]] {
+                dictArray = direct
             } else if let obj = parsed as? [String: Any],
-                      let nested = obj.values.first(where: { $0 is [String] }) as? [String] {
-                arr = nested
+                      let nested = obj.values.first(where: { $0 is [[String: Any]] }) as? [[String: Any]] {
+                dictArray = nested
+            } else if let stringArr = parsed as? [String] {
+                // Graceful fallback: AI returned old flat-string format
+                Logger.debug("Memory extraction: got flat strings, wrapping as workflow entries")
+                return stringArr.compactMap { str in
+                    let trimmed = str.trimmingCharacters(in: .whitespacesAndNewlines)
+                    guard !trimmed.isEmpty else { return nil }
+                    return MemoryEntry(category: .workflow, content: trimmed, confidence: 0.7)
+                }
             } else {
                 Logger.debug("Memory extraction: unexpected JSON structure")
                 return []
             }
 
-            Logger.debug("Memory extraction: \(arr.count) new entries")
-            return arr
+            let entries = dictArray.compactMap { dict -> MemoryEntry? in
+                guard let content = dict["content"] as? String else { return nil }
+                let trimmed = content.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !trimmed.isEmpty else { return nil }
+                let category = (dict["category"] as? String).flatMap { MemoryCategory(rawValue: $0) } ?? .workflow
+                let confidence = dict["confidence"] as? Double ?? 0.7
+                return MemoryEntry(category: category, content: trimmed, confidence: confidence)
+            }
+
+            Logger.debug("Memory extraction: \(entries.count) new structured entries")
+            return entries
         } catch {
             Logger.debug("Memory extraction failed (non-fatal): \(error.localizedDescription)")
             return []
@@ -282,8 +324,8 @@ public final class TaskSummarizer: Sendable {
                 if !last.windowTitles.contains(title) {
                     last.windowTitles.append(title)
                 }
-                if let ocr = activity.ocrText, !ocr.isEmpty, last.ocrSamples.count < 3 {
-                    let trimmed = String(ocr.prefix(400))
+                if let ocr = activity.ocrText, !ocr.isEmpty, last.ocrSamples.count < 5 {
+                    let trimmed = String(ocr.prefix(800))
                     if !last.ocrSamples.contains(where: { $0.prefix(80) == trimmed.prefix(80) }) {
                         last.ocrSamples.append(trimmed)
                     }
@@ -293,7 +335,7 @@ public final class TaskSummarizer: Sendable {
                 // Start a new block
                 var ocrSamples: [String] = []
                 if let ocr = activity.ocrText, !ocr.isEmpty {
-                    ocrSamples.append(String(ocr.prefix(400)))
+                    ocrSamples.append(String(ocr.prefix(800)))
                 }
                 rawBlocks.append(ActivityBlock(
                     appName: activity.appName,
@@ -369,7 +411,7 @@ public final class TaskSummarizer: Sendable {
                     for title in block.windowTitles where !merged.windowTitles.contains(title) {
                         merged.windowTitles.append(title)
                     }
-                    for ocr in block.ocrSamples where merged.ocrSamples.count < 3 {
+                    for ocr in block.ocrSamples where merged.ocrSamples.count < 5 {
                         merged.ocrSamples.append(ocr)
                     }
                     result[target] = merged
@@ -415,8 +457,8 @@ public final class TaskSummarizer: Sendable {
             let titles = DataSanitizer.sanitizeAll(Array(block.windowTitles.prefix(5))).joined(separator: " | ")
             lines.append("[\(start)–\(end)] \(block.appName) (\(dur)) — \(titles)")
 
-            // Collect OCR samples (limit total to 10), sanitized to strip sensitive patterns
-            for ocr in block.ocrSamples where ocrSections.count < 10 {
+            // Collect OCR samples (limit total to 20), sanitized to strip sensitive patterns
+            for ocr in block.ocrSamples where ocrSections.count < 20 {
                 ocrSections.append((time: start, text: DataSanitizer.sanitize(ocr)))
             }
         }

@@ -86,7 +86,7 @@ class DatabaseManager {
     }
 
     /// Current schema version — kept in sync with DatabaseReader's migrations.
-    private static let schemaVersion = 7
+    private static let schemaVersion = 8
 
     private func runMigrations() {
         let currentVersion = getUserVersion()
@@ -173,6 +173,19 @@ class DatabaseManager {
             )
             """
             if !execMigration(stubsSql, label: "7: create stubs_content table") {
+                migrationFailed = true
+            }
+        }
+
+        if currentVersion < 8 {
+            let digestSql = """
+            CREATE TABLE IF NOT EXISTS ocr_digests (
+                date         TEXT PRIMARY KEY,
+                digest       TEXT NOT NULL,
+                generated_at TEXT NOT NULL
+            )
+            """
+            if !execMigration(digestSql, label: "8: create ocr_digests table") {
                 migrationFailed = true
             }
         }
@@ -480,6 +493,56 @@ class DatabaseManager {
         }
     }
 
+    // MARK: - OCR Digest
+
+    /// Fetch all OCR texts for a given date (used by OCRDigestBuilder).
+    func ocrTextsForDate(_ date: Date) -> [String] {
+        guard db != nil else { return [] }
+        let cal = Calendar.current
+        let start = cal.startOfDay(for: date)
+        guard let end = cal.date(byAdding: .day, value: 1, to: start) else { return [] }
+        let startStr = SharedFormatters.iso8601.string(from: start)
+        let endStr = SharedFormatters.iso8601.string(from: end)
+
+        let sql = "SELECT ocr_text FROM screenshots WHERE timestamp >= ? AND timestamp < ? AND ocr_text IS NOT NULL AND ocr_text != ''"
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return [] }
+        defer { sqlite3_finalize(stmt) }
+
+        sqliteBindText(stmt, 1, startStr)
+        sqliteBindText(stmt, 2, endStr)
+
+        var texts: [String] = []
+        while sqlite3_step(stmt) == SQLITE_ROW {
+            if let cStr = sqlite3_column_text(stmt, 0) {
+                texts.append(String(cString: cStr))
+            }
+        }
+        return texts
+    }
+
+    /// Insert or replace the cached OCR digest for a date.
+    func insertOrReplaceOCRDigest(date: String, digest: String) {
+        guard db != nil else { return }
+        let sql = """
+        INSERT INTO ocr_digests (date, digest, generated_at)
+        VALUES (?, ?, ?)
+        ON CONFLICT(date) DO UPDATE SET digest = excluded.digest, generated_at = excluded.generated_at
+        """
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return }
+        defer { sqlite3_finalize(stmt) }
+
+        let now = SharedFormatters.iso8601.string(from: Date())
+        sqliteBindText(stmt, 1, date)
+        sqliteBindText(stmt, 2, digest)
+        sqliteBindText(stmt, 3, now)
+
+        if sqlite3_step(stmt) != SQLITE_DONE {
+            Logger.error("Failed to upsert OCR digest: \(lastError)")
+        }
+    }
+
     // MARK: - Summarization Queries
 
     /// Returns activity + OCR data for a time range (used by AI summarization)
@@ -524,15 +587,16 @@ class DatabaseManager {
 
     // MARK: - Cleanup
 
-    /// Delete the oldest screenshot rows, keeping only the most recent `keep` entries.
-    /// Returns the file paths of deleted rows so the caller can remove the files from disk.
-    func deleteScreenshotsKeepingLatest(_ keep: Int) -> [String] {
+    /// Tier 1: Strip image files from old screenshots but keep DB rows (OCR text is preserved).
+    /// Returns file paths to delete from disk for screenshots beyond the latest `keep`.
+    func pruneScreenshotImages(keepLatest keep: Int) -> [String] {
         guard db != nil else { return [] }
 
-        // 1. Collect file paths of rows that will be deleted
+        // Find rows that have a non-empty file_path and are beyond the latest `keep`
         let selectSql = """
         SELECT file_path FROM screenshots
-        WHERE id NOT IN (SELECT id FROM screenshots ORDER BY timestamp DESC LIMIT ?)
+        WHERE file_path != '' AND file_path IS NOT NULL
+          AND id NOT IN (SELECT id FROM screenshots ORDER BY timestamp DESC LIMIT ?)
         """
         var selectStmt: OpaquePointer?
         guard sqlite3_prepare_v2(db, selectSql, -1, &selectStmt, nil) == SQLITE_OK else { return [] }
@@ -542,30 +606,52 @@ class DatabaseManager {
         var paths: [String] = []
         while sqlite3_step(selectStmt) == SQLITE_ROW {
             if let cStr = sqlite3_column_text(selectStmt, 0) {
-                paths.append(String(cString: cStr))
+                let path = String(cString: cStr)
+                if !path.isEmpty { paths.append(path) }
             }
         }
 
         guard !paths.isEmpty else { return [] }
 
-        // 2. Delete the rows
-        let deleteSql = """
-        DELETE FROM screenshots
-        WHERE id NOT IN (SELECT id FROM screenshots ORDER BY timestamp DESC LIMIT ?)
+        // Clear file_path (keep the row for OCR text)
+        let updateSql = """
+        UPDATE screenshots SET file_path = ''
+        WHERE file_path != '' AND file_path IS NOT NULL
+          AND id NOT IN (SELECT id FROM screenshots ORDER BY timestamp DESC LIMIT ?)
         """
-        var deleteStmt: OpaquePointer?
-        guard sqlite3_prepare_v2(db, deleteSql, -1, &deleteStmt, nil) == SQLITE_OK else { return [] }
-        defer { sqlite3_finalize(deleteStmt) }
-        sqlite3_bind_int(deleteStmt, 1, Int32(keep))
+        var updateStmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, updateSql, -1, &updateStmt, nil) == SQLITE_OK else { return paths }
+        defer { sqlite3_finalize(updateStmt) }
+        sqlite3_bind_int(updateStmt, 1, Int32(keep))
 
-        if sqlite3_step(deleteStmt) == SQLITE_DONE {
-            let deleted = sqlite3_changes(db)
-            if deleted > 0 {
-                Logger.info("Deleted \(deleted) screenshot record(s) (keeping latest \(keep))")
+        if sqlite3_step(updateStmt) == SQLITE_DONE {
+            let updated = sqlite3_changes(db)
+            if updated > 0 {
+                Logger.info("Pruned images from \(updated) screenshot(s) (keeping latest \(keep) images, OCR text preserved)")
             }
         }
 
         return paths
+    }
+
+    /// Tier 2: Delete screenshot DB rows older than `days` to prevent unbounded growth.
+    func deleteScreenshotsOlderThan(days: Int) {
+        guard db != nil else { return }
+        guard let cutoff = Calendar.current.date(byAdding: .day, value: -days, to: Date()) else { return }
+        let cutoffStr = SharedFormatters.iso8601.string(from: cutoff)
+
+        let sql = "DELETE FROM screenshots WHERE timestamp < ?"
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return }
+        defer { sqlite3_finalize(stmt) }
+        sqliteBindText(stmt, 1, cutoffStr)
+
+        if sqlite3_step(stmt) == SQLITE_DONE {
+            let deleted = sqlite3_changes(db)
+            if deleted > 0 {
+                Logger.info("Deleted \(deleted) screenshot row(s) older than \(days) days")
+            }
+        }
     }
 
     deinit {

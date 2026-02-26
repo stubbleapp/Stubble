@@ -33,13 +33,13 @@ struct ChatOverlayView: View {
         }
         .background(
             RoundedRectangle(cornerRadius: isExpanded ? 20 : 14, style: .continuous)
-                .fill(.white.opacity(0.88))
+                .fill(Theme.chatSurface)
                 .shadow(color: .black.opacity(0.06), radius: 20, y: -6)
                 .shadow(color: .black.opacity(0.04), radius: 6, y: -2)
         )
         .overlay(
             RoundedRectangle(cornerRadius: isExpanded ? 20 : 14, style: .continuous)
-                .strokeBorder(.white.opacity(0.5), lineWidth: 0.5)
+                .strokeBorder(Theme.chatBorder, lineWidth: 0.5)
         )
         .clipShape(RoundedRectangle(cornerRadius: isExpanded ? 20 : 14, style: .continuous))
         .padding(.horizontal, 20)
@@ -179,7 +179,7 @@ struct ChatOverlayView: View {
 
             // Subtle separator
             Rectangle()
-                .fill(Color.black.opacity(0.04))
+                .fill(Theme.chatSeparator)
                 .frame(height: 0.5)
                 .padding(.horizontal, 12)
 
@@ -192,7 +192,7 @@ struct ChatOverlayView: View {
 
             // Subtle separator
             Rectangle()
-                .fill(Color.black.opacity(0.04))
+                .fill(Theme.chatSeparator)
                 .frame(height: 0.5)
                 .padding(.horizontal, 12)
         }
@@ -326,7 +326,7 @@ private struct SuggestionButtonStyle: ButtonStyle {
         configuration.label
             .background(
                 RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .fill(isHovering ? Color.black.opacity(0.03) : Color.clear)
+                    .fill(isHovering ? Theme.chatSeparator : Color.clear)
             )
             .onHover { hovering in
                 withAnimation(.easeInOut(duration: 0.12)) {
@@ -350,6 +350,7 @@ private struct ChatTextField: NSViewRepresentable {
         field.drawsBackground = false
         field.focusRingType = .none
         field.font = .systemFont(ofSize: 13)
+        field.textColor = .labelColor
         field.delegate = context.coordinator
         field.lineBreakMode = .byTruncatingTail
         field.cell?.wraps = false
@@ -424,7 +425,7 @@ private struct MessageBubble: View {
             .overlay(
                 message.role == .assistant
                     ? RoundedRectangle(cornerRadius: 16, style: .continuous)
-                        .strokeBorder(Color.black.opacity(0.04), lineWidth: 0.5)
+                        .strokeBorder(Theme.chatSeparator, lineWidth: 0.5)
                     : nil
             )
             .shadow(
@@ -444,7 +445,7 @@ private struct MessageBubble: View {
                 .fill(Theme.accent)
         } else {
             RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .fill(.white.opacity(0.7))
+                .fill(Theme.chatAssistantBubble)
         }
     }
 

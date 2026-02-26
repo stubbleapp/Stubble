@@ -14,61 +14,62 @@ final class RecommendationGenerator: Sendable {
     // MARK: - Public API
 
     /// Generate stubs content: greeting, suggested questions, and recommendations.
-    /// - Parameters:
-    ///   - recentTasks: Tasks from the last few days, keyed by date string
-    ///   - projectActivities: Current day's project activity clusters
-    ///   - appsUsed: Map of app name → approximate total seconds used
-    ///   - memoryContext: Known facts about the user from the memory store
-    ///   - activityLog: Today's granular activity log (app sessions with window titles)
-    /// - Returns: StubsContent with greeting, questions, and 2-5 recommendations
     func generate(
         recentTasks: [String: [TaskRecord]],
         projectActivities: [ProjectActivity],
         appsUsed: [String: TimeInterval],
         memoryContext: String?,
-        activityLog: String? = nil
+        activityLog: String? = nil,
+        weeklyTrends: String? = nil,
+        ocrDigest: String? = nil
     ) async throws -> StubsContent {
         let prompt = buildPrompt(
             recentTasks: recentTasks,
             projectActivities: projectActivities,
             appsUsed: appsUsed,
             memoryContext: memoryContext,
-            activityLog: activityLog
+            activityLog: activityLog,
+            weeklyTrends: weeklyTrends,
+            ocrDigest: ocrDigest
         )
 
         let systemInstruction = """
-        You are a knowledgeable productivity assistant embedded in a desktop activity tracker called Stubble. \
-        You provide highly specific, actionable recommendations based on a user's ACTUAL recent \
-        computer activity. Every recommendation MUST directly relate to something the user worked on. \
-        Never give generic productivity advice that could apply to anyone. \
+        You are a knowledgeable assistant embedded in a desktop activity tracker called Stubble. \
+        You know this user — their role, projects, goals, and working patterns are provided in the \
+        User Profile section. USE THIS PROFILE to frame every recommendation around what matters \
+        to THEM specifically. A recommendation for a Swift/macOS developer should be completely different \
+        from one for a web developer, even if the activity looks similar. \
         \
         Your output has three parts: \
-        1. greeting_context: A warm, casual 1-2 sentence summary of what the user has been working on recently, \
-           ending with a natural transition like "here are some things that might help" or similar. \
-           Reference specific projects, technologies, or tasks from the data. Keep it conversational. \
-        2. suggested_questions: 3-4 thoughtful questions the user might want to ask an AI assistant \
-           about their recent work. These should be specific to their actual activity — not generic. \
-           Frame them as questions the user would ask (e.g. "How can I improve my test coverage for async code?"). \
-        3. recommendations: 2-5 actionable recommendations (see categories below). \
+        1. greeting_context: A warm, personal 1-2 sentence greeting that shows you know what they're \
+           working on. Reference their specific projects or goals by name. End with a natural transition. \
+        2. suggested_questions: 3-4 questions the user might want to ask about their recent work. \
+           These must be deeply specific — referencing their actual projects, technologies, and challenges. \
+           Frame as the user's voice (e.g. "How should I handle the migration to ScreenCaptureKit?"). \
+        3. recommendations: 3-6 actionable items (see categories below). \
         \
         Categories: \
-        - article: A relevant technical article, tutorial, or documentation page \
-        - tool: A specific app, extension, CLI tool, or service that would help their workflow \
-        - best_practice: A concrete technique or methodology relevant to their current work \
-        - workflow: A specific workflow improvement based on observed patterns \
+        - article: A relevant technical article, tutorial, or documentation page. MUST be a real, \
+          existing URL from official docs, well-known blogs, or established resources. \
+        - tool: A specific app, extension, CLI tool, or service. Explain HOW it helps their specific situation. \
+        - best_practice: A concrete technique or methodology. Explain WHY it applies to their current work. \
+        - workflow: A specific workflow improvement based on patterns you've observed across their week. \
+        - learning: A skill or knowledge area that would accelerate their current projects. \
         \
         Rules: \
-        - Produce between 2 and 5 recommendations (fewer is better if quality is higher) \
-        - Each MUST reference specific work the user actually did in the data provided \
-        - Use window titles and activity details to understand WHAT the user was actually doing, not just which app \
-        - URLs must be real, well-known, and relevant (official docs, popular tutorials, tool homepages) \
-        - The "reason" field must cite specific tasks, projects, or apps from the data \
-        - Never recommend apps the user already uses heavily (check the apps list) \
-        - Focus on the most recent activity for freshness \
-        - Prefer recommendations that: deepen expertise on topics they're actively working on, \
-          introduce tools that solve problems they appear to be facing, or suggest best practices \
-          for technologies they're using \
-        - Avoid obvious or generic suggestions like "use a password manager" or "take breaks" \
+        - The User Profile is your primary lens. If the user is building a macOS app in Swift, recommend \
+          Swift/macOS resources, not generic productivity tools. If they do legal work, recommend legal \
+          tech and compliance resources. \
+        - Cross-reference the weekly trends with the user profile to find the most impactful recommendations. \
+          For example, if they've spent 3 days on a database layer, recommend specific database optimization \
+          techniques for their stack. \
+        - Use relevant links from tasks (repos, docs, file paths) to understand EXACTLY what projects and \
+          codebases they're working in, then recommend resources specific to those. \
+        - Every recommendation's "reason" must cite specific projects, tasks, or patterns from the data. \
+        - Never recommend tools/apps the user already uses heavily. \
+        - Prefer depth over breadth: 3 highly relevant recommendations beat 6 generic ones. \
+        - URLs must be real and well-known — official docs, tool homepages, established tutorials. \
+        - Avoid generic advice ("take breaks", "use version control", "back up your data"). \
         \
         Respond with a JSON object. Do not include any text outside the JSON.
         """
@@ -103,6 +104,8 @@ final class RecommendationGenerator: Sendable {
         appsUsed: [String: TimeInterval],
         memoryContext: String?,
         activityLog: String? = nil,
+        weeklyTrends: String? = nil,
+        ocrDigest: String? = nil,
         dateLabel: String
     ) async throws -> StubsContent {
         let prompt = buildPrompt(
@@ -110,38 +113,38 @@ final class RecommendationGenerator: Sendable {
             projectActivities: projectActivities,
             appsUsed: appsUsed,
             memoryContext: memoryContext,
-            activityLog: activityLog
+            activityLog: activityLog,
+            weeklyTrends: weeklyTrends,
+            ocrDigest: ocrDigest
         )
 
         let systemInstruction = """
-        You are a knowledgeable productivity assistant embedded in a desktop activity tracker called Stubble. \
-        The user is reviewing a past day (\(dateLabel)). Provide a comprehensive retrospective analysis. \
+        You are a knowledgeable assistant embedded in a desktop activity tracker called Stubble. \
+        You know this user — their role, projects, and goals are in the User Profile section. \
+        The user is reviewing a past day (\(dateLabel)). Provide a personalized retrospective. \
         \
-        Your output has four parts: \
-        1. greeting_context: A warm, casual 1 sentence intro referencing the date and the main theme of the day \
-           (e.g. "Last Tuesday was a big coding day" or "Wednesday was split between meetings and design work"). \
-        2. day_summary: A comprehensive 2-4 paragraph narrative of what was done that day. Include: \
-           - What the user worked on and how their time was split \
-           - Notable patterns (e.g. "You spent most of the morning in deep focus on code, then switched to communications after lunch") \
-           - Observations about work habits, context-switching, or focus blocks \
-           - Any interesting trends (apps used, projects touched, time distribution) \
-           Write in second person ("you"), warm and conversational. Use markdown for structure (bold, lists) where it helps. \
-        3. suggested_questions: 3-4 thoughtful questions about that day's work \
-           (e.g. "How could I have reduced the context-switching between projects?"). \
-        4. recommendations: 1-3 brief takeaways or insights specific to that day. \
+        Your output has two parts: \
+        1. greeting_context: A warm, personal 1 sentence intro referencing the date and the main theme \
+           of the day. Use what you know about the user's projects to add context \
+           (e.g. "Last Tuesday was a deep dive into the Stubble permission system" not just "a big coding day"). \
+        2. day_summary: A comprehensive 2-4 paragraph narrative. Include: \
+           - What the user worked on and how time was split, referencing project names from the profile \
+           - Notable patterns (focus blocks, context-switching, deep work vs. communication) \
+           - How this day's work fits into their broader goals and ongoing projects \
+           - Any interesting observations about their habits or workflow \
+           Write in second person ("you"), warm and conversational. Use markdown for structure. \
         \
         Rules: \
         - Be specific — reference actual tasks, apps, and projects from the data \
-        - The day_summary should feel like a thoughtful end-of-day review \
-        - Don't be generic — every observation should be rooted in the actual data \
+        - Use the User Profile to add meaning beyond raw data (connect activities to goals) \
+        - The day_summary should feel like a thoughtful, personalized end-of-day review \
+        - Don't be generic — every observation should be rooted in the data and profile \
         - If the data is sparse, keep the summary short and honest about it \
         \
         Respond with a JSON object. Do not include any text outside the JSON. \
         \
         JSON format: \
-        { "greeting_context": "...", "day_summary": "...", "suggested_questions": [...], \
-          "recommendations": [{"category": "...", "title": "...", "description": "...", \
-          "reason": "...", "action_url": null, "icon": "..."}] }
+        { "greeting_context": "...", "day_summary": "...", "suggested_questions": [], "recommendations": [] }
         """
 
         for attempt in 0..<2 {
@@ -173,24 +176,45 @@ final class RecommendationGenerator: Sendable {
         projectActivities: [ProjectActivity],
         appsUsed: [String: TimeInterval],
         memoryContext: String?,
-        activityLog: String?
+        activityLog: String?,
+        weeklyTrends: String? = nil,
+        ocrDigest: String? = nil
     ) -> String {
         var lines: [String] = []
 
-        lines.append("Based on the following recent computer activity, provide personalized recommendations.")
+        // User profile FIRST — this is the primary lens for personalization
+        if let memory = memoryContext, !memory.isEmpty {
+            lines.append("## User Profile")
+            lines.append("This is what you know about this user. Use it to make every recommendation deeply relevant to their specific role, projects, and goals.")
+            lines.append(memory)
+            lines.append("")
+        }
+
+        // Weekly trends — cross-day patterns
+        if let trends = weeklyTrends, !trends.isEmpty {
+            lines.append("## Weekly Patterns")
+            lines.append(trends)
+            lines.append("")
+        }
+
+        lines.append("## Recent Activity Data")
         lines.append("")
 
-        // Recent tasks by day
+        // Recent tasks by day — expanded detail with links
         let sortedDates = recentTasks.keys.sorted().reversed()
-        for dateStr in sortedDates.prefix(3) {
+        for dateStr in sortedDates {
             guard let tasks = recentTasks[dateStr] else { continue }
-            lines.append("## Tasks on \(dateStr)")
-            for task in tasks.prefix(10) {
+            lines.append("### \(dateStr)")
+            for task in tasks.prefix(15) {
                 let durMins = Int(task.duration / 60)
                 let apps = task.appNamesList.joined(separator: ", ")
                 lines.append("- \"\(task.title)\" (\(durMins)m) — \(apps)")
                 if !task.description.isEmpty {
                     lines.append("  \(task.description)")
+                }
+                let links = task.linksList.map(\.value)
+                if !links.isEmpty {
+                    lines.append("  Links: \(links.prefix(3).joined(separator: ", "))")
                 }
             }
             lines.append("")
@@ -229,10 +253,11 @@ final class RecommendationGenerator: Sendable {
             lines.append("")
         }
 
-        // Memory context
-        if let memory = memoryContext, !memory.isEmpty {
-            lines.append("## Known Context About This User")
-            lines.append(memory)
+        // OCR-derived screen content analysis
+        if let digest = ocrDigest, !digest.isEmpty {
+            lines.append("## Screen Content Analysis (extracted from screenshots)")
+            lines.append("This is what was actually visible on screen — URLs visited, code being written, documents open, communications:")
+            lines.append(digest)
             lines.append("")
         }
 
@@ -241,35 +266,35 @@ final class RecommendationGenerator: Sendable {
         ## Output Format
         Respond with a JSON object:
         {
-          "greeting_context": "You've been deep into Swift concurrency and API integration lately — here are some things that might help.",
+          "greeting_context": "You've been deep into the Stubble permission system and SQLite layer this week — here are some things that might help.",
           "suggested_questions": [
-            "What patterns should I follow for actor isolation in my codebase?",
-            "How can I improve my test coverage for async code?",
-            "What are the best practices for SQLite WAL mode on macOS?"
+            "How should I handle TCC permission changes across app updates?",
+            "What's the best WAL checkpoint strategy for my SQLite usage pattern?",
+            "Are there better approaches to cross-process memory sharing on macOS?"
           ],
           "recommendations": [
             {
               "category": "article",
-              "title": "Understanding Swift Concurrency with async/await",
-              "description": "A comprehensive guide to structured concurrency in Swift, covering Task groups, actors, and Sendable conformance — directly relevant to the concurrent code patterns observed in your recent work.",
-              "reason": "You spent significant time working on async code in your Stubble project",
-              "action_url": "https://docs.swift.org/swift-book/documentation/the-swift-programming-language/concurrency/",
-              "icon": "doc.text"
+              "title": "Apple's TCC internals and code signing",
+              "description": "Deep dive into how macOS TCC ties permissions to code signatures, and strategies for preserving them across updates — directly relevant to the permission issues you've been debugging in Stubble.",
+              "reason": "You've spent multiple days this week working on TCC permission handling in Stubble",
+              "action_url": "https://developer.apple.com/documentation/security/app_sandbox",
+              "icon": "lock.shield"
             }
           ]
         }
 
         Top-level fields:
-        - greeting_context: 1-2 warm, casual sentences summarizing what the user has been working on, with a natural transition
-        - suggested_questions: 3-4 specific questions the user might want to ask about their recent work
+        - greeting_context: 1-2 warm, personal sentences that reference the user's actual projects by name
+        - suggested_questions: 3-4 deeply specific questions tied to their current work and challenges
 
         Recommendation fields:
-        - category: one of "article", "tool", "best_practice", "workflow"
-        - title: concise, specific title (not generic)
-        - description: 2-3 sentences explaining what this is and why it's valuable for THIS user
-        - reason: 1 sentence citing specific tasks/projects/apps from the data above
+        - category: one of "article", "tool", "best_practice", "workflow", "learning"
+        - title: concise, specific title that would only make sense for THIS user
+        - description: 2-3 sentences explaining what this is and why it's valuable for THIS user's specific situation
+        - reason: 1 sentence citing specific tasks, projects, or multi-day patterns from the data
         - action_url: a real URL (official docs, tool homepage, well-known tutorial). Use null if no URL applies.
-        - icon: an SF Symbol name that fits the recommendation (e.g. "doc.text", "wrench.and.screwdriver", "lightbulb", "arrow.triangle.branch", "book", "cpu", "network")
+        - icon: an SF Symbol name (e.g. "doc.text", "wrench.and.screwdriver", "lightbulb", "arrow.triangle.branch", "book", "cpu", "network", "lock.shield", "swift", "terminal")
         """)
 
         return lines.joined(separator: "\n")

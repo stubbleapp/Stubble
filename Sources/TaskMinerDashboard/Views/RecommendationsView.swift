@@ -5,21 +5,28 @@ import TaskMinerShared
 struct RecommendationsView: View {
     @Environment(DashboardViewModel.self) var viewModel
 
-    /// The user's first name from macOS account, used for the greeting.
     private var firstName: String {
         let full = NSFullUserName()
         return full.split(separator: " ").first.map(String.init) ?? full
     }
 
-    /// Whether there's any content to show (recommendations or day summary).
     private var hasContent: Bool {
-        !viewModel.recommendations.isEmpty || viewModel.daySummaryContent != nil
+        !viewModel.recommendations.isEmpty
+            || viewModel.daySummaryContent != nil
+            || !viewModel.projectActivities.isEmpty
+    }
+
+    private var displaySummary: String? {
+        viewModel.daySummaryContent ?? viewModel.daySummaryText
+    }
+
+    private var sortedProjects: [ProjectActivity] {
+        viewModel.projectActivities.sorted { $0.totalDuration > $1.totalDuration }
     }
 
     var body: some View {
         VStack(spacing: 0) {
             if viewModel.isGeneratingRecommendations && !hasContent {
-                // Loading — full-screen centered
                 Spacer()
                 VStack(spacing: 16) {
                     ProgressView()
@@ -29,11 +36,7 @@ struct RecommendationsView: View {
                         .foregroundStyle(Theme.textMuted)
                 }
                 Spacer()
-            } else if !hasContent && !viewModel.hasAttemptedStubsGeneration {
-                // Not yet attempted — blank, auto-load will fire via onAppear
-                Spacer()
             } else if !hasContent {
-                // Attempted but empty (no API key or no data)
                 Spacer()
                 VStack(spacing: 14) {
                     Text("Generate stubs to get personalized\ninsights based on your recent work.")
@@ -64,38 +67,42 @@ struct RecommendationsView: View {
                 }
                 Spacer()
             } else {
-                // Populated — greeting, content, questions
                 ScrollView {
                     VStack(alignment: .leading, spacing: 0) {
-                        // Header — greeting + refresh
+                        // 1. Header
                         headerSection
                             .padding(.horizontal, 24)
                             .padding(.top, 20)
                             .padding(.bottom, 16)
 
-                        // Error banner
                         if let error = viewModel.recommendationsError {
                             errorBanner(error)
                                 .padding(.horizontal, 24)
                                 .padding(.bottom, 12)
                         }
 
-                        // Day summary (past days only)
-                        if let summary = viewModel.daySummaryContent {
+                        // 2. Day Summary
+                        if let summary = displaySummary {
                             daySummaryCard(summary)
                                 .padding(.horizontal, 24)
                                 .padding(.bottom, 16)
                         }
 
-                        // Insight rows
-                        if !viewModel.recommendations.isEmpty {
-                            insightsSection
+                        // 3. Top Projects
+                        if !sortedProjects.isEmpty {
+                            projectsSection
                                 .padding(.horizontal, 24)
                                 .padding(.bottom, 16)
                         }
 
-                        // Suggested questions — horizontal pills
-                        if !viewModel.suggestedQuestions.isEmpty {
+                        // 4. Recommendations (horizontal scroll cards)
+                        if viewModel.isViewingToday && !viewModel.recommendations.isEmpty {
+                            recommendationCardsSection
+                                .padding(.bottom, 16)
+                        }
+
+                        // 5. Suggested Questions
+                        if viewModel.isViewingToday && !viewModel.suggestedQuestions.isEmpty {
                             questionPills
                                 .padding(.bottom, 16)
                         }
@@ -106,7 +113,6 @@ struct RecommendationsView: View {
             }
         }
         .onAppear {
-            // Auto-generate stubs on first view if we have data and a key
             if !hasContent
                 && !viewModel.isGeneratingRecommendations
                 && !viewModel.hasAttemptedStubsGeneration
@@ -217,15 +223,30 @@ struct RecommendationsView: View {
         )
     }
 
-    // MARK: - Insights Section
+    // MARK: - Projects Section
 
-    private var insightsSection: some View {
-        VStack(spacing: 2) {
-            ForEach(viewModel.recommendations) { tip in
-                InsightRow(
-                    tip: tip,
-                    onDismiss: { viewModel.dismissRecommendation(id: tip.id) }
-                )
+    private var projectsSection: some View {
+        ProjectsExpandableView(projects: sortedProjects)
+    }
+
+    // MARK: - Recommendation Cards (horizontal scroll)
+
+    private var recommendationCardsSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Recommended for you")
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(Theme.textPrimary)
+                .padding(.horizontal, 24)
+
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 12) {
+                    ForEach(viewModel.recommendations) { tip in
+                        RecommendationCard(tip: tip, onDismiss: {
+                            viewModel.dismissRecommendation(id: tip.id)
+                        })
+                    }
+                }
+                .padding(.horizontal, 24)
             }
         }
     }
@@ -260,7 +281,6 @@ struct RecommendationsView: View {
 
     // MARK: - Markdown Helpers
 
-    /// Pre-process block-level markdown into inline equivalents, then parse.
     private static func renderMarkdown(_ source: String) -> AttributedString? {
         let processed = preprocessMarkdown(source)
         var options = AttributedString.MarkdownParsingOptions()
@@ -305,45 +325,94 @@ struct RecommendationsView: View {
     }
 }
 
-// MARK: - Insight Row (single-line glass, hover reveals description)
+// MARK: - Projects Expandable View
 
-private struct InsightRow: View {
-    let tip: Recommendation
-    let onDismiss: () -> Void
-    @State private var isHovering = false
-    @State private var isExpanded = false
+private struct ProjectsExpandableView: View {
+    let projects: [ProjectActivity]
+    @State private var showAll = false
+    @Environment(DashboardViewModel.self) var viewModel
+
+    private var visibleProjects: [ProjectActivity] {
+        showAll ? projects : Array(projects.prefix(3))
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            // Always-visible: icon + title
+            // Section header
+            HStack {
+                Text("Projects")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(Theme.textPrimary)
+                Spacer()
+                Text(formatDuration(viewModel.activeSeconds))
+                    .font(.system(size: 12, weight: .medium).monospacedDigit())
+                    .foregroundStyle(Theme.textMuted)
+                Text("active")
+                    .font(.system(size: 12))
+                    .foregroundStyle(Theme.textQuaternary)
+            }
+            .padding(.bottom, 10)
+
+            VStack(spacing: 2) {
+                ForEach(visibleProjects) { activity in
+                    ProjectRow(activity: activity)
+                }
+            }
+
+            if projects.count > 3 {
+                Button {
+                    withAnimation(.easeInOut(duration: 0.2)) {
+                        showAll.toggle()
+                    }
+                } label: {
+                    HStack(spacing: 4) {
+                        Text(showAll ? "Show less" : "Show all \(projects.count) projects")
+                            .font(.system(size: 12, weight: .medium))
+                        Image(systemName: showAll ? "chevron.up" : "chevron.down")
+                            .font(.system(size: 9, weight: .semibold))
+                    }
+                    .foregroundStyle(Theme.accent)
+                    .padding(.top, 10)
+                }
+                .buttonStyle(.plain)
+            }
+        }
+    }
+}
+
+// MARK: - Single Project Row (expandable)
+
+private struct ProjectRow: View {
+    let activity: ProjectActivity
+    @State private var isExpanded = false
+    @Environment(DashboardViewModel.self) var viewModel
+
+    private var activityColor: Color {
+        Theme.barPalette[activity.colorIndex % Theme.barPalette.count]
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
             Button {
                 withAnimation(.easeInOut(duration: 0.2)) {
                     isExpanded.toggle()
                 }
             } label: {
                 HStack(spacing: 10) {
-                    Image(systemName: tip.iconName)
-                        .font(.system(size: 12, weight: .medium))
-                        .foregroundStyle(Theme.textMuted)
-                        .frame(width: 20)
+                    RoundedRectangle(cornerRadius: 2, style: .continuous)
+                        .fill(activityColor)
+                        .frame(width: 4, height: 18)
 
-                    Text(tip.title)
+                    Text(activity.name)
                         .font(.system(size: 13, weight: .medium))
                         .foregroundStyle(Theme.textPrimary)
                         .lineLimit(1)
 
                     Spacer(minLength: 4)
 
-                    // Dismiss — only on hover
-                    if isHovering {
-                        Button(action: onDismiss) {
-                            Image(systemName: "xmark")
-                                .font(.system(size: 9, weight: .medium))
-                                .foregroundStyle(Theme.textMuted.opacity(0.6))
-                        }
-                        .buttonStyle(.plain)
-                        .transition(.opacity)
-                    }
+                    Text(formatDuration(activity.totalDuration * viewModel.activityDurationScale))
+                        .font(.system(size: 11, weight: .medium).monospacedDigit())
+                        .foregroundStyle(Theme.textMuted)
 
                     Image(systemName: "chevron.right")
                         .font(.system(size: 10, weight: .medium))
@@ -356,33 +425,44 @@ private struct InsightRow: View {
             }
             .buttonStyle(.plain)
 
-            // Expanded detail
             if isExpanded {
                 VStack(alignment: .leading, spacing: 8) {
-                    Text(tip.description)
-                        .font(.system(size: 12))
-                        .foregroundStyle(Theme.textSecondary)
-                        .lineSpacing(2)
-                        .fixedSize(horizontal: false, vertical: true)
-
-                    if let urlStr = tip.actionURL,
-                       let url = URL(string: urlStr) {
-                        Button {
-                            NSWorkspace.shared.open(url)
-                        } label: {
-                            HStack(spacing: 3) {
-                                Text(tip.actionLabel)
-                                    .font(.system(size: 11, weight: .medium))
-                                Image(systemName: "arrow.up.right")
-                                    .font(.system(size: 8, weight: .semibold))
-                            }
-                            .foregroundStyle(Theme.accent)
-                        }
-                        .buttonStyle(.plain)
+                    if !activity.summary.isEmpty {
+                        Text(activity.summary)
+                            .font(.system(size: 12))
+                            .foregroundStyle(Theme.textSecondary)
+                            .lineSpacing(2)
+                            .fixedSize(horizontal: false, vertical: true)
                     }
+
+                    // App icons
+                    if !activity.appNames.isEmpty {
+                        HStack(spacing: 4) {
+                            ForEach(activity.appNames.prefix(6), id: \.self) { app in
+                                HoverableAppIconView(
+                                    appName: app,
+                                    bundleId: viewModel.bundleId(forAppName: app),
+                                    size: 18
+                                )
+                            }
+                            if activity.appNames.count > 6 {
+                                Text("+\(activity.appNames.count - 6)")
+                                    .font(.system(size: 9, weight: .medium))
+                                    .foregroundStyle(Theme.textMuted)
+                                    .frame(width: 18, height: 18)
+                                    .background(Theme.surfaceElevated)
+                                    .clipShape(Circle())
+                            }
+                        }
+                    }
+
+                    // Time range
+                    Text(formatTimeRange(start: activity.startTime, end: activity.endTime))
+                        .font(.system(size: 11).monospacedDigit())
+                        .foregroundStyle(Theme.textMuted)
                 }
                 .padding(.horizontal, 12)
-                .padding(.leading, 30) // Align with title text (past icon)
+                .padding(.leading, 14)
                 .padding(.bottom, 10)
                 .transition(.opacity.combined(with: .move(edge: .top)))
             }
@@ -393,6 +473,80 @@ private struct InsightRow: View {
         )
         .overlay(
             RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .strokeBorder(Theme.cardBorder, lineWidth: 0.5)
+        )
+    }
+}
+
+// MARK: - Recommendation Card (horizontal scroll item)
+
+private struct RecommendationCard: View {
+    let tip: Recommendation
+    let onDismiss: () -> Void
+    @State private var isHovering = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 6) {
+                Image(systemName: tip.iconName)
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(Theme.accent)
+
+                Text(tip.category.displayName.uppercased())
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(Theme.textMuted)
+                    .tracking(0.5)
+
+                Spacer()
+
+                if isHovering {
+                    Button(action: onDismiss) {
+                        Image(systemName: "xmark")
+                            .font(.system(size: 9, weight: .medium))
+                            .foregroundStyle(Theme.textMuted.opacity(0.6))
+                    }
+                    .buttonStyle(.plain)
+                    .transition(.opacity)
+                }
+            }
+
+            Text(tip.title)
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(Theme.textPrimary)
+                .lineLimit(2)
+                .fixedSize(horizontal: false, vertical: true)
+
+            Text(tip.description)
+                .font(.system(size: 12))
+                .foregroundStyle(Theme.textSecondary)
+                .lineLimit(3)
+                .lineSpacing(1)
+
+            Spacer(minLength: 0)
+
+            if let urlStr = tip.actionURL, let url = URL(string: urlStr) {
+                Button {
+                    NSWorkspace.shared.open(url)
+                } label: {
+                    HStack(spacing: 3) {
+                        Text(tip.actionLabel)
+                            .font(.system(size: 11, weight: .medium))
+                        Image(systemName: "arrow.up.right")
+                            .font(.system(size: 8, weight: .semibold))
+                    }
+                    .foregroundStyle(Theme.accent)
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(14)
+        .frame(width: 220, height: 170, alignment: .topLeading)
+        .background(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(.ultraThinMaterial)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
                 .strokeBorder(Theme.cardBorder, lineWidth: 0.5)
         )
         .onHover { hovering in

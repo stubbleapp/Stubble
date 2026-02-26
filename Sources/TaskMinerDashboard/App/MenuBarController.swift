@@ -63,6 +63,19 @@ final class MenuBarDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        if flag { return false }
+        // Bring an existing (hidden/minimized) window to front rather than
+        // letting WindowGroup spawn a duplicate.
+        for window in NSApp.windows where window.canBecomeMain {
+            window.makeKeyAndOrderFront(nil)
+            NSApp.activate(ignoringOtherApps: true)
+            return false
+        }
+        // No restorable window — let SwiftUI create one.
+        return true
+    }
+
     func applicationWillTerminate(_ notification: Notification) {
         pollTimer?.invalidate()
         pollTimer = nil

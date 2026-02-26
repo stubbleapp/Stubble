@@ -20,10 +20,10 @@ struct ContentView: View {
     /// NSEvent monitor reference so we can remove it on disappear.
     @State private var flagsMonitor: Any?
 
-    private let screensTabIndex = 3
+    private let screensTabIndex = 2
 
     private var tabItems: [String] {
-        var items = ["Timeline", "Stubs", "Activities"]
+        var items = ["Timeline", "Stubs"]
         if showScreensTab { items.append("Screens") }
         return items
     }
@@ -56,14 +56,12 @@ struct ContentView: View {
                     TaskTimelineView()
                 case 1:
                     RecommendationsView()
-                case 2:
-                    ActivitiesView()
                 default:
                     ScreenshotBrowserView()
                 }
 
                 // Single chat overlay shared across all tabs (except Screens)
-                if selectedTab < 3 {
+                if selectedTab < 2 {
                     ChatOverlayView()
                 }
             }
@@ -74,8 +72,7 @@ struct ContentView: View {
             ToolbarItem(placement: .principal) {
                 SegmentedPicker(
                     items: tabItems,
-                    selection: $selectedTab,
-                    highlightedItem: "Stubs"
+                    selection: $selectedTab
                 )
                 .frame(maxWidth: 500)
                 .accessibilityIdentifier("content-tab-picker")
@@ -139,7 +136,7 @@ struct ContentView: View {
                 }
             }
             // Keep ViewModel's currentScreen in sync so chat context knows which tab is active
-            let screenNames = ["Timeline", "Stubs", "Activities", "Screens"]
+            let screenNames = ["Timeline", "Stubs", "Screens"]
             viewModel.currentScreen = newTab < screenNames.count ? screenNames[newTab] : "Stubs"
         }
     }
@@ -149,8 +146,6 @@ struct ContentView: View {
 struct SegmentedPicker: View {
     let items: [String]
     @Binding var selection: Int
-    /// Title of the item that gets a subtle accent tint even when not selected.
-    var highlightedItem: String? = nil
 
     private let segmentPaddingH: CGFloat = 14
     private let segmentPaddingV: CGFloat = 6
@@ -160,29 +155,20 @@ struct SegmentedPicker: View {
         HStack(spacing: 0) {
             ForEach(Array(items.enumerated()), id: \.offset) { index, title in
                 let isSelected = selection == index
-                let isHighlighted = title == highlightedItem && !isSelected
 
                 Button {
                     withAnimation(.easeInOut(duration: 0.15)) { selection = index }
                 } label: {
                     Text(title)
-                        .font(.system(size: 12, weight: isSelected || isHighlighted ? .semibold : .regular))
-                        .foregroundStyle(
-                            isHighlighted ? .white
-                            : isSelected ? Theme.textPrimary
-                            : Theme.textSecondary
-                        )
+                        .font(.system(size: 12, weight: isSelected ? .semibold : .regular))
+                        .foregroundStyle(isSelected ? Theme.textPrimary : Theme.textSecondary)
                         .padding(.horizontal, segmentPaddingH)
                         .padding(.vertical, segmentPaddingV)
                         .frame(minHeight: ToolbarLayout.minTouchTarget)
                         .contentShape(Rectangle())
                         .background(
                             RoundedRectangle(cornerRadius: 6, style: .continuous)
-                                .fill(
-                                    isHighlighted ? Theme.accent
-                                    : isSelected ? Theme.selectedSurface
-                                    : Color.clear
-                                )
+                                .fill(isSelected ? Theme.selectedSurface : Color.clear)
                         )
                 }
                 .buttonStyle(.plain)

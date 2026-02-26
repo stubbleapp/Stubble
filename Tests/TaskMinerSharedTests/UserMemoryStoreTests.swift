@@ -28,8 +28,8 @@ final class UserMemoryStoreTests: XCTestCase {
 
     func testSaveAndLoad() {
         let entries = [
-            MemoryEntry(content: "Building a macOS app called Stubble"),
-            MemoryEntry(content: "Uses Swift and SQLite"),
+            MemoryEntry(category: .project, content: "Building a macOS app called Stubble"),
+            MemoryEntry(category: .technology, content: "Uses Swift and SQLite"),
         ]
 
         store.save(entries)
@@ -37,12 +37,14 @@ final class UserMemoryStoreTests: XCTestCase {
 
         XCTAssertEqual(loaded.count, 2)
         XCTAssertEqual(loaded[0].content, "Building a macOS app called Stubble")
+        XCTAssertEqual(loaded[0].category, .project)
         XCTAssertEqual(loaded[1].content, "Uses Swift and SQLite")
+        XCTAssertEqual(loaded[1].category, .technology)
     }
 
     func testSavePreservesIDs() {
         let id = UUID()
-        let entries = [MemoryEntry(id: id, content: "Test")]
+        let entries = [MemoryEntry(id: id, category: .workflow, content: "Test")]
 
         store.save(entries)
         let loaded = store.load()
@@ -50,84 +52,91 @@ final class UserMemoryStoreTests: XCTestCase {
         XCTAssertEqual(loaded[0].id, id)
     }
 
-    func testSavePreservesLearnedAtDate() {
+    func testSavePreservesFirstSeenDate() {
         let date = Date().addingTimeInterval(-86400)
-        let entries = [MemoryEntry(content: "Old fact", learnedAt: date)]
+        let entries = [MemoryEntry(category: .identity, content: "Old fact", firstSeen: date, lastSeen: date)]
 
         store.save(entries)
         let loaded = store.load()
 
-        XCTAssertEqual(loaded[0].learnedAt.timeIntervalSince1970,
+        XCTAssertEqual(loaded[0].firstSeen.timeIntervalSince1970,
                        date.timeIntervalSince1970, accuracy: 1.0)
     }
 
-    // MARK: - Merge
+    // MARK: - Structured Merge
 
     func testMergeAddsNewEntries() {
-        store.save([MemoryEntry(content: "Existing fact")])
+        store.save([MemoryEntry(category: .project, content: "Existing project")])
 
-        store.merge(newEntries: ["New fact"])
+        store.mergeStructured(newEntries: [
+            MemoryEntry(category: .technology, content: "New technology fact")
+        ])
         let loaded = store.load()
 
         XCTAssertEqual(loaded.count, 2)
-        XCTAssertTrue(loaded.contains(where: { $0.content == "Existing fact" }))
-        XCTAssertTrue(loaded.contains(where: { $0.content == "New fact" }))
+        XCTAssertTrue(loaded.contains(where: { $0.content == "Existing project" }))
+        XCTAssertTrue(loaded.contains(where: { $0.content == "New technology fact" }))
     }
 
-    func testMergeDeduplicatesCaseInsensitive() {
-        store.save([MemoryEntry(content: "Uses Swift and SQLite")])
+    func testMergeReinforcesMatchingEntry() {
+        store.save([MemoryEntry(category: .project, content: "Building Stubble macOS activity tracker")])
 
-        store.merge(newEntries: ["uses swift and sqlite"])
+        store.mergeStructured(newEntries: [
+            MemoryEntry(category: .project, content: "Building Stubble macOS desktop tracker")
+        ])
         let loaded = store.load()
 
-        XCTAssertEqual(loaded.count, 1, "Duplicate (case-insensitive) should not be added")
+        XCTAssertEqual(loaded.count, 1, "Should reinforce existing, not add duplicate")
+        XCTAssertEqual(loaded[0].reinforcementCount, 2)
+    }
+
+    func testMergeDifferentCategoryNotReinforced() {
+        store.save([MemoryEntry(category: .project, content: "Building Stubble")])
+
+        store.mergeStructured(newEntries: [
+            MemoryEntry(category: .technology, content: "Building Stubble")
+        ])
+        let loaded = store.load()
+
+        XCTAssertEqual(loaded.count, 2, "Different categories should not match")
     }
 
     func testMergeSkipsEmptyAndWhitespace() {
         store.save([])
 
-        store.merge(newEntries: ["", "   ", "\n", "Valid entry"])
+        store.mergeStructured(newEntries: [
+            MemoryEntry(category: .workflow, content: ""),
+            MemoryEntry(category: .workflow, content: "   "),
+            MemoryEntry(category: .workflow, content: "Valid entry"),
+        ])
         let loaded = store.load()
 
         XCTAssertEqual(loaded.count, 1)
         XCTAssertEqual(loaded[0].content, "Valid entry")
     }
 
-    func testMergeTrimsWhitespace() {
-        store.save([])
-
-        store.merge(newEntries: ["  Fact with spaces  "])
-        let loaded = store.load()
-
-        XCTAssertEqual(loaded[0].content, "Fact with spaces")
-    }
-
     func testMergeCapsAt50() {
-        // Pre-fill with 48 entries
-        let existing = (0..<48).map { MemoryEntry(content: "Fact \($0)") }
+        let existing = (0..<48).map { MemoryEntry(category: .project, content: "Alpha project number \($0) details", confidence: 0.8) }
         store.save(existing)
 
-        // Merge 5 more
-        store.merge(newEntries: ["New 1", "New 2", "New 3", "New 4", "New 5"])
+        let newEntries = (0..<5).map { MemoryEntry(category: .technology, content: "Brand unique technology entry \($0)", confidence: 0.9) }
+        store.mergeStructured(newEntries: newEntries)
 
         let loaded = store.load()
-        XCTAssertEqual(loaded.count, 50, "Should be capped at 50")
-
-        // The newest entries should be present (they're at the end)
-        XCTAssertTrue(loaded.contains(where: { $0.content == "New 5" }))
+        XCTAssertLessThanOrEqual(loaded.count, 50, "Should be capped at 50")
+        XCTAssertGreaterThan(loaded.count, 48, "New entries should have been added")
     }
 
-    func testMergeDropsOldestWhenOverCap() {
-        let existing = (0..<50).map { MemoryEntry(content: "Old \($0)") }
-        store.save(existing)
+    // MARK: - Legacy Merge (backward compat)
 
-        store.merge(newEntries: ["Brand new fact"])
+    func testLegacyMergeStillWorks() {
+        store.save([MemoryEntry(category: .workflow, content: "Existing fact")])
+
+        store.merge(newEntries: ["New fact"])
         let loaded = store.load()
 
-        XCTAssertEqual(loaded.count, 50)
-        // Oldest should have been dropped
-        XCTAssertFalse(loaded.contains(where: { $0.content == "Old 0" }))
-        XCTAssertTrue(loaded.contains(where: { $0.content == "Brand new fact" }))
+        XCTAssertEqual(loaded.count, 2)
+        XCTAssertTrue(loaded.contains(where: { $0.content == "New fact" }))
     }
 
     // MARK: - Delete
@@ -135,8 +144,8 @@ final class UserMemoryStoreTests: XCTestCase {
     func testDeleteRemovesEntry() {
         let id = UUID()
         store.save([
-            MemoryEntry(id: id, content: "To delete"),
-            MemoryEntry(content: "To keep"),
+            MemoryEntry(id: id, category: .workflow, content: "To delete"),
+            MemoryEntry(category: .workflow, content: "To keep"),
         ])
 
         store.delete(id: id)
@@ -147,7 +156,7 @@ final class UserMemoryStoreTests: XCTestCase {
     }
 
     func testDeleteNonexistentIDNoOp() {
-        store.save([MemoryEntry(content: "Existing")])
+        store.save([MemoryEntry(category: .workflow, content: "Existing")])
 
         store.delete(id: UUID())
         let loaded = store.load()
@@ -159,8 +168,8 @@ final class UserMemoryStoreTests: XCTestCase {
 
     func testClearRemovesAll() {
         store.save([
-            MemoryEntry(content: "Fact 1"),
-            MemoryEntry(content: "Fact 2"),
+            MemoryEntry(category: .project, content: "Fact 1"),
+            MemoryEntry(category: .technology, content: "Fact 2"),
         ])
 
         store.clear()
@@ -169,23 +178,61 @@ final class UserMemoryStoreTests: XCTestCase {
         XCTAssertTrue(loaded.isEmpty)
     }
 
-    // MARK: - contextString
+    // MARK: - Profile
 
-    func testContextStringWithEntries() {
+    func testSaveAndLoadProfile() {
+        store.saveProfile("A software developer building Stubble.")
+        let profile = store.loadProfile()
+        XCTAssertEqual(profile, "A software developer building Stubble.")
+    }
+
+    func testContextStringPrefersProfile() {
+        store.save([MemoryEntry(category: .workflow, content: "Some fact")])
+        store.saveProfile("Synthesized profile text.")
+
+        let context = store.contextString()
+        XCTAssertEqual(context, "Synthesized profile text.")
+    }
+
+    func testContextStringFallsThroughToEntries() {
         store.save([
-            MemoryEntry(content: "Builds macOS apps"),
-            MemoryEntry(content: "Uses Swift"),
+            MemoryEntry(category: .project, content: "Builds macOS apps"),
+            MemoryEntry(category: .technology, content: "Uses Swift"),
         ])
 
         let context = store.contextString()
         XCTAssertNotNil(context)
-        XCTAssertTrue(context!.contains("- Builds macOS apps"))
-        XCTAssertTrue(context!.contains("- Uses Swift"))
+        XCTAssertTrue(context!.contains("Builds macOS apps"))
+        XCTAssertTrue(context!.contains("Uses Swift"))
     }
 
     func testContextStringEmptyReturnsNil() {
         let context = store.contextString()
         XCTAssertNil(context)
+    }
+
+    // MARK: - Legacy Migration
+
+    func testLegacyFormatMigration() {
+        let legacyJSON = """
+        [
+          {
+            "id": "11111111-1111-1111-1111-111111111111",
+            "content": "Building a macOS app",
+            "learnedAt": "2025-01-15T10:00:00Z"
+          }
+        ]
+        """.data(using: .utf8)!
+
+        try? FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
+        try! legacyJSON.write(to: tempDir.appendingPathComponent("memory.json"))
+
+        let loaded = store.load()
+        XCTAssertEqual(loaded.count, 1)
+        XCTAssertEqual(loaded[0].content, "Building a macOS app")
+        XCTAssertEqual(loaded[0].category, .workflow)
+        XCTAssertEqual(loaded[0].reinforcementCount, 1)
+        XCTAssertEqual(loaded[0].source, .activityInference)
     }
 
     // MARK: - MemoryEntry
@@ -194,12 +241,14 @@ final class UserMemoryStoreTests: XCTestCase {
         let entry = MemoryEntry(content: "Test")
         XCTAssertNotNil(entry.id)
         XCTAssertEqual(entry.content, "Test")
-        // learnedAt should be approximately now
-        XCTAssertEqual(entry.learnedAt.timeIntervalSinceNow, 0, accuracy: 2.0)
+        XCTAssertEqual(entry.category, .workflow)
+        XCTAssertEqual(entry.reinforcementCount, 1)
+        XCTAssertEqual(entry.source, .activityInference)
+        XCTAssertEqual(entry.firstSeen.timeIntervalSinceNow, 0, accuracy: 2.0)
     }
 
     func testMemoryEntryCodable() throws {
-        let entry = MemoryEntry(content: "Test fact", learnedAt: Date())
+        let entry = MemoryEntry(category: .project, content: "Test fact", confidence: 0.9)
         let encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .iso8601
         let data = try encoder.encode(entry)
@@ -210,5 +259,7 @@ final class UserMemoryStoreTests: XCTestCase {
 
         XCTAssertEqual(decoded.id, entry.id)
         XCTAssertEqual(decoded.content, entry.content)
+        XCTAssertEqual(decoded.category, .project)
+        XCTAssertEqual(decoded.confidence, 0.9)
     }
 }

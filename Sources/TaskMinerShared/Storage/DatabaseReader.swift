@@ -39,7 +39,7 @@ public class DatabaseReader {
     }
 
     /// Current schema version. Bump this when adding new migrations.
-    private static let schemaVersion = 7
+    private static let schemaVersion = 8
 
     /// Apply schema migrations so the dashboard works even if the CLI hasn't run yet.
     /// Uses PRAGMA user_version to track which migrations have already run.
@@ -146,6 +146,19 @@ public class DatabaseReader {
             )
             """
             if !execMigration(stubsSql, label: "7: create stubs_content table") {
+                migrationFailed = true
+            }
+        }
+
+        if currentVersion < 8 {
+            let digestSql = """
+            CREATE TABLE IF NOT EXISTS ocr_digests (
+                date         TEXT PRIMARY KEY,
+                digest       TEXT NOT NULL,
+                generated_at TEXT NOT NULL
+            )
+            """
+            if !execMigration(digestSql, label: "8: create ocr_digests table") {
                 migrationFailed = true
             }
         }
@@ -539,6 +552,59 @@ public class DatabaseReader {
         return map
     }
 
+    // MARK: - OCR Digest
+
+    /// Fetch the cached OCR digest for a date. Returns nil if not yet computed.
+    public func ocrDigest(for date: Date) -> String? {
+        let dateStr = SharedFormatters.dayFormatter.string(from: date)
+        let sql = "SELECT digest FROM ocr_digests WHERE date = ?"
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return nil }
+        defer { sqlite3_finalize(stmt) }
+        sqliteBindText(stmt, 1, dateStr)
+
+        guard sqlite3_step(stmt) == SQLITE_ROW else { return nil }
+        return sqlite3_column_text(stmt, 0).map { String(cString: $0) }
+    }
+
+    /// Fetch all OCR texts for a date (used to build digest on-demand in the dashboard).
+    public func ocrTextsForDate(_ date: Date) -> [String] {
+        let range = dateRange(for: date)
+        let sql = "SELECT ocr_text FROM screenshots WHERE timestamp >= ? AND timestamp < ? AND ocr_text IS NOT NULL AND ocr_text != ''"
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return [] }
+        defer { sqlite3_finalize(stmt) }
+
+        sqliteBindText(stmt, 1, range.start)
+        sqliteBindText(stmt, 2, range.end)
+
+        var texts: [String] = []
+        while sqlite3_step(stmt) == SQLITE_ROW {
+            if let cStr = sqlite3_column_text(stmt, 0) {
+                texts.append(String(cString: cStr))
+            }
+        }
+        return texts
+    }
+
+    /// Insert or replace the cached OCR digest for a date (used by dashboard on-demand computation).
+    public func insertOrReplaceOCRDigest(date: String, digest: String) {
+        guard db != nil else { return }
+        let sql = """
+        INSERT INTO ocr_digests (date, digest, generated_at) VALUES (?, ?, ?)
+        ON CONFLICT(date) DO UPDATE SET digest = excluded.digest, generated_at = excluded.generated_at
+        """
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return }
+        defer { sqlite3_finalize(stmt) }
+
+        let now = SharedFormatters.iso8601.string(from: Date())
+        sqliteBindText(stmt, 1, date)
+        sqliteBindText(stmt, 2, digest)
+        sqliteBindText(stmt, 3, now)
+        sqlite3_step(stmt)
+    }
+
     // MARK: - Clear All Data
 
     /// Delete all rows from every table. Returns the number of screenshot file paths
@@ -546,14 +612,15 @@ public class DatabaseReader {
     public func clearAllData() -> [String] {
         guard db != nil else { return [] }
 
-        // Collect screenshot file paths before deleting rows
+        // Collect screenshot file paths before deleting rows (skip empty paths from pruned images)
         var paths: [String] = []
-        let selectSql = "SELECT file_path FROM screenshots"
+        let selectSql = "SELECT file_path FROM screenshots WHERE file_path IS NOT NULL AND file_path != ''"
         var selectStmt: OpaquePointer?
         if sqlite3_prepare_v2(db, selectSql, -1, &selectStmt, nil) == SQLITE_OK {
             while sqlite3_step(selectStmt) == SQLITE_ROW {
                 if let cStr = sqlite3_column_text(selectStmt, 0) {
-                    paths.append(String(cString: cStr))
+                    let path = String(cString: cStr)
+                    if !path.isEmpty { paths.append(path) }
                 }
             }
             sqlite3_finalize(selectStmt)
@@ -567,8 +634,9 @@ public class DatabaseReader {
         sqlite3_exec(db, "DELETE FROM daily_summaries", nil, nil, nil)
         sqlite3_exec(db, "DELETE FROM chat_messages", nil, nil, nil)
         sqlite3_exec(db, "DELETE FROM stubs_content", nil, nil, nil)
+        sqlite3_exec(db, "DELETE FROM ocr_digests", nil, nil, nil)
 
-        Logger.info("Cleared all data from 6 tables (\(paths.count) screenshot files)")
+        Logger.info("Cleared all data from 8 tables (\(paths.count) screenshot files)")
         return paths
     }
 

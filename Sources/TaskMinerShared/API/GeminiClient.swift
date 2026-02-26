@@ -63,7 +63,7 @@ public final class GeminiClient: Sendable {
 
         let generationConfig: [String: Any] = [
             "temperature": 0.3,
-            "maxOutputTokens": 8192,
+            "maxOutputTokens": 65536,
             "responseMimeType": "application/json",
             "thinkingConfig": ["thinkingBudget": 0]
         ]
@@ -280,8 +280,6 @@ public final class GeminiClient: Sendable {
 
     /// Parse the Gemini response JSON and extract the text content.
     private func parseResponseText(_ data: Data) throws -> String {
-        // Gemini 2.5 Flash may include "thought" parts before the actual content,
-        // so we find the last part that has a "text" key and is not a thought.
         guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
               let candidates = json["candidates"] as? [[String: Any]],
               let firstCandidate = candidates.first,
@@ -292,7 +290,13 @@ public final class GeminiClient: Sendable {
             throw GeminiError.parseError("Could not parse response structure: \(preview)")
         }
 
+        // Warn if the response was truncated due to token limit
+        if let finishReason = firstCandidate["finishReason"] as? String, finishReason == "MAX_TOKENS" {
+            Logger.warning("GeminiClient: response truncated (MAX_TOKENS) — output hit the token limit")
+        }
+
         // Find the last non-thought part with text content
+        // (Gemini 2.5 Flash may include "thought" parts before the actual content)
         let text = parts.reversed()
             .first(where: { $0["thought"] == nil && $0["text"] != nil })?["text"] as? String
             ?? parts.last?["text"] as? String

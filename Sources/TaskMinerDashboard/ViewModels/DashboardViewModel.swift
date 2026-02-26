@@ -83,6 +83,7 @@ final class DashboardViewModel {
     // Pause
     var pauseState: PauseState?
     private var pauseTimer: Timer?
+    private var refreshTimer: Timer?
 
     deinit {
         // deinit is nonisolated but this @MainActor class is always deallocated on
@@ -90,6 +91,7 @@ final class DashboardViewModel {
         // the standard pattern for accessing @MainActor properties from deinit.
         MainActor.assumeIsolated {
             pauseTimer?.invalidate()
+            refreshTimer?.invalidate()
         }
     }
 
@@ -148,6 +150,7 @@ final class DashboardViewModel {
         loadChatHistory()
         loadAppNameMap()
         startPausePolling()
+        startPeriodicRefresh()
 
         // Auto-generate day summaries for recent past days that don't have one yet
         autoGeneratePendingSummaries()
@@ -226,9 +229,11 @@ final class DashboardViewModel {
                 try writer.deleteTasks(for: dateStr)
                 try writer.insertTasks(result.tasks)
 
-                // Merge any new memory entries learned from this session
+                // Merge new structured memory entries and re-synthesize profile
                 if !result.newMemoryEntries.isEmpty {
-                    self.memoryStore.merge(newEntries: result.newMemoryEntries)
+                    self.memoryStore.mergeStructured(newEntries: result.newMemoryEntries)
+                    let profileSynth = ProfileSynthesizer(geminiClient: summarizer.geminiClient)
+                    await profileSynth.synthesizeIfNeeded(store: self.memoryStore)
                 }
 
                 // Refresh all data for the day (tasks, activities, summary stats)
@@ -553,6 +558,20 @@ final class DashboardViewModel {
         pauseTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
             Task { @MainActor in
                 self?.pauseState = self?.pauseController.currentState()
+            }
+        }
+    }
+
+    /// Reload activity data from the database every 15 minutes so the dashboard
+    /// stays current while the daemon writes new data in the background.
+    private func startPeriodicRefresh() {
+        refreshTimer = Timer.scheduledTimer(withTimeInterval: 900, repeats: true) { [weak self] _ in
+            Task { @MainActor in
+                guard let self else { return }
+                guard self.isViewingToday else { return }
+                self.loadAvailableDates()
+                self.loadDataForSelectedDate()
+                Logger.debug("Periodic dashboard refresh completed")
             }
         }
     }

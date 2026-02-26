@@ -274,21 +274,34 @@ class AppDelegate {
             }
         }
 
-        // 4. Daily summary at midnight rollover + screenshot cap
+        // 4. Daily summary at midnight rollover + OCR digest + screenshot cap
         let today = todayString()
         if today != lastSummaryDate {
             // Generate summary for yesterday
             if let yesterday = Calendar.current.date(byAdding: .day, value: -1, to: Date()) {
                 db.generateDailySummary(for: yesterday)
+                // Build and cache the OCR digest for yesterday (before images are pruned)
+                let ocrTexts = db.ocrTextsForDate(yesterday)
+                if !ocrTexts.isEmpty {
+                    let digest = OCRDigestBuilder.buildDigest(from: ocrTexts)
+                    if let section = digest.asPromptSection() {
+                        let dateStr = SharedFormatters.dayFormatter.string(from: yesterday)
+                        db.insertOrReplaceOCRDigest(date: dateStr, digest: section)
+                        Logger.info("Generated OCR digest for \(dateStr) from \(ocrTexts.count) screenshots")
+                    }
+                }
             }
             lastSummaryDate = today
         }
 
-        // 5. Cap screenshots: keep only the latest 100 (DB rows + files)
-        let deletedPaths = db.deleteScreenshotsKeepingLatest(100)
-        if !deletedPaths.isEmpty {
-            screenshotStorage.cleanupFiles(relativePaths: deletedPaths)
+        // 5. Tiered screenshot pruning:
+        //    - Tier 1: delete image files beyond the latest 100 (keep OCR text in DB)
+        //    - Tier 2: delete entire DB rows older than 30 days
+        let prunedPaths = db.pruneScreenshotImages(keepLatest: 100)
+        if !prunedPaths.isEmpty {
+            screenshotStorage.cleanupFiles(relativePaths: prunedPaths)
         }
+        db.deleteScreenshotsOlderThan(days: 30)
     }
 
     // MARK: - Idle Transition Handling
@@ -511,10 +524,16 @@ class AppDelegate {
                         Logger.info("AI generated \(inserted) task(s)")
                     }
 
-                    // Merge new memory entries
+                    // Merge new structured memory entries
                     if !result.newMemoryEntries.isEmpty {
-                        memoryStore.merge(newEntries: result.newMemoryEntries)
+                        memoryStore.mergeStructured(newEntries: result.newMemoryEntries)
                     }
+                }
+
+                // Re-synthesize user profile after memory changes (runs in background)
+                if !result.newMemoryEntries.isEmpty {
+                    let synthesizer = ProfileSynthesizer(geminiClient: summarizer.geminiClient)
+                    await synthesizer.synthesizeIfNeeded(store: memoryStore)
                 }
             } catch {
                 await MainActor.run {

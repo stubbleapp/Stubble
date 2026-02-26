@@ -129,6 +129,32 @@ enum Theme {
         Color(red: 0.65, green: 0.50, blue: 0.70),   // 9 — Lavender
     ]
 
+    // MARK: - Chat overlay
+
+    /// Chat panel glass fill — translucent white in light, translucent dark in dark mode.
+    static let chatSurface = adaptive(
+        light: NSColor(red: 1.0, green: 1.0, blue: 1.0, alpha: 0.88),
+        dark: NSColor(red: 0.16, green: 0.16, blue: 0.17, alpha: 0.92)
+    )
+
+    /// Chat panel border.
+    static let chatBorder = adaptive(
+        light: NSColor(red: 1.0, green: 1.0, blue: 1.0, alpha: 0.5),
+        dark: NSColor(red: 0.30, green: 0.30, blue: 0.32, alpha: 0.6)
+    )
+
+    /// Subtle inner separator in the chat panel.
+    static let chatSeparator = adaptive(
+        light: NSColor(red: 0.0, green: 0.0, blue: 0.0, alpha: 0.04),
+        dark: NSColor(red: 1.0, green: 1.0, blue: 1.0, alpha: 0.06)
+    )
+
+    /// Assistant message bubble background.
+    static let chatAssistantBubble = adaptive(
+        light: NSColor(red: 1.0, green: 1.0, blue: 1.0, alpha: 0.7),
+        dark: NSColor(red: 0.22, green: 0.22, blue: 0.23, alpha: 0.8)
+    )
+
     // MARK: - Screenshot trigger badges
 
     static let triggerAppSwitch = Color(red: 0.40, green: 0.56, blue: 0.78)

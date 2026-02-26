@@ -20,12 +20,14 @@ extension DashboardViewModel {
         isGeneratingRecommendations = true
         recommendationsError = nil
 
-        // Gather context
-        let recentTasks = loadRecentTasksForSelectedDate(days: 3)
+        // Gather context — wide window for richer recommendations
+        let recentTasks = loadRecentTasksForSelectedDate(days: 7)
         let currentProjectActivities = projectActivities
         let appsUsed = buildAppUsageMap(from: recentTasks)
         let memoryContext = memoryStore.contextString()
         let activityLog = buildActivityLog()
+        let weeklyTrends = buildWeeklyTrends(from: recentTasks)
+        let ocrDigest = loadOrBuildOCRDigest()
         let viewingToday = isViewingToday
         let dateLabel = SharedFormatters.headerDateFormatter.string(from: selectedDate)
         let dateString = SharedFormatters.dayFormatter.string(from: selectedDate)
@@ -39,7 +41,9 @@ extension DashboardViewModel {
                         projectActivities: currentProjectActivities,
                         appsUsed: appsUsed,
                         memoryContext: memoryContext,
-                        activityLog: activityLog
+                        activityLog: activityLog,
+                        weeklyTrends: weeklyTrends,
+                        ocrDigest: ocrDigest
                     )
                 } else {
                     content = try await generator.generateDaySummary(
@@ -48,6 +52,8 @@ extension DashboardViewModel {
                         appsUsed: appsUsed,
                         memoryContext: memoryContext,
                         activityLog: activityLog,
+                        weeklyTrends: weeklyTrends,
+                        ocrDigest: ocrDigest,
                         dateLabel: dateLabel
                     )
                 }
@@ -154,6 +160,49 @@ extension DashboardViewModel {
         return result
     }
 
+    /// Analyze cross-day patterns: recurring projects, time distribution shifts, focus trends.
+    private func buildWeeklyTrends(from recentTasks: [String: [TaskRecord]]) -> String? {
+        guard recentTasks.count >= 2 else { return nil }
+
+        var projectDays: [String: Int] = [:]
+        var dailyHours: [(date: String, hours: Double)] = []
+
+        for (dateStr, tasks) in recentTasks {
+            let totalSecs = tasks.reduce(0.0) { $0 + $1.duration }
+            dailyHours.append((dateStr, totalSecs / 3600))
+
+            // Extract project-like keywords from task titles
+            for task in tasks {
+                let words = task.title
+                    .replacingOccurrences(of: "ing ", with: " ")
+                    .split(separator: " ")
+                    .filter { $0.count > 3 }
+                    .map { String($0) }
+                for word in words where word.first?.isUppercase == true {
+                    projectDays[word, default: 0] += 1
+                }
+            }
+        }
+
+        var lines: [String] = []
+
+        // Recurring topics (appeared on 2+ days)
+        let recurring = projectDays.filter { $0.value >= 2 }.sorted { $0.value > $1.value }
+        if !recurring.isEmpty {
+            let topics = recurring.prefix(8).map { "\($0.key) (\($0.value) days)" }.joined(separator: ", ")
+            lines.append("Recurring focus areas this week: \(topics)")
+        }
+
+        // Daily active hours
+        let sorted = dailyHours.sorted { $0.date < $1.date }
+        if sorted.count >= 2 {
+            let summary = sorted.map { "\($0.date): \(String(format: "%.1f", $0.hours))h" }.joined(separator: ", ")
+            lines.append("Daily active hours: \(summary)")
+        }
+
+        return lines.isEmpty ? nil : lines.joined(separator: "\n")
+    }
+
     /// Build a compact activity log from the selected date's grouped activities, including window titles.
     private func buildActivityLog() -> String? {
         guard !groupedActivities.isEmpty else { return nil }
@@ -168,6 +217,24 @@ extension DashboardViewModel {
             }
         }
         return lines.joined(separator: "\n")
+    }
+
+    /// Load the cached OCR digest for the selected date, or build it on-demand from DB.
+    func loadOrBuildOCRDigest() -> String? {
+        guard let db = dbReader else { return nil }
+        // Try cached first
+        if let cached = db.ocrDigest(for: selectedDate) {
+            return cached
+        }
+        // Build on-demand from whatever OCR texts are in the DB
+        let ocrTexts = db.ocrTextsForDate(selectedDate)
+        guard !ocrTexts.isEmpty else { return nil }
+        let digest = OCRDigestBuilder.buildDigest(from: ocrTexts)
+        guard let section = digest.asPromptSection() else { return nil }
+        // Cache it
+        let dateStr = SharedFormatters.dayFormatter.string(from: selectedDate)
+        db.insertOrReplaceOCRDigest(date: dateStr, digest: section)
+        return section
     }
 
     /// Build a map of app name → total seconds used across all provided tasks.
@@ -268,6 +335,19 @@ extension DashboardViewModel {
         let appsUsed = buildAppUsageMap(from: recentTasks)
         let memoryContext = memoryStore.contextString()
 
+        // Load or build OCR digest for the target date
+        var ocrDigest: String? = db.ocrDigest(for: date)
+        if ocrDigest == nil {
+            let ocrTexts = db.ocrTextsForDate(date)
+            if !ocrTexts.isEmpty {
+                let digest = OCRDigestBuilder.buildDigest(from: ocrTexts)
+                if let section = digest.asPromptSection() {
+                    db.insertOrReplaceOCRDigest(date: dateStr, digest: section)
+                    ocrDigest = section
+                }
+            }
+        }
+
         do {
             let content = try await generator.generateDaySummary(
                 recentTasks: recentTasks,
@@ -275,6 +355,8 @@ extension DashboardViewModel {
                 appsUsed: appsUsed,
                 memoryContext: memoryContext,
                 activityLog: activityLog,
+                weeklyTrends: nil,
+                ocrDigest: ocrDigest,
                 dateLabel: dateLabel
             )
             persistStubsContent(content, dateString: dateStr)

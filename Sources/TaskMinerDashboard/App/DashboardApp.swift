@@ -56,6 +56,7 @@ struct DashboardApp: App {
         .windowStyle(.titleBar)
         .windowToolbarStyle(.unified(showsTitle: false))
         .commands {
+            CommandGroup(replacing: .newItem) { }
             CommandGroup(replacing: .appInfo) {
                 Button("About Stubble") {
                     showAboutPanel()
