@@ -9,7 +9,9 @@ enum TimelineItem: Identifiable {
     var id: String {
         switch self {
         case .task(let record, _, _):
-            return "task-\(record.id ?? 0)"
+            // Include start time to distinguish split task fragments that share the same DB id
+            let ts = Int(record.startTime.timeIntervalSince1970)
+            return "task-\(record.id ?? 0)-\(ts)"
         case .gap(let id, _, _, _):
             return id
         }
@@ -24,13 +26,22 @@ enum TimelineItem: Identifiable {
     ///
     /// Tasks are sorted by start time and overlapping boundaries are clipped so that
     /// AI-generated task merging never produces inverted inter-task windows.
-    static func build(from tasks: [TaskRecord], idleActivities: [ActivityRecord] = []) -> [TimelineItem] {
+    static func build(from tasks: [TaskRecord], idleActivities: [ActivityRecord] = [], minIdleDuration: TimeInterval = 120) -> [TimelineItem] {
         guard !tasks.isEmpty else { return [] }
 
-        // 1. Sort by start time — AI regeneration can produce out-of-order tasks
-        let sorted = tasks.sorted { $0.startTime < $1.startTime }
+        let idleGaps = consolidateIdlePeriods(idleActivities, minDuration: minIdleDuration)
 
-        // 2. Compute effective end times — clip overlapping tasks so window is never inverted.
+        // 1. Split tasks that span across idle periods so away gaps become visible
+        //    regardless of task granularity. This is display-only — no DB changes.
+        let split = splitTasksAroundIdlePeriods(
+            tasks.sorted { $0.startTime < $1.startTime },
+            idleGaps: idleGaps
+        )
+
+        // 2. Sort by start time — AI regeneration can produce out-of-order tasks
+        let sorted = split.sorted { $0.startTime < $1.startTime }
+
+        // 3. Compute effective end times — clip overlapping tasks so window is never inverted.
         //    If task[i].endTime > task[i+1].startTime, clip it to task[i+1].startTime.
         //    This keeps overlap resolution local to the display layer (TaskRecord is unchanged).
         var effectiveEndTimes = sorted.map(\.endTime)
@@ -39,8 +50,6 @@ enum TimelineItem: Identifiable {
                 effectiveEndTimes[i] = sorted[i + 1].startTime
             }
         }
-
-        let idleGaps = consolidateIdlePeriods(idleActivities)
 
         var items: [TimelineItem] = []
         var usedGaps: Set<Int> = []
@@ -81,9 +90,9 @@ enum TimelineItem: Identifiable {
                             duration: duration
                         ))
                         for gi in matchedIndices { usedGaps.insert(gi) }
-                    } else if interTaskGap >= 120 {
+                    } else if interTaskGap >= minIdleDuration {
                         // Fallback: infer gap from task boundaries if no idle records matched
-                        // and the gap is significant (>= 2 minutes)
+                        // and the gap is significant (>= min away threshold)
                         items.append(.gap(
                             id: "inferred-\(index)",
                             startTime: windowStart,
@@ -108,13 +117,94 @@ enum TimelineItem: Identifiable {
         return items
     }
 
-    /// Minimum idle duration to show in the timeline (2 minutes).
-    private static let minIdleDuration: TimeInterval = 120
+    /// Resolve the minimum idle duration from user settings.
+    /// Must be called from the main actor (since SettingsManager is @MainActor).
+    @MainActor
+    static var settingsMinIdleDuration: TimeInterval {
+        TimeInterval(SettingsManager.shared.minAwayMinutes * 60)
+    }
+
+    /// Minimum task fragment duration after splitting (30 seconds).
+    /// Fragments shorter than this are discarded to avoid tiny slivers.
+    private static let minFragmentDuration: TimeInterval = 30
+
+    /// Split tasks whose time ranges span across idle periods.
+    /// When the AI generates a broad task (e.g. 9:00–12:00) that encompasses
+    /// an idle period (e.g. 10:30–10:45), this splits it into two display tasks
+    /// (9:00–10:30 and 10:45–12:00) so the existing inter-task gap logic can
+    /// detect and show the away period. All task content (title, description, etc.)
+    /// is preserved in both halves. This is display-only — no DB changes.
+    private static func splitTasksAroundIdlePeriods(
+        _ tasks: [TaskRecord],
+        idleGaps: [(start: Date, end: Date)]
+    ) -> [TaskRecord] {
+        guard !idleGaps.isEmpty else { return tasks }
+
+        var result: [TaskRecord] = []
+
+        for task in tasks {
+            // Find all idle periods strictly interior to this task's time range.
+            // "Strictly interior" means the idle starts after the task starts AND
+            // ends before the task ends, with a small margin to avoid splitting
+            // at boundaries where idle and task edges coincide.
+            let margin: TimeInterval = 10 // seconds
+            let interiorIdles = idleGaps.filter { idle in
+                idle.start > task.startTime.addingTimeInterval(margin) &&
+                idle.end < task.endTime.addingTimeInterval(-margin)
+            }
+
+            guard !interiorIdles.isEmpty else {
+                result.append(task)
+                continue
+            }
+
+            // Split the task around each interior idle period.
+            // Walk through the task's time range, emitting fragments between idles.
+            var cursor = task.startTime
+            for idle in interiorIdles.sorted(by: { $0.start < $1.start }) {
+                // Fragment before this idle period
+                let fragmentEnd = idle.start
+                if fragmentEnd.timeIntervalSince(cursor) >= minFragmentDuration {
+                    result.append(TaskRecord(
+                        id: task.id,
+                        date: task.date,
+                        startTime: cursor,
+                        endTime: fragmentEnd,
+                        title: task.title,
+                        description: task.description,
+                        appNames: task.appNames,
+                        confidence: task.confidence,
+                        relevantLinks: task.relevantLinks,
+                        activeDuration: nil // recalc from span
+                    ))
+                }
+                cursor = idle.end
+            }
+
+            // Final fragment after the last idle period
+            if task.endTime.timeIntervalSince(cursor) >= minFragmentDuration {
+                result.append(TaskRecord(
+                    id: task.id,
+                    date: task.date,
+                    startTime: cursor,
+                    endTime: task.endTime,
+                    title: task.title,
+                    description: task.description,
+                    appNames: task.appNames,
+                    confidence: task.confidence,
+                    relevantLinks: task.relevantLinks,
+                    activeDuration: nil
+                ))
+            }
+        }
+
+        return result
+    }
 
     /// Consolidate idle ActivityRecords into merged time ranges.
     /// Handles unfinalized idle records (no end_time) by estimating
     /// the end from the next activity record's timestamp.
-    private static func consolidateIdlePeriods(_ activities: [ActivityRecord]) -> [(start: Date, end: Date)] {
+    private static func consolidateIdlePeriods(_ activities: [ActivityRecord], minDuration: TimeInterval) -> [(start: Date, end: Date)] {
         let sorted = activities.sorted { $0.timestamp < $1.timestamp }
 
         var idles: [(start: Date, end: Date)] = []
@@ -134,7 +224,7 @@ enum TimelineItem: Identifiable {
             }
 
             let duration = end.timeIntervalSince(record.timestamp)
-            guard duration >= minIdleDuration else { continue }
+            guard duration >= minDuration else { continue }
             idles.append((start: record.timestamp, end: end))
         }
 
@@ -352,7 +442,7 @@ struct TaskTimelineView: View {
                     .padding(.top, 16)
                     .padding(.bottom, 8)
 
-                    let timelineItems = TimelineItem.build(from: viewModel.tasks, idleActivities: viewModel.activities)
+                    let timelineItems = TimelineItem.build(from: viewModel.tasks, idleActivities: viewModel.activities, minIdleDuration: TimelineItem.settingsMinIdleDuration)
                     LazyVStack(spacing: 0) {
                         ForEach(Array(timelineItems.enumerated()), id: \.element.id) { index, item in
                             switch item {

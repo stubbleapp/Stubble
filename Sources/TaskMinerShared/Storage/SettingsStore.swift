@@ -99,6 +99,11 @@ public final class SettingsStore {
         set { update { $0.launchAtLogin = newValue } }
     }
 
+    public var minAwayMinutes: Int {
+        get { load().minAwayMinutes ?? 15 }
+        set { update { $0.minAwayMinutes = newValue } }
+    }
+
     // MARK: - Helpers
 
     private func update(_ mutate: (inout AppSettings) -> Void) {
@@ -119,6 +124,7 @@ public struct AppSettings: Codable, Equatable {
     public var showScreensTab: Bool?
     public var hasCompletedSetup: Bool?
     public var launchAtLogin: Bool?
+    public var minAwayMinutes: Int?
 
     public init(
         geminiApiKey: String? = nil,
@@ -126,7 +132,8 @@ public struct AppSettings: Codable, Equatable {
         granularity: TaskGranularity? = nil,
         showScreensTab: Bool? = nil,
         hasCompletedSetup: Bool? = nil,
-        launchAtLogin: Bool? = nil
+        launchAtLogin: Bool? = nil,
+        minAwayMinutes: Int? = nil
     ) {
         self.geminiApiKey = geminiApiKey
         self.customPrompt = customPrompt
@@ -134,5 +141,6 @@ public struct AppSettings: Codable, Equatable {
         self.showScreensTab = showScreensTab
         self.hasCompletedSetup = hasCompletedSetup
         self.launchAtLogin = launchAtLogin
+        self.minAwayMinutes = minAwayMinutes
     }
 }

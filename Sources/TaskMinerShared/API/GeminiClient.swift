@@ -279,7 +279,7 @@ public final class GeminiClient: Sendable {
     }
 
     /// Parse the Gemini response JSON and extract the text content.
-    private func parseResponseText(_ data: Data) throws -> String {
+    func parseResponseText(_ data: Data) throws -> String {
         guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
               let candidates = json["candidates"] as? [[String: Any]],
               let firstCandidate = candidates.first,
@@ -309,12 +309,12 @@ public final class GeminiClient: Sendable {
     }
 
     /// HTTP status codes that indicate a transient/retryable server issue.
-    private static func isRetryableStatusCode(_ code: Int) -> Bool {
+    static func isRetryableStatusCode(_ code: Int) -> Bool {
         code == 429 || code == 500 || code == 502 || code == 503
     }
 
     /// URLError codes that indicate transient network issues worth retrying.
-    private static func isRetryableURLError(_ error: URLError) -> Bool {
+    static func isRetryableURLError(_ error: URLError) -> Bool {
         switch error.code {
         case .timedOut, .networkConnectionLost, .notConnectedToInternet:
             return true

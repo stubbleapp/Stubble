@@ -65,11 +65,12 @@ public final class TaskSummarizer: Sendable {
         memoryContext: String? = nil,
         granularity: TaskGranularity = .medium,
         fileEvents: [String] = [],
-        calendarContext: String? = nil
+        calendarContext: String? = nil,
+        significantBreaks: [(start: Date, end: Date)] = []
     ) async throws -> SummarizationResult {
         guard !activities.isEmpty else { return SummarizationResult(tasks: [], daySummary: nil, newMemoryEntries: []) }
 
-        let prompt = buildPrompt(from: activities, granularity: granularity, fileEvents: fileEvents, calendarContext: calendarContext)
+        let prompt = buildPrompt(from: activities, granularity: granularity, fileEvents: fileEvents, calendarContext: calendarContext, significantBreaks: significantBreaks)
 
         let userRules: String
         if let custom = customPrompt?.trimmingCharacters(in: .whitespacesAndNewlines), !custom.isEmpty {
@@ -464,7 +465,8 @@ public final class TaskSummarizer: Sendable {
         from activities: [SummarizationInput],
         granularity: TaskGranularity = .medium,
         fileEvents: [String] = [],
-        calendarContext: String? = nil
+        calendarContext: String? = nil,
+        significantBreaks: [(start: Date, end: Date)] = []
     ) -> String {
         let blocks = aggregateActivities(activities)
             .filter { $0.totalDuration >= Self.minBlockDuration }
@@ -473,6 +475,9 @@ public final class TaskSummarizer: Sendable {
         let totalActiveSeconds = blocks.reduce(0.0) { $0 + $1.totalDuration }
         let totalActiveHours = totalActiveSeconds / 3600.0
         let targetTaskCount = max(1, Int(ceil(totalActiveHours * granularity.tasksPerHour)))
+
+        // Sort breaks by start time for insertion between blocks
+        let sortedBreaks = significantBreaks.sorted { $0.start < $1.start }
 
         var lines: [String] = []
         lines.append("Analyze the following desktop activity log and identify the high-level tasks.")
@@ -488,7 +493,7 @@ public final class TaskSummarizer: Sendable {
         var allBrowserURLs: [String] = []
         var allDocumentPaths: [String] = []
 
-        for block in blocks {
+        for (blockIndex, block) in blocks.enumerated() {
             let start = SharedFormatters.timeSecondsFormatter.string(from: block.startTime)
             let end = SharedFormatters.timeSecondsFormatter.string(from: block.endTime)
             let dur = "\(Int(block.totalDuration))s"
@@ -506,6 +511,20 @@ public final class TaskSummarizer: Sendable {
             }
 
             lines.append(line)
+
+            // Insert BREAK markers for significant idle periods between this block and the next
+            if !sortedBreaks.isEmpty {
+                let nextBlockStart = blockIndex + 1 < blocks.count ? blocks[blockIndex + 1].startTime : Date.distantFuture
+                for brk in sortedBreaks {
+                    // Break falls between this block's end and the next block's start
+                    if brk.start >= block.endTime && brk.start < nextBlockStart {
+                        let brkStart = SharedFormatters.timeSecondsFormatter.string(from: brk.start)
+                        let brkEnd = SharedFormatters.timeSecondsFormatter.string(from: brk.end)
+                        let mins = Int(brk.end.timeIntervalSince(brk.start) / 60)
+                        lines.append("--- BREAK [\(brkStart)–\(brkEnd)] (\(mins) min away) ---")
+                    }
+                }
+            }
 
             for url in block.browserURLs where !allBrowserURLs.contains(url) {
                 allBrowserURLs.append(url)
@@ -588,8 +607,10 @@ public final class TaskSummarizer: Sendable {
 
         Rules:
         - \(granularity.promptInstruction)
-        - CRITICAL: You MUST produce approximately \(targetTaskCount) tasks (±2). Many activity blocks belong to the same task — merge aggressively. Using an IDE and consulting AI documentation about the same project is ONE task, not two. Switching between apps frequently is normal workflow, not separate tasks.
-        - If the same project or topic appears in multiple blocks (even separated by short breaks or other apps), merge them into ONE task that spans the full time range
+        - CRITICAL: You MUST produce approximately \(targetTaskCount) tasks (±2). Many activity blocks belong to the same task — merge related blocks within the same work session. Using an IDE and consulting AI documentation about the same project is ONE task, not two. Switching between apps frequently is normal workflow, not separate tasks.
+        - BREAK markers indicate the user was away from their computer. Each work session is the activity between consecutive BREAKs (or start/end of day). Tasks MUST NOT span across BREAK markers — generate separate tasks for work before and after each break, even if the topic is the same. Use distinct titles that reflect the specific focus of each session (e.g. "Developing auth flow" before a break and "Continuing auth flow development" after).
+        - Within a session (between BREAKs), merge aggressively — if the same project or topic appears in multiple blocks (even separated by short pauses or other apps), merge them into ONE task
+        - If no BREAK markers are present, treat the entire log as one session and merge as usual
         - Only split into separate tasks when the TOPIC genuinely changes (e.g., switching from coding to email to video watching)
         - Every task title MUST be unique — never produce two tasks with the same or near-identical title
         - Titles MUST start with a present participle verb (e.g., Developing, Browsing, Watching, Reviewing, Debugging)
@@ -598,7 +619,7 @@ public final class TaskSummarizer: Sendable {
         - confidence should be 0.0-1.0 based on how certain you are
         - start_time/end_time: use the earliest start and latest end from the constituent activity blocks
         - active_seconds: the SUM of the durations (in seconds) shown in parentheses for each constituent activity block. Do NOT use end_time minus start_time — that would incorrectly include idle gaps between blocks. For example, if a task merges a 300s block and a 180s block separated by a break, active_seconds should be 480, not the full time span.
-        - Ignore idle periods
+        - Idle periods are marked with BREAK lines in the activity log — respect them as session boundaries
         - Silently skip any activity involving adult, explicit, or NSFW content — never include it in tasks or the day summary
         - relevant_links: extract any URLs (https://...) or local file paths (/Users/...) visible in the OCR text or window titles that relate to this task. Include website URLs, document links, repository URLs, and file paths. Return [] if none found. Only include real URLs/paths seen in the data, never fabricate them.
         - If there's not enough information, return {"tasks": [], "day_summary": null}

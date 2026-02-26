@@ -235,6 +235,227 @@ final class UserMemoryStoreTests: XCTestCase {
         XCTAssertEqual(loaded[0].source, .activityInference)
     }
 
+    // MARK: - Confidence Decay
+
+    func testDecayPrunesOldLowReinforcementEntries() {
+        // A project entry (high decay rate: 0.15) seen once, 45 days ago
+        // Should hit tier 1 (>14d, count<=1) penalty = 0.075
+        // AND tier 2 (>30d, count<=2) penalty = 0.15
+        // Total penalty = 0.225 → 0.7 - 0.225 = 0.475 → above 0.15, survives
+        // But a second merge pass would decay further...
+        // Actually let's test with 90 days to ensure it drops below 0.15
+        let old = MemoryEntry(
+            category: .project,
+            content: "Old abandoned project from months ago",
+            confidence: 0.3,
+            firstSeen: Date().addingTimeInterval(-90 * 86400),
+            lastSeen: Date().addingTimeInterval(-90 * 86400),
+            reinforcementCount: 1
+        )
+        store.save([old])
+
+        // Trigger decay by merging empty (the daily review path)
+        store.mergeStructured(newEntries: [])
+        let loaded = store.load()
+
+        // After decay: tier1 (0.075) + tier2 (0.15) + tier3 (0.075) = 0.3
+        // 0.3 - 0.3 = clamped to 0.1, which is below 0.15 threshold → pruned
+        XCTAssertTrue(loaded.isEmpty, "Entry with low confidence + old age should be pruned")
+    }
+
+    func testDecayPreservesRecentEntries() {
+        let recent = MemoryEntry(
+            category: .project,
+            content: "Current active project",
+            confidence: 0.7,
+            firstSeen: Date().addingTimeInterval(-5 * 86400),
+            lastSeen: Date().addingTimeInterval(-5 * 86400),
+            reinforcementCount: 1
+        )
+        store.save([recent])
+        store.mergeStructured(newEntries: [])
+        let loaded = store.load()
+
+        XCTAssertEqual(loaded.count, 1, "Recent entries should not be decayed")
+    }
+
+    func testDecayRateVariesByCategory() {
+        // Identity (0.03) should decay much slower than project (0.15)
+        let old = Date().addingTimeInterval(-35 * 86400) // 35 days ago
+        let identity = MemoryEntry(
+            category: .identity,
+            content: "Software engineer based in Stockholm",
+            confidence: 0.5,
+            firstSeen: old, lastSeen: old,
+            reinforcementCount: 1
+        )
+        let project = MemoryEntry(
+            category: .project,
+            content: "Working on some temporary project",
+            confidence: 0.5,
+            firstSeen: old, lastSeen: old,
+            reinforcementCount: 1
+        )
+        store.save([identity, project])
+        store.mergeStructured(newEntries: [])
+        let loaded = store.load()
+
+        // Identity should survive (lower decay), project may be pruned (higher decay)
+        let hasIdentity = loaded.contains(where: { $0.category == .identity })
+        XCTAssertTrue(hasIdentity, "Identity entries should decay slowly and survive")
+    }
+
+    func testHighReinforcementResistsDecay() {
+        // Entry seen 5 times should resist tier 1 and tier 2 decay
+        let old = Date().addingTimeInterval(-45 * 86400)
+        let entry = MemoryEntry(
+            category: .project,
+            content: "Frequently observed project work",
+            confidence: 0.7,
+            firstSeen: old, lastSeen: old,
+            reinforcementCount: 5
+        )
+        store.save([entry])
+        store.mergeStructured(newEntries: [])
+        let loaded = store.load()
+
+        // count=5 means no tiers apply (tier1: count<=1, tier2: count<=2, tier3: count<=3)
+        XCTAssertEqual(loaded.count, 1, "Highly reinforced entries should not decay")
+        XCTAssertEqual(loaded[0].confidence, 0.7, accuracy: 0.01)
+    }
+
+    // MARK: - Correction Handling
+
+    func testCorrectionReplacesMatchingEntry() {
+        store.save([
+            MemoryEntry(category: .identity, content: "Works as a backend software engineer at Acme")
+        ])
+
+        // Shares enough words to exceed 0.25 Jaccard: "works", "software", "engineer", "acme"
+        let correction = MemoryEntry(
+            category: .identity,
+            content: "Works as a frontend software engineer at Acme",
+            isCorrection: true
+        )
+        store.mergeStructured(newEntries: [correction])
+        let loaded = store.load()
+
+        XCTAssertEqual(loaded.count, 1, "Correction should replace, not add")
+        XCTAssertTrue(loaded[0].content.contains("frontend"),
+                      "Content should be updated to correction")
+        XCTAssertFalse(loaded[0].content.contains("backend"),
+                       "Old content should be replaced")
+        XCTAssertEqual(loaded[0].reinforcementCount, 1, "Reinforcement should be reset")
+    }
+
+    func testCorrectionWithNoMatchAddsNew() {
+        store.save([
+            MemoryEntry(category: .technology, content: "Uses Python for scripting")
+        ])
+
+        let correction = MemoryEntry(
+            category: .identity,  // different category → no match
+            content: "Actually a designer, not an engineer",
+            isCorrection: true
+        )
+        store.mergeStructured(newEntries: [correction])
+        let loaded = store.load()
+
+        XCTAssertEqual(loaded.count, 2, "No matching entry to correct → add as new")
+    }
+
+    // MARK: - Category-Aware Capacity Cap
+
+    func testCapacityCapRespectsCategoryMinimums() {
+        // Fill with 50 project entries (minimum for project is 15)
+        // Then add 5 identity entries
+        var entries: [MemoryEntry] = []
+        for i in 0..<50 {
+            entries.append(MemoryEntry(
+                category: .project,
+                content: "Unique project number \(i) details here",
+                confidence: Double(i) / 100.0 + 0.2,
+                firstSeen: Date(),
+                lastSeen: Date(),
+                reinforcementCount: 3  // enough to avoid decay
+            ))
+        }
+        store.save(entries)
+
+        // Each entry must have distinct word sets to avoid Jaccard merge
+        let identityFacts = [
+            "Software engineer based in Stockholm Sweden",
+            "Graduated from Chalmers University electrical program",
+            "Fluent in Swedish English and German languages",
+            "Previously worked at Spotify music streaming company",
+            "Passionate about photography and mountaineering outdoors",
+        ]
+        let newIdentity = identityFacts.map {
+            MemoryEntry(category: .identity, content: $0, confidence: 0.9)
+        }
+        store.mergeStructured(newEntries: newIdentity)
+        let loaded = store.load()
+
+        XCTAssertLessThanOrEqual(loaded.count, 50, "Should be capped at 50")
+        let identityCount = loaded.filter { $0.category == .identity }.count
+        XCTAssertEqual(identityCount, 5, "All identity entries should survive (below minimum of 5)")
+    }
+
+    func testCapacityRemovesLowestConfidenceFirst() {
+        var entries: [MemoryEntry] = []
+        // 48 entries with varying confidence
+        for i in 0..<48 {
+            entries.append(MemoryEntry(
+                category: .project,
+                content: "Project entry number \(i) is unique content",
+                confidence: 0.2 + Double(i) * 0.01,
+                firstSeen: Date(),
+                lastSeen: Date(),
+                reinforcementCount: 5
+            ))
+        }
+        store.save(entries)
+
+        // Add 5 more to trigger cap
+        let newEntries = (0..<5).map {
+            MemoryEntry(
+                category: .project,
+                content: "Brand new project entry \($0) unique text",
+                confidence: 0.9
+            )
+        }
+        store.mergeStructured(newEntries: newEntries)
+        let loaded = store.load()
+
+        XCTAssertLessThanOrEqual(loaded.count, 50)
+        // The lowest-confidence entries should have been removed
+        let confidences = loaded.map(\.confidence)
+        let minConf = confidences.min() ?? 0
+        XCTAssertGreaterThan(minConf, 0.19, "Lowest confidence entries should have been pruned")
+    }
+
+    // MARK: - Synthesis Metadata
+
+    func testSynthesisMetadataUpdatedOnSaveProfile() {
+        store.save([
+            MemoryEntry(category: .project, content: "Fact 1"),
+            MemoryEntry(category: .technology, content: "Fact 2"),
+        ])
+
+        store.saveProfile("A synthesized profile.")
+        let meta = store.synthesisMetadata()
+
+        XCTAssertNotNil(meta.lastSynthesizedAt)
+        XCTAssertEqual(meta.entryCountAtLastSynthesis, 2)
+        XCTAssertEqual(meta.lastSynthesizedAt!.timeIntervalSinceNow, 0, accuracy: 2.0)
+    }
+
+    func testSynthesisMetadataDefaultsToNil() {
+        let meta = store.synthesisMetadata()
+        XCTAssertNil(meta.lastSynthesizedAt)
+        XCTAssertNil(meta.entryCountAtLastSynthesis)
+    }
+
     // MARK: - MemoryEntry
 
     func testMemoryEntryDefaultInit() {

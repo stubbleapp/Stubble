@@ -130,9 +130,10 @@ final class TaskSummarizerParsingTests: XCTestCase {
         XCTAssertEqual(blocks[0].windowTitles.count, 1, "Duplicate window titles should be deduplicated")
     }
 
-    func testLimitsOCRSamplesToThree() {
+    func testLimitsOCRSamplesPerBlock() {
         let base = Date()
-        let activities = (0..<5).map { i in
+        // Use 7 activities so the cap (5) is actually exercised
+        let activities = (0..<7).map { i in
             SummarizationInput(
                 appName: "Xcode",
                 bundleId: nil,
@@ -147,7 +148,8 @@ final class TaskSummarizerParsingTests: XCTestCase {
         let blocks = summarizer.aggregateActivities(activities)
 
         XCTAssertEqual(blocks.count, 1)
-        XCTAssertLessThanOrEqual(blocks[0].ocrSamples.count, 3, "OCR samples should be capped at 3")
+        XCTAssertLessThanOrEqual(blocks[0].ocrSamples.count, 5, "OCR samples should be capped at 5 per block")
+        XCTAssertEqual(blocks[0].ocrSamples.count, 5, "All 5 sample slots should be filled from 7 inputs")
     }
 
     func testEmptyActivitiesReturnsEmptyBlocks() {

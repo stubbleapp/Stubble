@@ -68,4 +68,9 @@ final class SettingsManager {
         get { store?.launchAtLogin ?? true }
         set { store?.launchAtLogin = newValue }
     }
+
+    var minAwayMinutes: Int {
+        get { store?.minAwayMinutes ?? 15 }
+        set { store?.minAwayMinutes = newValue }
+    }
 }

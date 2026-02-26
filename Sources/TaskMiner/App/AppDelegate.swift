@@ -541,6 +541,10 @@ class AppDelegate {
         let memoryStore = UserMemoryStore(filePath: self.config.shared.memoryPath)
         let memoryContext = memoryStore.contextString()
 
+        // Compute significant idle breaks for session-aware task generation
+        let minAwaySeconds = TimeInterval((cliSettings?.minAwayMinutes ?? 15) * 60)
+        let significantBreaks = Self.consolidateIdleBreaks(from: activityData, minDuration: minAwaySeconds)
+
         let db = self.db
         let dateStr = todayString()
         Task {
@@ -552,7 +556,8 @@ class AppDelegate {
                     memoryContext: memoryContext,
                     granularity: cliSettings?.granularity ?? .medium,
                     fileEvents: fileEvents,
-                    calendarContext: calContext
+                    calendarContext: calContext,
+                    significantBreaks: significantBreaks
                 )
                 guard !result.tasks.isEmpty else { return }
                 await MainActor.run {
@@ -599,6 +604,48 @@ class AppDelegate {
     private struct CLISettings: Codable {
         var customPrompt: String?
         var granularity: TaskGranularity?
+        var minAwayMinutes: Int?
+    }
+
+    /// Consolidate idle activities into merged break periods, filtering by minimum duration.
+    /// Handles unfinalized idle records (no duration) by estimating end from the next non-idle activity.
+    static func consolidateIdleBreaks(
+        from activities: [SummarizationInput],
+        minDuration: TimeInterval
+    ) -> [(start: Date, end: Date)] {
+        let sorted = activities.sorted { $0.timestamp < $1.timestamp }
+
+        var idles: [(start: Date, end: Date)] = []
+        for (i, activity) in sorted.enumerated() {
+            guard activity.isIdle else { continue }
+
+            let end: Date
+            if let dur = activity.duration, dur > 0 {
+                end = activity.timestamp.addingTimeInterval(dur)
+            } else {
+                // Unfinalized idle record — estimate end from the next non-idle activity
+                let nextNonIdle = sorted.dropFirst(i + 1).first { !$0.isIdle }
+                end = nextNonIdle?.timestamp ?? activity.timestamp
+            }
+
+            let duration = end.timeIntervalSince(activity.timestamp)
+            guard duration >= minDuration else { continue }
+            idles.append((start: activity.timestamp, end: end))
+        }
+
+        guard !idles.isEmpty else { return [] }
+
+        // Merge overlapping/adjacent idle periods
+        var merged: [(start: Date, end: Date)] = [idles[0]]
+        for idle in idles.dropFirst() {
+            if idle.start <= merged[merged.count - 1].end {
+                merged[merged.count - 1].end = max(merged[merged.count - 1].end, idle.end)
+            } else {
+                merged.append(idle)
+            }
+        }
+
+        return merged
     }
 
     // MARK: - Helpers

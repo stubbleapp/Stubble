@@ -15,6 +15,7 @@ struct SettingsView: View {
     @State private var showMemorySection = false
     @State private var newMemoryContent: String = ""
     @State private var newMemoryCategory: MemoryCategory = .workflow
+    @State private var minAwayMinutes: Int = 15
 
     var body: some View {
         ScrollView {
@@ -117,6 +118,25 @@ struct SettingsView: View {
                         .foregroundStyle(Theme.textMuted)
                 }
 
+                // Minimum Away Duration
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Minimum Away Duration")
+                        .font(.subheadline.weight(.medium))
+                        .foregroundStyle(Theme.textPrimary)
+
+                    Stepper(
+                        "\(minAwayMinutes) minutes",
+                        value: $minAwayMinutes,
+                        in: 5...60,
+                        step: 5
+                    )
+                    .accessibilityIdentifier("settings-min-away")
+
+                    Text("Away periods shorter than this are hidden in the timeline. Tasks are generated per work session separated by these breaks.")
+                        .font(.caption2)
+                        .foregroundStyle(Theme.textMuted)
+                }
+
                 // Memory / Learned Context
                 VStack(alignment: .leading, spacing: 8) {
                     Button {
@@ -200,6 +220,7 @@ struct SettingsView: View {
             showKey = !apiKey.isEmpty
             customPrompt = SettingsManager.shared.customPrompt ?? ""
             granularity = SettingsManager.shared.granularity
+            minAwayMinutes = SettingsManager.shared.minAwayMinutes
             loadMemoryEntries()
         }
         .onChange(of: apiKey) {
@@ -214,6 +235,11 @@ struct SettingsView: View {
         .onChange(of: granularity) {
             SettingsManager.shared.granularity = granularity
             Analytics.settingChanged("granularity", value: granularity.displayName)
+            showSavedIndicator()
+        }
+        .onChange(of: minAwayMinutes) {
+            SettingsManager.shared.minAwayMinutes = minAwayMinutes
+            Analytics.settingChanged("minAwayMinutes", value: "\(minAwayMinutes)")
             showSavedIndicator()
         }
         .alert("Clear All Data?", isPresented: $showClearConfirmation) {

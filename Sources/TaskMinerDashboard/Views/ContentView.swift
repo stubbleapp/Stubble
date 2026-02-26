@@ -27,7 +27,7 @@ struct ContentView: View {
         var items = ["Day", "Stubs"]
         if showDebugTabs {
             items.append("Me")
-            items.append("Screens")
+            items.append("Log")
         }
         return items
     }
@@ -63,7 +63,7 @@ struct ContentView: View {
                 case 2:
                     MeView()
                 default:
-                    ScreenshotBrowserView()
+                    ActivityLogView()
                 }
 
                 // Single chat overlay shared across all tabs (except Screens)
@@ -142,7 +142,7 @@ struct ContentView: View {
                 }
             }
             // Keep ViewModel's currentScreen in sync so chat context knows which tab is active
-            let screenNames = ["Day", "Stubs", "Me", "Screens"]
+            let screenNames = ["Day", "Stubs", "Me", "Log"]
             viewModel.currentScreen = newTab < screenNames.count ? screenNames[newTab] : "Stubs"
         }
     }

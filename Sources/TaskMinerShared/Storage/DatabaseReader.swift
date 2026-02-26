@@ -231,7 +231,8 @@ public class DatabaseReader {
     public func activities(for date: Date) -> [ActivityRecord] {
         let range = dateRange(for: date)
         let sql = """
-        SELECT id, timestamp, end_time, app_name, bundle_id, window_title, duration, is_idle
+        SELECT id, timestamp, end_time, app_name, bundle_id, window_title, duration, is_idle,
+               browser_url, document_path, focused_element_role
         FROM activities
         WHERE timestamp >= ? AND timestamp < ?
         ORDER BY timestamp ASC
@@ -253,7 +254,10 @@ public class DatabaseReader {
                 bundleId: sqlite3_column_text(stmt, 4).map({ String(cString: $0) }),
                 windowTitle: sqlite3_column_text(stmt, 5).map({ String(cString: $0) }),
                 duration: sqlite3_column_type(stmt, 6) != SQLITE_NULL ? sqlite3_column_double(stmt, 6) : nil,
-                isIdle: sqlite3_column_int(stmt, 7) != 0
+                isIdle: sqlite3_column_int(stmt, 7) != 0,
+                browserURL: sqlite3_column_text(stmt, 8).map({ String(cString: $0) }),
+                documentPath: sqlite3_column_text(stmt, 9).map({ String(cString: $0) }),
+                focusedElementRole: sqlite3_column_text(stmt, 10).map({ String(cString: $0) })
             )
             results.append(record)
         }
@@ -288,6 +292,37 @@ public class DatabaseReader {
                 activityId: sqlite3_column_type(stmt, 4) != SQLITE_NULL ? sqlite3_column_int64(stmt, 4) : nil,
                 trigger: ScreenshotTrigger(rawValue: triggerStr) ?? .manual,
                 ocrText: sqlite3_column_text(stmt, 6).map({ String(cString: $0) })
+            )
+            results.append(record)
+        }
+        return results
+    }
+
+    // MARK: - File Events
+
+    public func fileEvents(for date: Date) -> [FileEventRecord] {
+        let range = dateRange(for: date)
+        let sql = """
+        SELECT id, timestamp, file_path, event_type, activity_id
+        FROM file_events
+        WHERE timestamp >= ? AND timestamp < ?
+        ORDER BY timestamp ASC
+        """
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return [] }
+        defer { sqlite3_finalize(stmt) }
+
+        sqliteBindText(stmt, 1, range.start)
+        sqliteBindText(stmt, 2, range.end)
+
+        var results: [FileEventRecord] = []
+        while sqlite3_step(stmt) == SQLITE_ROW {
+            let record = FileEventRecord(
+                id: sqlite3_column_int64(stmt, 0),
+                timestamp: sqlite3_column_text(stmt, 1).flatMap({ SharedFormatters.iso8601.date(from: String(cString: $0)) }) ?? Date(),
+                filePath: sqlite3_column_text(stmt, 2).map({ String(cString: $0) }) ?? "",
+                eventType: sqlite3_column_text(stmt, 3).map({ String(cString: $0) }) ?? "modified",
+                activityId: sqlite3_column_type(stmt, 4) != SQLITE_NULL ? sqlite3_column_int64(stmt, 4) : nil
             )
             results.append(record)
         }
@@ -656,6 +691,7 @@ public class DatabaseReader {
         sqlite3_exec(db, "DELETE FROM chat_messages", nil, nil, nil)
         sqlite3_exec(db, "DELETE FROM stubs_content", nil, nil, nil)
         sqlite3_exec(db, "DELETE FROM ocr_digests", nil, nil, nil)
+        sqlite3_exec(db, "DELETE FROM file_events", nil, nil, nil)
 
         Logger.info("Cleared all data from 8 tables (\(paths.count) screenshot files)")
         return paths
