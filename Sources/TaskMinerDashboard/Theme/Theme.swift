@@ -53,34 +53,34 @@ enum Theme {
 
     // MARK: - Backgrounds
 
-    /// Primary background — main content area (light cream).
+    /// Primary background — main content area (light cream / dark #292929).
     static let primaryBackground = adaptive(
         light: NSColor(red: 0.976, green: 0.973, blue: 0.961, alpha: 1),   // #F9F8F5 — warm cream
-        dark: NSColor(red: 0.102, green: 0.102, blue: 0.106, alpha: 1)
+        dark: NSColor(red: 0.161, green: 0.161, blue: 0.161, alpha: 1)     // RGB(41,41,41) — #292929
     )
 
-    /// Secondary background — toolbars, sidebars, input areas (RGB 247,247,243).
+    /// Secondary background — toolbars, sidebars, input areas.
     static let secondaryBackground = adaptive(
         light: NSColor(red: 0.969, green: 0.969, blue: 0.953, alpha: 1),   // #F7F7F3 — user-specified
-        dark: NSColor(red: 0.145, green: 0.145, blue: 0.153, alpha: 1)
+        dark: NSColor(red: 0.161, green: 0.161, blue: 0.161, alpha: 1)     // RGB(41,41,41) — matches primary
     )
 
     /// Elevated surface — segmented controls, group headers.
     static let surfaceElevated = adaptive(
         light: NSColor(red: 0.92, green: 0.918, blue: 0.902, alpha: 1),    // warm elevated
-        dark: NSColor(red: 0.173, green: 0.173, blue: 0.18, alpha: 1)
+        dark: NSColor(red: 0.208, green: 0.208, blue: 0.208, alpha: 1)     // RGB(53,53,53)
     )
 
     /// Card / bubble background (warm white).
     static let cardBackground = adaptive(
         light: NSColor(red: 0.995, green: 0.993, blue: 0.985, alpha: 1),   // warm white
-        dark: NSColor(red: 0.20, green: 0.20, blue: 0.21, alpha: 1)
+        dark: NSColor(red: 0.231, green: 0.231, blue: 0.231, alpha: 1)     // RGB(59,59,59)
     )
 
     /// Selected item background (warm white).
     static let selectedSurface = adaptive(
         light: NSColor(red: 0.995, green: 0.993, blue: 0.985, alpha: 1),   // warm white
-        dark: NSColor(red: 0.28, green: 0.28, blue: 0.29, alpha: 1)
+        dark: NSColor(red: 0.298, green: 0.298, blue: 0.298, alpha: 1)     // RGB(76,76,76)
     )
 
     // MARK: - Text
