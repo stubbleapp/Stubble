@@ -399,4 +399,6 @@ final class MenuBarDelegate: NSObject, NSApplicationDelegate {
 extension Notification.Name {
     /// Posted by the setup wizard when the user completes initial setup.
     static let setupWizardCompleted = Notification.Name("setupWizardCompleted")
+    /// Posted by SettingsView when the appearance mode changes.
+    static let appearanceModeChanged = Notification.Name("appearanceModeChanged")
 }

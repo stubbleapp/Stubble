@@ -234,6 +234,26 @@ extension DashboardViewModel {
             }
         }
 
+        // Granola meetings
+        if !granolaMeetings.isEmpty {
+            lines.append("")
+            lines.append("Meetings (from Granola):")
+            for meeting in granolaMeetings.prefix(8) {
+                let start = SharedFormatters.timeFormatter.string(from: meeting.startTime)
+                let end = SharedFormatters.timeFormatter.string(from: meeting.endTime)
+                lines.append("- [\(start)–\(end)] \(meeting.title) (\(meeting.formattedDuration))")
+                if meeting.attendeeCount > 0 {
+                    lines.append("  Attendees: \(meeting.attendeeNames.joined(separator: ", "))")
+                }
+                if let summary = meeting.summary, !summary.isEmpty {
+                    lines.append("  Summary: \(String(summary.prefix(500)))")
+                }
+                if let notes = meeting.notesForPrompt(maxChars: 500) {
+                    lines.append("  Notes: \(notes)")
+                }
+            }
+        }
+
         // OCR-derived screen content (what was actually visible on screen)
         if let digest = loadOrBuildOCRDigest(), !digest.isEmpty {
             lines.append("")

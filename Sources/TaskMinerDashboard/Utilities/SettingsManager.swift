@@ -80,4 +80,9 @@ final class SettingsManager {
         get { store?.exclusions ?? ["Exclude adult, explicit, or NSFW content"] }
         set { store?.exclusions = newValue }
     }
+
+    var appearanceMode: AppearanceMode {
+        get { store?.appearanceMode ?? .system }
+        set { store?.appearanceMode = newValue }
+    }
 }

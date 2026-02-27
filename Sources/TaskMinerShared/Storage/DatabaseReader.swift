@@ -39,7 +39,7 @@ public class DatabaseReader {
     }
 
     /// Current schema version. Bump this when adding new migrations.
-    private static let schemaVersion = 11
+    private static let schemaVersion = 12
 
     /// Apply schema migrations so the dashboard works even if the CLI hasn't run yet.
     /// Uses PRAGMA user_version to track which migrations have already run.
@@ -206,6 +206,33 @@ public class DatabaseReader {
             }
         }
 
+        if currentVersion < 12 {
+            let granolaSql = """
+            CREATE TABLE IF NOT EXISTS granola_meetings (
+                id                INTEGER PRIMARY KEY AUTOINCREMENT,
+                granola_id        TEXT NOT NULL UNIQUE,
+                title             TEXT NOT NULL,
+                meeting_date      TEXT NOT NULL,
+                start_time        TEXT NOT NULL,
+                end_time          TEXT NOT NULL,
+                duration          REAL NOT NULL DEFAULT 0,
+                attendees_json    TEXT DEFAULT '[]',
+                organizer         TEXT,
+                notes_plain       TEXT,
+                transcript_text   TEXT,
+                summary           TEXT,
+                meeting_url       TEXT,
+                source_updated_at TEXT NOT NULL,
+                imported_at       TEXT NOT NULL
+            )
+            """
+            if !execMigration(granolaSql, label: "12: create granola_meetings table") {
+                migrationFailed = true
+            }
+            sqlite3_exec(db, "CREATE INDEX IF NOT EXISTS idx_granola_meetings_date ON granola_meetings(meeting_date)", nil, nil, nil)
+            sqlite3_exec(db, "CREATE INDEX IF NOT EXISTS idx_granola_meetings_granola_id ON granola_meetings(granola_id)", nil, nil, nil)
+        }
+
         // Only bump the version if all migrations succeeded — failed migrations
         // will be retried on the next launch.
         if migrationFailed {
@@ -350,6 +377,47 @@ public class DatabaseReader {
                 activityId: sqlite3_column_type(stmt, 4) != SQLITE_NULL ? sqlite3_column_int64(stmt, 4) : nil
             )
             results.append(record)
+        }
+        return results
+    }
+
+    // MARK: - Granola Meetings
+
+    public func granolaMeetings(for date: Date) -> [GranolaMeetingRecord] {
+        let dateStr = SharedFormatters.dayFormatter.string(from: date)
+        let sql = """
+        SELECT id, granola_id, title, meeting_date, start_time, end_time, duration,
+               attendees_json, organizer, notes_plain, transcript_text, summary,
+               meeting_url, source_updated_at, imported_at
+        FROM granola_meetings
+        WHERE meeting_date = ?
+        ORDER BY start_time ASC
+        """
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return [] }
+        defer { sqlite3_finalize(stmt) }
+
+        sqliteBindText(stmt, 1, dateStr)
+
+        var results: [GranolaMeetingRecord] = []
+        while sqlite3_step(stmt) == SQLITE_ROW {
+            results.append(GranolaMeetingRecord(
+                id: sqlite3_column_int64(stmt, 0),
+                granolaId: sqlite3_column_text(stmt, 1).map { String(cString: $0) } ?? "",
+                title: sqlite3_column_text(stmt, 2).map { String(cString: $0) } ?? "",
+                meetingDate: sqlite3_column_text(stmt, 3).map { String(cString: $0) } ?? "",
+                startTime: sqlite3_column_text(stmt, 4).flatMap { SharedFormatters.iso8601.date(from: String(cString: $0)) } ?? Date(),
+                endTime: sqlite3_column_text(stmt, 5).flatMap { SharedFormatters.iso8601.date(from: String(cString: $0)) } ?? Date(),
+                duration: sqlite3_column_double(stmt, 6),
+                attendeesJson: sqlite3_column_text(stmt, 7).map { String(cString: $0) } ?? "[]",
+                organizer: sqlite3_column_text(stmt, 8).map { String(cString: $0) },
+                notesPlain: sqlite3_column_text(stmt, 9).map { String(cString: $0) },
+                transcriptText: sqlite3_column_text(stmt, 10).map { String(cString: $0) },
+                summary: sqlite3_column_text(stmt, 11).map { String(cString: $0) },
+                meetingURL: sqlite3_column_text(stmt, 12).map { String(cString: $0) },
+                sourceUpdatedAt: sqlite3_column_text(stmt, 13).map { String(cString: $0) } ?? "",
+                importedAt: sqlite3_column_text(stmt, 14).flatMap { SharedFormatters.iso8601.date(from: String(cString: $0)) } ?? Date()
+            ))
         }
         return results
     }
@@ -739,8 +807,9 @@ public class DatabaseReader {
         sqlite3_exec(db, "DELETE FROM ocr_digests", nil, nil, nil)
         sqlite3_exec(db, "DELETE FROM file_events", nil, nil, nil)
         sqlite3_exec(db, "DELETE FROM habits_analysis", nil, nil, nil)
+        sqlite3_exec(db, "DELETE FROM granola_meetings", nil, nil, nil)
 
-        Logger.info("Cleared all data from 10 tables (\(paths.count) screenshot files)")
+        Logger.info("Cleared all data from 11 tables (\(paths.count) screenshot files)")
         return paths
     }
 

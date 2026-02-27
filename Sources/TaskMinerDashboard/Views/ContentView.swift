@@ -15,20 +15,18 @@ struct ContentView: View {
 
     /// Tracks whether the Option (⌥) key is currently held down.
     @State private var optionKeyHeld = false
-    /// The debug tabs (Me, Screens) are visible when Option is held OR while the user is on one.
+    /// The debug tab (Log) is visible when Option is held OR while the user is on it.
     @State private var showDebugTabs = false
     /// NSEvent monitor reference so we can remove it on disappear.
     @State private var flagsMonitor: Any?
 
     private let stubsTabIndex = 1
     private let habitsTabIndex = 2
-    private let meTabIndex = 3
-    private let screensTabIndex = 4
+    private let logTabIndex = 3
 
     private var tabItems: [String] {
         var items = ["Day", "Stubs", "Habits"]
         if showDebugTabs {
-            items.append("Me")
             items.append("Log")
         }
         return items
@@ -67,19 +65,17 @@ struct ContentView: View {
                     RecommendationsView()
                 case 2:
                     HabitsView()
-                case 3:
-                    MeView()
                 default:
                     ActivityLogView()
                 }
 
                 // Single chat overlay shared across all tabs (except Log)
-                if selectedTab < 4 {
+                if selectedTab < logTabIndex {
                     ChatOverlayView()
                 }
             }
         }
-        .background(Theme.primaryBackground)
+        .background(Theme.secondaryBackground)
         .toolbarBackground(Theme.secondaryBackground, for: .automatic)
         .toolbar {
             ToolbarItem(placement: .principal) {
@@ -97,18 +93,17 @@ struct ContentView: View {
             }
         }
         .onAppear {
-            // Monitor Option key press/release to reveal the hidden Screens tab
+            // Monitor Option key press/release to reveal the hidden Log tab
             flagsMonitor = NSEvent.addLocalMonitorForEvents(matching: .flagsChanged) { event in
                 let isOption = event.modifierFlags.contains(.option)
                 if isOption != optionKeyHeld {
                     optionKeyHeld = isOption
                     if isOption {
-                        // Option pressed → reveal Screens tab
                         withAnimation(.easeInOut(duration: 0.15)) {
                             showDebugTabs = true
                         }
-                    } else if selectedTab != meTabIndex && selectedTab != screensTabIndex {
-                        // Option released while NOT on a debug tab → hide them
+                    } else if selectedTab != logTabIndex {
+                        // Option released while NOT on the debug tab → hide it
                         withAnimation(.easeInOut(duration: 0.15)) {
                             showDebugTabs = false
                         }
@@ -124,8 +119,8 @@ struct ContentView: View {
             }
         }
         .onChange(of: selectedTab) { _, newTab in
-            // User navigated away from debug tabs → hide them (unless Option still held)
-            if newTab != meTabIndex && newTab != screensTabIndex && !optionKeyHeld {
+            // User navigated away from the debug tab → hide it (unless Option still held)
+            if newTab != logTabIndex && !optionKeyHeld {
                 withAnimation(.easeInOut(duration: 0.15)) {
                     showDebugTabs = false
                 }
@@ -135,7 +130,7 @@ struct ContentView: View {
                 viewModel.selectDate(Date())
             }
             // Keep ViewModel's currentScreen in sync so chat context knows which tab is active
-            let screenNames = ["Day", "Stubs", "Habits", "Me", "Log"]
+            let screenNames = ["Day", "Stubs", "Habits", "Log"]
             viewModel.currentScreen = newTab < screenNames.count ? screenNames[newTab] : "Stubs"
         }
     }

@@ -8,7 +8,16 @@ struct DashboardApp: App {
     @NSApplicationDelegateAdaptor(MenuBarDelegate.self) var appDelegate
     @State private var viewModel = DashboardViewModel()
     @State private var hasCompletedSetup = SettingsManager.shared.hasCompletedSetup
+    @State private var appearanceMode = SettingsManager.shared.appearanceMode
     @StateObject private var updater = SoftwareUpdater()
+
+    private var colorScheme: ColorScheme? {
+        switch appearanceMode {
+        case .system: return nil
+        case .light: return .light
+        case .dark: return .dark
+        }
+    }
 
     /// Guard against SwiftUI calling init() multiple times on this struct.
     private static var didInitialize = false
@@ -56,6 +65,10 @@ struct DashboardApp: App {
             .environment(viewModel)
             .environmentObject(updater)
             .tint(Theme.accent)
+            .preferredColorScheme(colorScheme)
+            .onReceive(NotificationCenter.default.publisher(for: .appearanceModeChanged)) { _ in
+                appearanceMode = SettingsManager.shared.appearanceMode
+            }
         }
         .defaultSize(width: hasCompletedSetup ? 1100 : 560, height: hasCompletedSetup ? 750 : 480)
         .windowResizability(.contentSize)
@@ -84,6 +97,10 @@ struct DashboardApp: App {
             SettingsView()
                 .environment(viewModel)
                 .tint(Theme.accent)
+                .preferredColorScheme(colorScheme)
+                .onReceive(NotificationCenter.default.publisher(for: .appearanceModeChanged)) { _ in
+                    appearanceMode = SettingsManager.shared.appearanceMode
+                }
         }
         .windowStyle(.titleBar)
         .windowToolbarStyle(.unified(showsTitle: false))

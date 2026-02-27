@@ -57,6 +57,7 @@ struct SettingsView: View {
     @State private var customPrompt: String = ""
     @State private var granularity: TaskGranularity = .medium
     @State private var minAwayMinutes: Int = 15
+    @State private var appearanceMode: AppearanceMode = .system
 
     // Exclusions
     @State private var exclusions: [String] = []
@@ -172,6 +173,7 @@ struct SettingsView: View {
         customPrompt = SettingsManager.shared.customPrompt ?? ""
         granularity = SettingsManager.shared.granularity
         minAwayMinutes = SettingsManager.shared.minAwayMinutes
+        appearanceMode = SettingsManager.shared.appearanceMode
         exclusions = SettingsManager.shared.exclusions
         loadMemoryEntries()
     }
@@ -182,7 +184,9 @@ struct SettingsView: View {
         SettingsManager.shared.customPrompt = trimmedPrompt.isEmpty ? nil : trimmedPrompt
         SettingsManager.shared.granularity = granularity
         SettingsManager.shared.minAwayMinutes = minAwayMinutes
+        SettingsManager.shared.appearanceMode = appearanceMode
         SettingsManager.shared.exclusions = exclusions
+        NotificationCenter.default.post(name: .appearanceModeChanged, object: nil)
         showSavedIndicator()
     }
 
@@ -197,6 +201,44 @@ struct SettingsView: View {
 
     private var generalPane: some View {
         VStack(alignment: .leading, spacing: 24) {
+            // Appearance
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Appearance")
+                    .font(.subheadline.weight(.medium))
+                    .foregroundStyle(Theme.textPrimary)
+
+                HStack(spacing: 0) {
+                    ForEach(AppearanceMode.allCases, id: \.self) { mode in
+                        Button {
+                            withAnimation(.easeInOut(duration: 0.15)) {
+                                appearanceMode = mode
+                            }
+                        } label: {
+                            HStack(spacing: 5) {
+                                Image(systemName: appearanceIcon(mode))
+                                    .font(.system(size: 10))
+                                Text(mode.displayName)
+                                    .font(.system(size: 12, weight: appearanceMode == mode ? .semibold : .regular))
+                            }
+                            .foregroundStyle(appearanceMode == mode ? Theme.textPrimary : Theme.textSecondary)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 7)
+                            .background(
+                                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                                    .fill(appearanceMode == mode ? Theme.selectedSurface : Color.clear)
+                            )
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .padding(3)
+                .background(
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .fill(Theme.surfaceElevated)
+                )
+            }
+
             // API Key
             VStack(alignment: .leading, spacing: 8) {
                 Text("Gemini API Key")
@@ -621,5 +663,13 @@ struct SettingsView: View {
         if days == 0 { return "today" }
         if days == 1 { return "yesterday" }
         return "\(days)d ago"
+    }
+
+    private func appearanceIcon(_ mode: AppearanceMode) -> String {
+        switch mode {
+        case .system: return "circle.lefthalf.filled"
+        case .light: return "sun.max"
+        case .dark: return "moon"
+        }
     }
 }

@@ -77,11 +77,12 @@ public final class TaskSummarizer: Sendable {
         calendarContext: String? = nil,
         significantBreaks: [(start: Date, end: Date)] = [],
         recentProjectNames: [String] = [],
-        exclusions: [String] = []
+        exclusions: [String] = [],
+        granolaMeetings: [GranolaMeetingRecord] = []
     ) async throws -> SummarizationResult {
         guard !activities.isEmpty else { return SummarizationResult(tasks: [], daySummary: nil, newMemoryEntries: [], projects: []) }
 
-        let prompt = buildPrompt(from: activities, granularity: granularity, fileEvents: fileEvents, calendarContext: calendarContext, significantBreaks: significantBreaks, recentProjectNames: recentProjectNames)
+        let prompt = buildPrompt(from: activities, granularity: granularity, fileEvents: fileEvents, calendarContext: calendarContext, significantBreaks: significantBreaks, recentProjectNames: recentProjectNames, granolaMeetings: granolaMeetings)
 
         let userRules: String
         if let custom = customPrompt?.trimmingCharacters(in: .whitespacesAndNewlines), !custom.isEmpty {
@@ -492,7 +493,8 @@ public final class TaskSummarizer: Sendable {
         fileEvents: [String] = [],
         calendarContext: String? = nil,
         significantBreaks: [(start: Date, end: Date)] = [],
-        recentProjectNames: [String] = []
+        recentProjectNames: [String] = [],
+        granolaMeetings: [GranolaMeetingRecord] = []
     ) -> String {
         let blocks = aggregateActivities(activities)
             .filter { $0.totalDuration >= Self.minBlockDuration }
@@ -607,6 +609,35 @@ public final class TaskSummarizer: Sendable {
             lines.append("")
             lines.append("## Calendar Events")
             lines.append(cal)
+        }
+
+        // Granola meeting notes and transcripts
+        if !granolaMeetings.isEmpty {
+            lines.append("")
+            lines.append("## Meeting Notes (from Granola)")
+            let timeFormatter = DateFormatter()
+            timeFormatter.dateFormat = "HH:mm"
+            timeFormatter.locale = Locale(identifier: "en_US_POSIX")
+            for meeting in granolaMeetings.prefix(5) {
+                let start = timeFormatter.string(from: meeting.startTime)
+                let end = timeFormatter.string(from: meeting.endTime)
+                let durMins = Int(meeting.duration / 60)
+                lines.append("")
+                lines.append("### \(meeting.title) [\(start)-\(end)] (\(durMins)m)")
+                if meeting.attendeeCount > 0 {
+                    lines.append("Attendees: \(meeting.attendeeNames.joined(separator: ", "))")
+                }
+                if let summary = meeting.summary, !summary.isEmpty {
+                    lines.append("Summary: \(summary)")
+                }
+                if let notes = meeting.notesForPrompt(maxChars: 2000) {
+                    lines.append("Notes: \(notes)")
+                }
+                if let transcript = meeting.transcriptForPrompt(maxChars: 2000) {
+                    lines.append("Transcript excerpt:")
+                    lines.append(transcript)
+                }
+            }
         }
 
         lines.append("</screen_content>")

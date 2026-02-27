@@ -79,24 +79,27 @@ enum LogEntry: Identifiable {
     case fileEvent(FileEventRecord)
     case task(TaskRecord)
     case idlePeriod(IdlePeriod)
+    case granolaMeeting(GranolaMeetingRecord)
 
     var id: String {
         switch self {
-        case .activity(let r):   return "act-\(r.id ?? 0)"
-        case .screenshot(let r): return "ss-\(r.id ?? 0)"
-        case .fileEvent(let r):  return "fe-\(r.id)"
-        case .task(let r):       return "task-\(r.id ?? 0)"
-        case .idlePeriod(let p): return p.id
+        case .activity(let r):       return "act-\(r.id ?? 0)"
+        case .screenshot(let r):     return "ss-\(r.id ?? 0)"
+        case .fileEvent(let r):      return "fe-\(r.id)"
+        case .task(let r):           return "task-\(r.id ?? 0)"
+        case .idlePeriod(let p):     return p.id
+        case .granolaMeeting(let m): return "meeting-\(m.id)"
         }
     }
 
     var timestamp: Date {
         switch self {
-        case .activity(let r):   return r.timestamp
-        case .screenshot(let r): return r.timestamp
-        case .fileEvent(let r):  return r.timestamp
-        case .task(let r):       return r.startTime
-        case .idlePeriod(let p): return p.startTime
+        case .activity(let r):       return r.timestamp
+        case .screenshot(let r):     return r.timestamp
+        case .fileEvent(let r):      return r.timestamp
+        case .task(let r):           return r.startTime
+        case .idlePeriod(let p):     return p.startTime
+        case .granolaMeeting(let m): return m.startTime
         }
     }
 }
@@ -109,6 +112,7 @@ enum LogFilterType: String, CaseIterable {
     case screenshots = "Screenshots"
     case fileEvents = "Files"
     case tasks = "Tasks"
+    case meetings = "Meetings"
     case away = "Away"
 }
 
@@ -137,6 +141,7 @@ struct ActivityLogView: View {
         for f in viewModel.fileEvents { entries.append(.fileEvent(f)) }
         for t in viewModel.tasks { entries.append(.task(t)) }
         for p in idlePeriods { entries.append(.idlePeriod(p)) }
+        for m in viewModel.granolaMeetings { entries.append(.granolaMeeting(m)) }
 
         entries.sort { $0.timestamp > $1.timestamp }
         return entries
@@ -149,6 +154,7 @@ struct ActivityLogView: View {
         case .screenshots: return logEntries.filter { if case .screenshot = $0 { return true }; return false }
         case .fileEvents: return logEntries.filter { if case .fileEvent = $0 { return true }; return false }
         case .tasks: return logEntries.filter { if case .task = $0 { return true }; return false }
+        case .meetings: return logEntries.filter { if case .granolaMeeting = $0 { return true }; return false }
         case .away: return logEntries.filter { if case .idlePeriod = $0 { return true }; return false }
         }
     }
@@ -228,6 +234,7 @@ struct ActivityLogView: View {
         case .screenshots: return viewModel.screenshots.count
         case .fileEvents: return viewModel.fileEvents.count
         case .tasks: return viewModel.tasks.count
+        case .meetings: return viewModel.granolaMeetings.count
         case .away: return idlePeriods.count
         }
     }
@@ -361,6 +368,10 @@ private struct LogEntryRow: View {
             Image(systemName: "moon.zzz.fill")
                 .font(.system(size: 10))
                 .foregroundStyle(Theme.statusPaused)
+        case .granolaMeeting:
+            Image(systemName: "person.2.fill")
+                .font(.system(size: 10))
+                .foregroundStyle(.purple)
         }
     }
 
@@ -443,6 +454,16 @@ private struct LogEntryRow: View {
                 Text("(\(Self.formatDuration(p.duration)))")
                     .foregroundStyle(Theme.textMuted)
             }
+
+        case .granolaMeeting(let m):
+            HStack(spacing: 4) {
+                Text("Meeting")
+                    .foregroundStyle(.purple)
+                Text(m.title)
+                    .foregroundStyle(Theme.textPrimary)
+                Text("(\(Self.timeRangeFormatter.string(from: m.startTime))–\(Self.timeRangeFormatter.string(from: m.endTime)))")
+                    .foregroundStyle(Theme.textMuted)
+            }
         }
     }
 
@@ -471,6 +492,8 @@ private struct LogEntryRow: View {
             taskDetail(r)
         case .idlePeriod(let p):
             idlePeriodDetail(p)
+        case .granolaMeeting(let m):
+            granolaMeetingDetail(m)
         }
     }
 
@@ -587,6 +610,63 @@ private struct LogEntryRow: View {
             detailRow("Duration", Self.formatDuration(p.duration))
             if p.recordCount > 1 {
                 detailRow("Records", "\(p.recordCount) idle events merged")
+            }
+        }
+    }
+
+    // MARK: Granola Meeting Detail
+
+    private func granolaMeetingDetail(_ m: GranolaMeetingRecord) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            detailRow("Time", "\(Self.timeRangeFormatter.string(from: m.startTime)) – \(Self.timeRangeFormatter.string(from: m.endTime))")
+            detailRow("Duration", m.formattedDuration)
+            if let organizer = m.organizer, !organizer.isEmpty {
+                detailRow("Organizer", organizer)
+            }
+            if m.attendeeCount > 0 {
+                detailRow("Attendees", m.attendeeNames.joined(separator: ", "))
+            }
+            if let url = m.meetingURL, !url.isEmpty {
+                detailRow("URL", url)
+            }
+            if let summary = m.summary, !summary.isEmpty {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Summary")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(Theme.textMuted)
+                    Text(String(summary.prefix(500)))
+                        .font(.system(size: 11))
+                        .foregroundStyle(Theme.textSecondary)
+                        .textSelection(.enabled)
+                        .lineLimit(8)
+                }
+                .padding(.top, 2)
+            }
+            if let notes = m.notesPlain, !notes.isEmpty {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Notes")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(Theme.textMuted)
+                    Text(String(notes.prefix(800)))
+                        .font(.system(size: 10))
+                        .foregroundStyle(Theme.textSecondary)
+                        .textSelection(.enabled)
+                        .lineLimit(12)
+                }
+                .padding(.top, 2)
+            }
+            if let transcript = m.transcriptText, !transcript.isEmpty {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Transcript")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(Theme.textMuted)
+                    Text(String(transcript.prefix(1000)))
+                        .font(.system(size: 10, design: .monospaced))
+                        .foregroundStyle(Theme.textSecondary)
+                        .textSelection(.enabled)
+                        .lineLimit(15)
+                }
+                .padding(.top, 2)
             }
         }
     }

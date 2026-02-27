@@ -14,6 +14,7 @@ class AppDelegate {
     private let ocrEngine: OCREngine
     private let fileActivityMonitor: FileActivityMonitor
     private let calendarMonitor: CalendarMonitor
+    private let granolaMeetingMonitor: GranolaMeetingMonitor
     /// Lazy-initialized so the daemon doesn't hit the Keychain on startup.
     /// The Dashboard prompts for Keychain access first; by the time the daemon
     /// needs it (15 min later for the first summarization), the user has already
@@ -58,6 +59,7 @@ class AppDelegate {
         self.ocrEngine = OCREngine()
         self.fileActivityMonitor = FileActivityMonitor()
         self.calendarMonitor = CalendarMonitor()
+        self.granolaMeetingMonitor = GranolaMeetingMonitor()
     }
 
     func start() {
@@ -90,6 +92,15 @@ class AppDelegate {
 
         // Request calendar access (non-blocking, user sees permission prompt once)
         calendarMonitor.requestAccess()
+
+        // Wire up Granola meeting monitor callback
+        granolaMeetingMonitor.onMeetingsUpdated = { [weak self] meetings in
+            guard let self else { return }
+            for meeting in meetings {
+                self.db.upsertGranolaMeeting(meeting)
+            }
+            Logger.info("Imported \(meetings.count) Granola meeting(s)")
+        }
 
         // Bootstrap with current frontmost app
         if let frontApp = activityMonitor.currentApp() {
@@ -336,6 +347,10 @@ class AppDelegate {
         }
         db.deleteScreenshotsOlderThan(days: 30)
         db.deleteFileEventsOlderThan(days: 30)
+        db.deleteGranolaMeetingsOlderThan(days: 90)
+
+        // Poll Granola meetings (checks file mod-date first, no-op if unchanged)
+        granolaMeetingMonitor.poll()
     }
 
     // MARK: - Idle Transition Handling
@@ -535,6 +550,9 @@ class AppDelegate {
         // Gather calendar context for the day
         let calContext = calendarMonitor.eventsContext(from: startTime, to: endTime)
 
+        // Gather Granola meeting data for the day
+        let granolaMeetings = db.recentGranolaMeetings(from: startTime, to: endTime)
+
         // Load settings from shared settings file (reuse config.shared, no redundant init)
         let cliSettings: CLISettings? = {
             guard let data = try? Data(contentsOf: self.config.shared.settingsPath),
@@ -568,7 +586,8 @@ class AppDelegate {
                     calendarContext: calContext,
                     significantBreaks: significantBreaks,
                     recentProjectNames: recentProjectNames,
-                    exclusions: cliSettings?.exclusions ?? ["Exclude adult, explicit, or NSFW content"]
+                    exclusions: cliSettings?.exclusions ?? ["Exclude adult, explicit, or NSFW content"],
+                    granolaMeetings: granolaMeetings
                 )
                 guard !result.tasks.isEmpty else { return }
                 await MainActor.run {

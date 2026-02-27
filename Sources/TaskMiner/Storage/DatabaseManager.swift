@@ -86,7 +86,7 @@ class DatabaseManager {
     }
 
     /// Current schema version — kept in sync with DatabaseReader's migrations.
-    private static let schemaVersion = 11
+    private static let schemaVersion = 12
 
     private func runMigrations() {
         let currentVersion = getUserVersion()
@@ -247,6 +247,33 @@ class DatabaseManager {
                               label: "11: add websites to tasks", ignoreDuplicate: true) {
                 migrationFailed = true
             }
+        }
+
+        if currentVersion < 12 {
+            let granolaSql = """
+            CREATE TABLE IF NOT EXISTS granola_meetings (
+                id                INTEGER PRIMARY KEY AUTOINCREMENT,
+                granola_id        TEXT NOT NULL UNIQUE,
+                title             TEXT NOT NULL,
+                meeting_date      TEXT NOT NULL,
+                start_time        TEXT NOT NULL,
+                end_time          TEXT NOT NULL,
+                duration          REAL NOT NULL DEFAULT 0,
+                attendees_json    TEXT DEFAULT '[]',
+                organizer         TEXT,
+                notes_plain       TEXT,
+                transcript_text   TEXT,
+                summary           TEXT,
+                meeting_url       TEXT,
+                source_updated_at TEXT NOT NULL,
+                imported_at       TEXT NOT NULL
+            )
+            """
+            if !execMigration(granolaSql, label: "12: create granola_meetings table") {
+                migrationFailed = true
+            }
+            sqlite3_exec(db, "CREATE INDEX IF NOT EXISTS idx_granola_meetings_date ON granola_meetings(meeting_date)", nil, nil, nil)
+            sqlite3_exec(db, "CREATE INDEX IF NOT EXISTS idx_granola_meetings_granola_id ON granola_meetings(granola_id)", nil, nil, nil)
         }
 
         // Only bump the version if all migrations succeeded — failed migrations
@@ -430,6 +457,118 @@ class DatabaseManager {
             let deleted = sqlite3_changes(db)
             if deleted > 0 { Logger.info("Deleted \(deleted) file event(s) older than \(days) days") }
         }
+    }
+
+    // MARK: - Granola Meetings
+
+    /// Insert or update a Granola meeting record (upsert by granola_id).
+    func upsertGranolaMeeting(_ record: GranolaMeetingRecord) {
+        guard db != nil else { return }
+        let sql = """
+        INSERT INTO granola_meetings (granola_id, title, meeting_date, start_time, end_time,
+            duration, attendees_json, organizer, notes_plain, transcript_text, summary,
+            meeting_url, source_updated_at, imported_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(granola_id) DO UPDATE SET
+            title = excluded.title,
+            notes_plain = excluded.notes_plain,
+            transcript_text = excluded.transcript_text,
+            summary = excluded.summary,
+            attendees_json = excluded.attendees_json,
+            source_updated_at = excluded.source_updated_at,
+            imported_at = excluded.imported_at
+        """
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
+            Logger.warning("Failed to prepare Granola meeting upsert: \(lastError)")
+            return
+        }
+        defer { sqlite3_finalize(stmt) }
+
+        let now = SharedFormatters.iso8601.string(from: Date())
+        let startStr = SharedFormatters.iso8601.string(from: record.startTime)
+        let endStr = SharedFormatters.iso8601.string(from: record.endTime)
+
+        sqliteBindText(stmt, 1, record.granolaId)
+        sqliteBindText(stmt, 2, record.title)
+        sqliteBindText(stmt, 3, record.meetingDate)
+        sqliteBindText(stmt, 4, startStr)
+        sqliteBindText(stmt, 5, endStr)
+        sqlite3_bind_double(stmt, 6, record.duration)
+        sqliteBindText(stmt, 7, record.attendeesJson)
+        if let org = record.organizer { sqliteBindText(stmt, 8, org) } else { sqlite3_bind_null(stmt, 8) }
+        if let notes = record.notesPlain { sqliteBindText(stmt, 9, notes) } else { sqlite3_bind_null(stmt, 9) }
+        if let transcript = record.transcriptText { sqliteBindText(stmt, 10, transcript) } else { sqlite3_bind_null(stmt, 10) }
+        if let summary = record.summary { sqliteBindText(stmt, 11, summary) } else { sqlite3_bind_null(stmt, 11) }
+        if let url = record.meetingURL { sqliteBindText(stmt, 12, url) } else { sqlite3_bind_null(stmt, 12) }
+        sqliteBindText(stmt, 13, record.sourceUpdatedAt)
+        sqliteBindText(stmt, 14, now)
+
+        if sqlite3_step(stmt) != SQLITE_DONE {
+            Logger.warning("Failed to upsert Granola meeting \(record.granolaId): \(lastError)")
+        }
+    }
+
+    /// Fetch Granola meetings within a time range (used by summarization).
+    func recentGranolaMeetings(from start: Date, to end: Date) -> [GranolaMeetingRecord] {
+        guard db != nil else { return [] }
+        let startStr = SharedFormatters.iso8601.string(from: start)
+        let endStr = SharedFormatters.iso8601.string(from: end)
+        let sql = """
+        SELECT id, granola_id, title, meeting_date, start_time, end_time, duration,
+               attendees_json, organizer, notes_plain, transcript_text, summary,
+               meeting_url, source_updated_at, imported_at
+        FROM granola_meetings
+        WHERE start_time >= ? AND start_time < ?
+        ORDER BY start_time ASC
+        """
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return [] }
+        defer { sqlite3_finalize(stmt) }
+        sqliteBindText(stmt, 1, startStr)
+        sqliteBindText(stmt, 2, endStr)
+
+        var results: [GranolaMeetingRecord] = []
+        while sqlite3_step(stmt) == SQLITE_ROW {
+            results.append(parseGranolaMeetingRow(stmt))
+        }
+        return results
+    }
+
+    /// Prune Granola meetings older than the given number of days.
+    func deleteGranolaMeetingsOlderThan(days: Int) {
+        guard db != nil else { return }
+        guard let cutoff = Calendar.current.date(byAdding: .day, value: -days, to: Date()) else { return }
+        let cutoffStr = SharedFormatters.iso8601.string(from: cutoff)
+        let sql = "DELETE FROM granola_meetings WHERE imported_at < ?"
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return }
+        defer { sqlite3_finalize(stmt) }
+        sqliteBindText(stmt, 1, cutoffStr)
+        if sqlite3_step(stmt) == SQLITE_DONE {
+            let deleted = sqlite3_changes(db)
+            if deleted > 0 { Logger.info("Deleted \(deleted) Granola meeting(s) older than \(days) days") }
+        }
+    }
+
+    private func parseGranolaMeetingRow(_ stmt: OpaquePointer?) -> GranolaMeetingRecord {
+        GranolaMeetingRecord(
+            id: sqlite3_column_int64(stmt, 0),
+            granolaId: sqlite3_column_text(stmt, 1).map { String(cString: $0) } ?? "",
+            title: sqlite3_column_text(stmt, 2).map { String(cString: $0) } ?? "",
+            meetingDate: sqlite3_column_text(stmt, 3).map { String(cString: $0) } ?? "",
+            startTime: sqlite3_column_text(stmt, 4).flatMap { SharedFormatters.iso8601.date(from: String(cString: $0)) } ?? Date(),
+            endTime: sqlite3_column_text(stmt, 5).flatMap { SharedFormatters.iso8601.date(from: String(cString: $0)) } ?? Date(),
+            duration: sqlite3_column_double(stmt, 6),
+            attendeesJson: sqlite3_column_text(stmt, 7).map { String(cString: $0) } ?? "[]",
+            organizer: sqlite3_column_text(stmt, 8).map { String(cString: $0) },
+            notesPlain: sqlite3_column_text(stmt, 9).map { String(cString: $0) },
+            transcriptText: sqlite3_column_text(stmt, 10).map { String(cString: $0) },
+            summary: sqlite3_column_text(stmt, 11).map { String(cString: $0) },
+            meetingURL: sqlite3_column_text(stmt, 12).map { String(cString: $0) },
+            sourceUpdatedAt: sqlite3_column_text(stmt, 13).map { String(cString: $0) } ?? "",
+            importedAt: sqlite3_column_text(stmt, 14).flatMap { SharedFormatters.iso8601.date(from: String(cString: $0)) } ?? Date()
+        )
     }
 
     // MARK: - Screenshot CRUD

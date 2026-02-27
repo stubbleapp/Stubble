@@ -30,6 +30,9 @@ final class DashboardViewModel {
     // File events (filesystem monitoring)
     var fileEvents: [FileEventRecord] = []
 
+    // Granola meetings (imported from Granola cache)
+    var granolaMeetings: [GranolaMeetingRecord] = []
+
     // Tasks (AI-generated)
     var tasks: [TaskRecord] = []
     var isGeneratingSummary = false
@@ -253,7 +256,8 @@ final class DashboardViewModel {
                     granularity: SettingsManager.shared.granularity,
                     significantBreaks: significantBreaks,
                     recentProjectNames: recentProjectNames,
-                    exclusions: SettingsManager.shared.exclusions
+                    exclusions: SettingsManager.shared.exclusions,
+                    granolaMeetings: dbReader?.granolaMeetings(for: date) ?? []
                 )
 
                 try writer.deleteTasks(for: dateStr)
@@ -577,6 +581,7 @@ final class DashboardViewModel {
         screenshots = db.screenshots(for: selectedDate)
         tasks = db.tasks(for: selectedDate)
         fileEvents = db.fileEvents(for: selectedDate)
+        granolaMeetings = db.granolaMeetings(for: selectedDate)
 
         let summary = db.computeSummary(for: selectedDate)
         activeSeconds = summary.activeSeconds
@@ -672,6 +677,7 @@ final class DashboardViewModel {
         groupedActivities = []
         screenshots = []
         fileEvents = []
+        granolaMeetings = []
         projectActivities = []
         recommendations = []
         greetingContext = nil
