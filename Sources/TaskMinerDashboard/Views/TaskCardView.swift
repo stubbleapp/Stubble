@@ -57,7 +57,7 @@ struct TaskCardView: View {
 
             // Foreground content
             cardContent
-                .background(Theme.primaryBackground)
+                .background(Theme.secondaryBackground)
                 .offset(x: swipeOffset)
                 .gesture(swipeGesture)
         }
@@ -475,7 +475,7 @@ struct AppIconStackView: View {
                 AppIconView(bundleId: bundleIdResolver(name), size: 20)
                     .background(
                         Circle()
-                            .fill(Theme.primaryBackground)
+                            .fill(Theme.secondaryBackground)
                             .frame(width: 22, height: 22)
                     )
                     .zIndex(Double(totalCount - index))
@@ -484,7 +484,7 @@ struct AppIconStackView: View {
                 FaviconView(domain: domain, size: 20)
                     .background(
                         Circle()
-                            .fill(Theme.primaryBackground)
+                            .fill(Theme.secondaryBackground)
                             .frame(width: 22, height: 22)
                     )
                     .zIndex(Double(totalCount - appSlice.count - index))

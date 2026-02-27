@@ -129,10 +129,10 @@ final class UserMemoryStoreTests: XCTestCase {
 
     // MARK: - Legacy Merge (backward compat)
 
-    func testLegacyMergeStillWorks() {
+    func testMergeStructuredAddsNewEntries() {
         store.save([MemoryEntry(category: .workflow, content: "Existing fact")])
 
-        store.merge(newEntries: ["New fact"])
+        store.mergeStructured(newEntries: [MemoryEntry(category: .technology, content: "New fact")])
         let loaded = store.load()
 
         XCTAssertEqual(loaded.count, 2)

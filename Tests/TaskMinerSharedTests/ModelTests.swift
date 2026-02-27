@@ -290,4 +290,26 @@ final class ModelTests: XCTestCase {
         XCTAssertNotNil(DatabaseError.migrationFailed("test").errorDescription)
         XCTAssertNotNil(DatabaseError.closed.errorDescription)
     }
+
+    // MARK: - AppearanceMode
+
+    func testAppearanceModeCodableRoundTrip() throws {
+        for mode in AppearanceMode.allCases {
+            let data = try JSONEncoder().encode(mode)
+            let decoded = try JSONDecoder().decode(AppearanceMode.self, from: data)
+            XCTAssertEqual(decoded, mode, "Codable round-trip failed for \(mode)")
+        }
+    }
+
+    func testAppearanceModeRawValues() {
+        XCTAssertEqual(AppearanceMode.system.rawValue, "system")
+        XCTAssertEqual(AppearanceMode.light.rawValue, "light")
+        XCTAssertEqual(AppearanceMode.dark.rawValue, "dark")
+    }
+
+    func testAppearanceModeDisplayNames() {
+        XCTAssertEqual(AppearanceMode.system.displayName, "System")
+        XCTAssertEqual(AppearanceMode.light.displayName, "Light")
+        XCTAssertEqual(AppearanceMode.dark.displayName, "Dark")
+    }
 }
