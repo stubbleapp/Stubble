@@ -160,7 +160,7 @@ struct SegmentedPicker: View {
                 } label: {
                     Text(title)
                         .font(.system(size: 12, weight: isSelected ? .semibold : .regular))
-                        .foregroundStyle(isSelected ? Theme.textPrimary : Theme.textSecondary)
+                        .foregroundStyle(isSelected ? Theme.accent : Theme.textSecondary)
                         .padding(.horizontal, segmentPaddingH)
                         .padding(.vertical, segmentPaddingV)
                         .frame(minHeight: ToolbarLayout.minTouchTarget)

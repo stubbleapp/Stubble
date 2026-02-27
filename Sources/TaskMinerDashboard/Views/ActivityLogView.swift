@@ -1,6 +1,75 @@
 import SwiftUI
 import TaskMinerShared
 
+// MARK: - IdlePeriod
+
+/// A consolidated idle/away period merged from one or more idle ActivityRecords.
+struct IdlePeriod: Identifiable {
+    let id: String
+    let startTime: Date
+    let endTime: Date
+    let duration: TimeInterval
+    let recordCount: Int  // how many raw idle records were merged
+
+    /// Consolidate idle ActivityRecords into merged periods.
+    /// Uses the same logic as the Day timeline gap detection.
+    /// The minDuration filter is applied **after** merging so that
+    /// adjacent short idles that combine into a long gap are kept.
+    static func consolidate(from activities: [ActivityRecord], minDuration: TimeInterval) -> [IdlePeriod] {
+        let sorted = activities.sorted { $0.timestamp < $1.timestamp }
+
+        // Collect ALL idle ranges — no duration filter yet
+        var idles: [(start: Date, end: Date)] = []
+        for (i, record) in sorted.enumerated() {
+            guard record.isIdle else { continue }
+
+            let end: Date
+            if let endTime = record.endTime {
+                end = endTime
+            } else if let dur = record.duration, dur > 0 {
+                end = record.timestamp.addingTimeInterval(dur)
+            } else {
+                // Unfinalized — estimate from next non-idle activity
+                let nextNonIdle = sorted.dropFirst(i + 1).first { !$0.isIdle }
+                end = nextNonIdle?.timestamp ?? record.timestamp
+            }
+
+            guard end > record.timestamp else { continue }  // skip zero/negative
+            idles.append((start: record.timestamp, end: end))
+        }
+
+        guard !idles.isEmpty else { return [] }
+
+        // Merge overlapping/adjacent
+        var merged: [(start: Date, end: Date)] = [idles[0]]
+        for idle in idles.dropFirst() {
+            if idle.start <= merged[merged.count - 1].end {
+                merged[merged.count - 1].end = max(merged[merged.count - 1].end, idle.end)
+            } else {
+                merged.append(idle)
+            }
+        }
+
+        // Filter by minDuration AFTER merging
+        let filtered = merged.filter { $0.end.timeIntervalSince($0.start) >= minDuration }
+
+        // Count raw records per merged period
+        let idleRecords = sorted.filter { $0.isIdle }
+        return filtered.enumerated().map { (index, period) in
+            let count = idleRecords.filter { r in
+                r.timestamp >= period.start && r.timestamp < period.end
+            }.count
+            return IdlePeriod(
+                id: "idle-\(index)",
+                startTime: period.start,
+                endTime: period.end,
+                duration: period.end.timeIntervalSince(period.start),
+                recordCount: max(count, 1)
+            )
+        }
+    }
+}
+
 // MARK: - LogEntry
 
 /// Unified log entry wrapping all event types for reverse-chronological display.
@@ -9,6 +78,7 @@ enum LogEntry: Identifiable {
     case screenshot(ScreenshotRecord)
     case fileEvent(FileEventRecord)
     case task(TaskRecord)
+    case idlePeriod(IdlePeriod)
 
     var id: String {
         switch self {
@@ -16,6 +86,7 @@ enum LogEntry: Identifiable {
         case .screenshot(let r): return "ss-\(r.id ?? 0)"
         case .fileEvent(let r):  return "fe-\(r.id)"
         case .task(let r):       return "task-\(r.id ?? 0)"
+        case .idlePeriod(let p): return p.id
         }
     }
 
@@ -25,6 +96,7 @@ enum LogEntry: Identifiable {
         case .screenshot(let r): return r.timestamp
         case .fileEvent(let r):  return r.timestamp
         case .task(let r):       return r.startTime
+        case .idlePeriod(let p): return p.startTime
         }
     }
 }
@@ -37,6 +109,7 @@ enum LogFilterType: String, CaseIterable {
     case screenshots = "Screenshots"
     case fileEvents = "Files"
     case tasks = "Tasks"
+    case away = "Away"
 }
 
 // MARK: - ActivityLogView
@@ -46,6 +119,11 @@ struct ActivityLogView: View {
     @State private var expandedEntryId: String?
     @State private var filterType: LogFilterType = .all
 
+    private var idlePeriods: [IdlePeriod] {
+        let minDuration = TimeInterval(SettingsManager.shared.minAwayMinutes * 60)
+        return IdlePeriod.consolidate(from: viewModel.activities, minDuration: minDuration)
+    }
+
     private var logEntries: [LogEntry] {
         var entries: [LogEntry] = []
         entries.reserveCapacity(
@@ -53,10 +131,12 @@ struct ActivityLogView: View {
             viewModel.fileEvents.count + viewModel.tasks.count
         )
 
-        for a in viewModel.activities { entries.append(.activity(a)) }
+        // Exclude raw idle records from the main list — they're replaced by consolidated IdlePeriods
+        for a in viewModel.activities where !a.isIdle { entries.append(.activity(a)) }
         for s in viewModel.screenshots { entries.append(.screenshot(s)) }
         for f in viewModel.fileEvents { entries.append(.fileEvent(f)) }
         for t in viewModel.tasks { entries.append(.task(t)) }
+        for p in idlePeriods { entries.append(.idlePeriod(p)) }
 
         entries.sort { $0.timestamp > $1.timestamp }
         return entries
@@ -69,6 +149,7 @@ struct ActivityLogView: View {
         case .screenshots: return logEntries.filter { if case .screenshot = $0 { return true }; return false }
         case .fileEvents: return logEntries.filter { if case .fileEvent = $0 { return true }; return false }
         case .tasks: return logEntries.filter { if case .task = $0 { return true }; return false }
+        case .away: return logEntries.filter { if case .idlePeriod = $0 { return true }; return false }
         }
     }
 
@@ -143,10 +224,11 @@ struct ActivityLogView: View {
     private func count(for type: LogFilterType) -> Int {
         switch type {
         case .all: return logEntries.count
-        case .activities: return viewModel.activities.count
+        case .activities: return viewModel.activities.filter({ !$0.isIdle }).count
         case .screenshots: return viewModel.screenshots.count
         case .fileEvents: return viewModel.fileEvents.count
         case .tasks: return viewModel.tasks.count
+        case .away: return idlePeriods.count
         }
     }
 
@@ -275,6 +357,10 @@ private struct LogEntryRow: View {
             Image(systemName: "sparkles")
                 .font(.system(size: 10))
                 .foregroundStyle(Theme.accent)
+        case .idlePeriod:
+            Image(systemName: "moon.zzz.fill")
+                .font(.system(size: 10))
+                .foregroundStyle(Theme.statusPaused)
         }
     }
 
@@ -347,7 +433,27 @@ private struct LogEntryRow: View {
                 Text("(\(Self.timeRangeFormatter.string(from: r.startTime))–\(Self.timeRangeFormatter.string(from: r.endTime)))")
                     .foregroundStyle(Theme.textMuted)
             }
+
+        case .idlePeriod(let p):
+            HStack(spacing: 4) {
+                Text("Away")
+                    .foregroundStyle(Theme.statusPaused)
+                Text("\(Self.timeRangeFormatter.string(from: p.startTime))–\(Self.timeRangeFormatter.string(from: p.endTime))")
+                    .foregroundStyle(Theme.textPrimary)
+                Text("(\(Self.formatDuration(p.duration)))")
+                    .foregroundStyle(Theme.textMuted)
+            }
         }
+    }
+
+    private static func formatDuration(_ interval: TimeInterval) -> String {
+        let totalMinutes = Int(interval / 60)
+        if totalMinutes < 60 {
+            return "\(totalMinutes)m"
+        }
+        let hours = totalMinutes / 60
+        let minutes = totalMinutes % 60
+        return minutes > 0 ? "\(hours)h \(minutes)m" : "\(hours)h"
     }
 
     // MARK: - Detail View
@@ -363,6 +469,8 @@ private struct LogEntryRow: View {
             fileEventDetail(r)
         case .task(let r):
             taskDetail(r)
+        case .idlePeriod(let p):
+            idlePeriodDetail(p)
         }
     }
 
@@ -466,6 +574,19 @@ private struct LogEntryRow: View {
                         .textSelection(.enabled)
                 }
                 .padding(.top, 2)
+            }
+        }
+    }
+
+    // MARK: Idle Period Detail
+
+    private func idlePeriodDetail(_ p: IdlePeriod) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            detailRow("Start", Self.timeFormatter.string(from: p.startTime))
+            detailRow("End", Self.timeFormatter.string(from: p.endTime))
+            detailRow("Duration", Self.formatDuration(p.duration))
+            if p.recordCount > 1 {
+                detailRow("Records", "\(p.recordCount) idle events merged")
             }
         }
     }

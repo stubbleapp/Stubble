@@ -208,56 +208,6 @@ struct RecommendationsView: View {
     }
 }
 
-// MARK: - Projects Expandable View
-
-struct ProjectsExpandableView: View {
-    let projects: [ProjectActivity]
-    @State private var showAll = false
-    @State private var expandedActivityID: UUID?
-    @Environment(DashboardViewModel.self) var viewModel
-
-    private var visibleProjects: [ProjectActivity] {
-        showAll ? projects : Array(projects.prefix(3))
-    }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            // Section header
-            HStack {
-                Text("Activities")
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(Theme.textPrimary)
-                Spacer()
-            }
-            .padding(.bottom, 10)
-
-            VStack(spacing: 0) {
-                ForEach(visibleProjects) { activity in
-                    ProjectRow(activity: activity, expandedID: $expandedActivityID)
-                }
-            }
-
-            if projects.count > 3 {
-                Button {
-                    withAnimation(.easeInOut(duration: 0.2)) {
-                        showAll.toggle()
-                    }
-                } label: {
-                    HStack(spacing: 4) {
-                        Text(showAll ? "Show less" : "Show all \(projects.count) activities")
-                            .font(.system(size: 12, weight: .medium))
-                        Image(systemName: showAll ? "chevron.up" : "chevron.down")
-                            .font(.system(size: 9, weight: .semibold))
-                    }
-                    .foregroundStyle(Theme.accent)
-                    .padding(.top, 10)
-                }
-                .buttonStyle(.plain)
-            }
-        }
-    }
-}
-
 // MARK: - Single Project Row (expandable)
 
 struct ProjectRow: View {

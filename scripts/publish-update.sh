@@ -12,8 +12,9 @@ set -euo pipefail
 #      Stores the private key in your Keychain, prints the public key.
 #      Put the public key in SPARKLE_ED_KEY in build-app.sh.
 #
-#   2. Build the app first:
-#        ./scripts/build-app.sh 1.2.0
+#   2. Build the app first (auto-increments version, or pass explicitly):
+#        ./scripts/build-app.sh          # auto-bumps minor from latest release
+#        ./scripts/build-app.sh 1.8.0    # explicit version override
 #
 #   3. Have `gh` (GitHub CLI) authenticated:
 #        gh auth login

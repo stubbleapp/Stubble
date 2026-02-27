@@ -3,6 +3,10 @@ import SwiftUI
 /// Shared markdown rendering utilities for day summaries and stubs content.
 enum MarkdownHelper {
 
+    // Precompiled regex patterns (avoid recompilation on every render)
+    private static let nestedListRegex = try! NSRegularExpression(pattern: #"^(\s{2,}|\t)[\-\*]\s"#)
+    private static let topListRegex = try! NSRegularExpression(pattern: #"^[\-\*]\s"#)
+
     /// Render a markdown string into an AttributedString suitable for SwiftUI `Text`.
     static func renderMarkdown(_ source: String) -> AttributedString? {
         let processed = preprocessMarkdown(source)
@@ -27,16 +31,20 @@ enum MarkdownHelper {
             .split(separator: "\n", omittingEmptySubsequences: false)
             .map { line in
                 let str = String(line)
-                if let match = str.range(of: #"^(\s{2,}|\t)[\-\*]\s"#, options: .regularExpression) {
-                    let indent = str[str.startIndex..<str.index(before: match.upperBound)]
-                    let rest = str[match.upperBound...]
+                let range = NSRange(str.startIndex..., in: str)
+
+                if let match = nestedListRegex.firstMatch(in: str, range: range) {
+                    let matchRange = Range(match.range, in: str)!
+                    let indent = str[str.startIndex..<str.index(before: matchRange.upperBound)]
+                    let rest = str[matchRange.upperBound...]
                     let indentStr = String(indent)
                         .replacingOccurrences(of: "-", with: "\u{25E6}")
                         .replacingOccurrences(of: "*", with: "\u{25E6}")
                     return "\(indentStr) \(rest)"
                 }
-                if let range = str.range(of: #"^[\-\*]\s"#, options: .regularExpression) {
-                    return "\u{2022}\u{2002}" + str[range.upperBound...]
+                if let match = topListRegex.firstMatch(in: str, range: range) {
+                    let matchRange = Range(match.range, in: str)!
+                    return "\u{2022}\u{2002}" + str[matchRange.upperBound...]
                 }
                 if str.hasPrefix("## ") {
                     return "**" + str.dropFirst(3) + "**"

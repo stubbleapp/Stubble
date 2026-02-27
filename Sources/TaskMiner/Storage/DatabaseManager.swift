@@ -134,7 +134,9 @@ class DatabaseManager {
             if !execMigration(paSql, label: "4: create project_activities table") {
                 migrationFailed = true
             }
-            sqlite3_exec(db, "CREATE INDEX IF NOT EXISTS idx_pa_date ON project_activities(date)", nil, nil, nil)
+            if sqlite3_exec(db, "CREATE INDEX IF NOT EXISTS idx_pa_date ON project_activities(date)", nil, nil, nil) != SQLITE_OK {
+                Logger.warning("Failed to create idx_pa_date index")
+            }
         }
 
         if currentVersion < 5 {
@@ -157,7 +159,9 @@ class DatabaseManager {
             if !execMigration(chatSql, label: "6: create chat_messages table") {
                 migrationFailed = true
             }
-            sqlite3_exec(db, "CREATE INDEX IF NOT EXISTS idx_chat_date ON chat_messages(date)", nil, nil, nil)
+            if sqlite3_exec(db, "CREATE INDEX IF NOT EXISTS idx_chat_date ON chat_messages(date)", nil, nil, nil) != SQLITE_OK {
+                Logger.warning("Failed to create idx_chat_date index")
+            }
         }
 
         if currentVersion < 7 {
@@ -218,7 +222,9 @@ class DatabaseManager {
             if !execMigration(fileEventsSql, label: "9d: create file_events table") {
                 migrationFailed = true
             }
-            sqlite3_exec(db, "CREATE INDEX IF NOT EXISTS idx_file_events_timestamp ON file_events(timestamp)", nil, nil, nil)
+            if sqlite3_exec(db, "CREATE INDEX IF NOT EXISTS idx_file_events_timestamp ON file_events(timestamp)", nil, nil, nil) != SQLITE_OK {
+                Logger.warning("Failed to create idx_file_events_timestamp index")
+            }
         }
 
         if currentVersion < 10 {
@@ -277,8 +283,11 @@ class DatabaseManager {
         return sqlite3_step(stmt) == SQLITE_ROW ? Int(sqlite3_column_int(stmt, 0)) : 0
     }
 
+    /// Note: PRAGMA doesn't support parameter binding — integer interpolation is safe here.
     private func setUserVersion(_ version: Int) {
-        sqlite3_exec(db, "PRAGMA user_version = \(version)", nil, nil, nil)
+        if sqlite3_exec(db, "PRAGMA user_version = \(version)", nil, nil, nil) != SQLITE_OK {
+            Logger.warning("Failed to set user_version to \(version)")
+        }
     }
 
     // MARK: - Activity CRUD
@@ -375,7 +384,9 @@ class DatabaseManager {
             sqliteBindText(stmt, 2, event.path)
             sqliteBindText(stmt, 3, event.type)
             if let aid = activityId { sqlite3_bind_int64(stmt, 4, aid) } else { sqlite3_bind_null(stmt, 4) }
-            sqlite3_step(stmt)
+            if sqlite3_step(stmt) != SQLITE_DONE {
+                Logger.warning("Failed to insert file event for \(event.path): \(String(cString: sqlite3_errmsg(db)))")
+            }
         }
     }
 
@@ -511,6 +522,68 @@ class DatabaseManager {
         guard sqlite3_step(stmt) == SQLITE_DONE else {
             throw DatabaseError.executionFailed(lastError)
         }
+    }
+
+    // MARK: - Project Activities
+
+    func deleteProjectActivities(for dateString: String) throws {
+        guard db != nil else { throw DatabaseError.closed }
+        let sql = "DELETE FROM project_activities WHERE date = ?"
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
+            throw DatabaseError.executionFailed(lastError)
+        }
+        defer { sqlite3_finalize(stmt) }
+        sqliteBindText(stmt, 1, dateString)
+        guard sqlite3_step(stmt) == SQLITE_DONE else {
+            throw DatabaseError.executionFailed(lastError)
+        }
+    }
+
+    func insertProjectActivities(_ records: [ProjectActivityRecord]) throws {
+        guard db != nil else { throw DatabaseError.closed }
+        let sql = """
+        INSERT INTO project_activities (date, name, summary, total_duration, app_names, task_titles, start_time, end_time, color_index)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """
+        sqlite3_exec(db, "BEGIN TRANSACTION", nil, nil, nil)
+        for record in records {
+            var stmt: OpaquePointer?
+            guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
+                sqlite3_exec(db, "ROLLBACK", nil, nil, nil)
+                throw DatabaseError.executionFailed(lastError)
+            }
+            defer { sqlite3_finalize(stmt) }
+            sqliteBindText(stmt, 1, record.date)
+            sqliteBindText(stmt, 2, record.name)
+            sqliteBindText(stmt, 3, record.summary)
+            sqlite3_bind_double(stmt, 4, record.totalDuration)
+            sqliteBindText(stmt, 5, record.appNames)
+            sqliteBindText(stmt, 6, record.taskTitles)
+            sqliteBindText(stmt, 7, SharedFormatters.iso8601.string(from: record.startTime))
+            sqliteBindText(stmt, 8, SharedFormatters.iso8601.string(from: record.endTime))
+            sqlite3_bind_int(stmt, 9, Int32(record.colorIndex))
+            if sqlite3_step(stmt) != SQLITE_DONE {
+                Logger.warning("Failed to insert project activity '\(record.name)': \(lastError)")
+            }
+        }
+        sqlite3_exec(db, "COMMIT", nil, nil, nil)
+    }
+
+    func projectActivityNames(for dateString: String) -> [String] {
+        guard db != nil else { return [] }
+        let sql = "SELECT DISTINCT name FROM project_activities WHERE date = ?"
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return [] }
+        defer { sqlite3_finalize(stmt) }
+        sqliteBindText(stmt, 1, dateString)
+        var names: [String] = []
+        while sqlite3_step(stmt) == SQLITE_ROW {
+            if let cStr = sqlite3_column_text(stmt, 0) {
+                names.append(String(cString: cStr))
+            }
+        }
+        return names
     }
 
     // MARK: - Daily Summary
@@ -664,6 +737,21 @@ class DatabaseManager {
     }
 
     // MARK: - Summarization Queries
+
+    /// Count non-idle activities since a given timestamp (lightweight check before expensive AI call).
+    func nonIdleActivityCount(since start: Date) -> Int {
+        guard db != nil else { return 0 }
+        let startStr = SharedFormatters.iso8601.string(from: start)
+        let sql = "SELECT COUNT(*) FROM activities WHERE timestamp >= ? AND is_idle = 0"
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return 0 }
+        defer { sqlite3_finalize(stmt) }
+        sqliteBindText(stmt, 1, startStr)
+        if sqlite3_step(stmt) == SQLITE_ROW {
+            return Int(sqlite3_column_int(stmt, 0))
+        }
+        return 0
+    }
 
     /// Returns activity + OCR data for a time range (used by AI summarization)
     func recentActivitiesWithOCR(from start: Date, to end: Date) -> [SummarizationInput] {

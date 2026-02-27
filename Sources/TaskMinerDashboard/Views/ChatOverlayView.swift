@@ -46,17 +46,29 @@ struct ChatOverlayView: View {
                     collapsedInputBar
                 }
             }
-            .background(
-                RoundedRectangle(cornerRadius: isExpanded ? 20 : 14, style: .continuous)
-                    .fill(Theme.chatSurface)
-                    .shadow(color: .black.opacity(0.06), radius: 20, y: -6)
-                    .shadow(color: .black.opacity(0.04), radius: 6, y: -2)
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: isExpanded ? 20 : 14, style: .continuous)
-                    .strokeBorder(Theme.chatBorder, lineWidth: 0.5)
-            )
-            .clipShape(RoundedRectangle(cornerRadius: isExpanded ? 20 : 14, style: .continuous))
+            .background {
+                if isExpanded {
+                    RoundedRectangle(cornerRadius: 20, style: .continuous)
+                        .fill(Theme.chatSurface)
+                        .shadow(color: .black.opacity(0.12), radius: 24, y: -4)
+                        .shadow(color: .black.opacity(0.06), radius: 8, y: -2)
+                } else {
+                    Capsule()
+                        .fill(Theme.chatSurface)
+                        .shadow(color: .black.opacity(0.12), radius: 24, y: -4)
+                        .shadow(color: .black.opacity(0.06), radius: 8, y: -2)
+                }
+            }
+            .overlay {
+                if isExpanded {
+                    RoundedRectangle(cornerRadius: 20, style: .continuous)
+                        .strokeBorder(Theme.chatBorder, lineWidth: 0.5)
+                } else {
+                    Capsule()
+                        .strokeBorder(Theme.chatBorder, lineWidth: 0.5)
+                }
+            }
+            .clipShape(.rect(cornerRadius: isExpanded ? 20 : 100))
             .padding(.horizontal, 20)
             .padding(.bottom, 16)
             .fixedSize(horizontal: false, vertical: !isExpanded)
@@ -101,6 +113,7 @@ struct ChatOverlayView: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .accessibilityLabel("Open chat")
     }
 
     // MARK: - Expanded Input Bar
@@ -149,10 +162,6 @@ struct ChatOverlayView: View {
             // Header
             HStack {
                 ActivityHaloDot(color: Theme.accent, size: 16)
-
-                Text("Chat")
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(Theme.textSecondary)
 
                 Spacer()
 
@@ -229,21 +238,15 @@ struct ChatOverlayView: View {
                             .foregroundStyle(Theme.textSecondary)
                             .padding(.horizontal, 10)
                             .padding(.vertical, 5)
-                            .background(
-                                Capsule()
-                                    .fill(Theme.chatSeparator)
-                            )
-                            .overlay(
-                                Capsule()
-                                    .strokeBorder(Theme.chatBorder, lineWidth: 0.5)
-                            )
+                            .modifier(LiquidGlassPillModifier())
                     }
                     .buttonStyle(.plain)
                 }
             }
             .padding(.horizontal, 14)
+            .padding(.vertical, 8)
         }
-        .padding(.vertical, 8)
+        .scrollClipDisabled(true)
     }
 
     // MARK: - Messages Scroll View
@@ -331,19 +334,6 @@ struct ChatOverlayView: View {
                 proxy.scrollTo(last.id, anchor: .bottom)
             }
         }
-    }
-}
-
-// MARK: - Stubble App Icon
-
-private struct StubbleIconView: View {
-    let size: CGFloat
-
-    var body: some View {
-        Image(nsImage: NSApp.applicationIconImage)
-            .resizable()
-            .aspectRatio(contentMode: .fit)
-            .frame(width: size, height: size)
     }
 }
 

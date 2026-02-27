@@ -31,13 +31,15 @@ extension DashboardViewModel {
         let dateLabel = SharedFormatters.headerDateFormatter.string(from: selectedDate)
         let dateString = SharedFormatters.dayFormatter.string(from: selectedDate)
 
-        Task {
+        recommendationsTask?.cancel()
+        recommendationsTask = Task {
             do {
                 // Ensure user profile is fresh before generating recommendations
                 if let client = self.geminiClient {
                     let synth = ProfileSynthesizer(geminiClient: client)
                     await synth.synthesizeIfNeeded(store: self.memoryStore)
                 }
+                guard !Task.isCancelled else { return }
                 let memoryContext = self.memoryStore.contextString()
 
                 let content: StubsContent
@@ -63,6 +65,8 @@ extension DashboardViewModel {
                         dateLabel: dateLabel
                     )
                 }
+
+                guard !Task.isCancelled else { return }
 
                 // Always persist to database (keyed by the date we generated for)
                 self.persistStubsContent(content, dateString: dateString)

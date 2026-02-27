@@ -17,91 +17,110 @@ enum TimelineItem: Identifiable {
 
     /// Build timeline items from tasks, inserting idle gaps between them.
     ///
-    /// Gap detection uses two sources:
-    /// 1. **Idle activity records** — ground truth from the daemon (screen lock, sleep, HID inactivity).
-    /// 2. **Task boundary inference** — fallback when no idle records match but a significant
-    ///    time hole exists between consecutive tasks (e.g. daemon was paused or crashed).
+    /// Away periods are the primary structure — idle detection (screen lock, sleep,
+    /// HID inactivity) is ground truth and always takes precedence over AI-generated
+    /// task boundaries. Tasks fill the spaces between away periods.
     ///
-    /// Tasks are sorted by start time and overlapping boundaries are clipped so that
-    /// AI-generated task merging never produces inverted inter-task windows.
+    /// Gap sources:
+    /// 1. **Idle activity records** — ground truth from the daemon, always shown if
+    ///    above the user's configured threshold.
+    /// 2. **Task boundary inference** — fallback when no idle records match but a
+    ///    significant time hole exists between consecutive tasks.
     static func build(from tasks: [TaskRecord], idleActivities: [ActivityRecord] = [], minIdleDuration: TimeInterval = 120) -> [TimelineItem] {
         guard !tasks.isEmpty else { return [] }
 
+        // 1. Consolidate idle records into merged gap periods (independent of tasks)
         let idleGaps = consolidateIdlePeriods(idleActivities, minDuration: minIdleDuration)
 
-        // Sort by start time — AI regeneration can produce out-of-order tasks
+        // 2. Sort tasks by start time — AI regeneration can produce out-of-order tasks
         let sorted = tasks.sorted { $0.startTime < $1.startTime }
 
-        // Compute effective end times — clip overlapping tasks so window is never inverted.
-        //    If task[i].endTime > task[i+1].startTime, clip it to task[i+1].startTime.
-        //    This keeps overlap resolution local to the display layer (TaskRecord is unchanged).
-        var effectiveEndTimes = sorted.map(\.endTime)
+        // 3. Define the active work range — only show gaps between first and last task
+        let dayStart = sorted.first!.startTime
+        let dayEnd = sorted.last!.endTime
+
+        // 4. Collect gaps within the work range, clipped to fit.
+        //    No re-filter against minIdleDuration — the gap already passed the
+        //    threshold during consolidation. Only skip trivially small slivers
+        //    (< 60s) produced by clipping to avoid rendering artifacts.
+        var relevantGaps: [(start: Date, end: Date)] = []
+        for gap in idleGaps {
+            guard gap.end > dayStart && gap.start < dayEnd else { continue }
+            let clippedStart = max(gap.start, dayStart)
+            let clippedEnd = min(gap.end, dayEnd)
+            guard clippedEnd.timeIntervalSince(clippedStart) >= 60 else { continue }
+            relevantGaps.append((start: clippedStart, end: clippedEnd))
+        }
+
+        // 5. Merge tasks and gaps into a unified chronological timeline
+        enum Event {
+            case task(TaskRecord)
+            case gap(index: Int, start: Date, end: Date, duration: TimeInterval)
+        }
+
+        var events: [(sortKey: Date, event: Event)] = []
+        for task in sorted {
+            events.append((sortKey: task.startTime, event: .task(task)))
+        }
+        for (i, gap) in relevantGaps.enumerated() {
+            let duration = gap.end.timeIntervalSince(gap.start)
+            events.append((sortKey: gap.start, event: .gap(index: i, start: gap.start, end: gap.end, duration: duration)))
+        }
+        events.sort { $0.sortKey < $1.sortKey }
+
+        // 6. Fallback: add inferred gaps for large time holes between tasks
+        //    that have no idle records (daemon was paused or crashed)
+        var inferredCount = 0
         for i in 0..<(sorted.count - 1) {
-            if effectiveEndTimes[i] > sorted[i + 1].startTime {
-                effectiveEndTimes[i] = sorted[i + 1].startTime
+            let prevEnd = sorted[i].endTime
+            let nextStart = sorted[i + 1].startTime
+            let hole = nextStart.timeIntervalSince(prevEnd)
+            guard hole >= minIdleDuration else { continue }
+
+            // Check if any gap (real or already in relevantGaps) covers this hole
+            let covered = relevantGaps.contains { gap in
+                gap.end > prevEnd && gap.start < nextStart
             }
+            guard !covered else { continue }
+
+            // Insert inferred gap
+            events.append((sortKey: prevEnd, event: .gap(
+                index: 1000 + inferredCount,
+                start: prevEnd,
+                end: nextStart,
+                duration: hole
+            )))
+            inferredCount += 1
+        }
+        // Re-sort after adding inferred gaps
+        if inferredCount > 0 {
+            events.sort { $0.sortKey < $1.sortKey }
         }
 
+        // 7. Convert to TimelineItems
         var items: [TimelineItem] = []
-        var usedGaps: Set<Int> = []
-
-        for (index, task) in sorted.enumerated() {
-            // Only show idle gaps BETWEEN tasks — never before the first
-            // task (user hadn't started working) or after the last (user
-            // is just done for the day).
-            if index > 0 {
-                let windowStart = effectiveEndTimes[index - 1]
-                let windowEnd = task.startTime
-                let interTaskGap = windowEnd.timeIntervalSince(windowStart)
-
-                // Skip if tasks are contiguous or overlapping (already clipped above)
-                if interTaskGap > 0 {
-                    // Collect all idle records that overlap this inter-task window,
-                    // then merge into a single gap so we never show consecutive "Away" items.
-                    var mergedStart: Date?
-                    var mergedEnd: Date?
-                    var matchedIndices: [Int] = []
-
-                    for (gapIndex, gap) in idleGaps.enumerated() where !usedGaps.contains(gapIndex) {
-                        // Use <= for boundary-exact matches (idle starting exactly at next task)
-                        if gap.end > windowStart && gap.start <= windowEnd {
-                            mergedStart = min(mergedStart ?? gap.start, gap.start)
-                            mergedEnd = max(mergedEnd ?? gap.end, gap.end)
-                            matchedIndices.append(gapIndex)
-                        }
-                    }
-
-                    if let start = mergedStart, let end = mergedEnd {
-                        // Emit one combined idle gap for this window
-                        let duration = end.timeIntervalSince(start)
-                        items.append(.gap(
-                            id: "idle-\(index)",
-                            startTime: start,
-                            endTime: end,
-                            duration: duration
-                        ))
-                        for gi in matchedIndices { usedGaps.insert(gi) }
-                    } else if interTaskGap >= minIdleDuration {
-                        // Fallback: infer gap from task boundaries if no idle records matched
-                        // and the gap is significant (>= min away threshold)
-                        items.append(.gap(
-                            id: "inferred-\(index)",
-                            startTime: windowStart,
-                            endTime: windowEnd,
-                            duration: interTaskGap
-                        ))
-                    }
-                }
+        for entry in events {
+            switch entry.event {
+            case .task(let task):
+                let isFirst = items.isEmpty
+                items.append(.task(task, isFirst: isFirst, isLast: false))
+            case .gap(let index, let start, let end, let duration):
+                items.append(.gap(
+                    id: "idle-\(index)",
+                    startTime: start,
+                    endTime: end,
+                    duration: duration
+                ))
             }
-
-            let isFirst = items.isEmpty
-            items.append(.task(task, isFirst: isFirst, isLast: false))
         }
 
-        // Fix isLast on the final item
-        if let lastIndex = items.indices.last {
-            if case .task(let record, let isFirst, _) = items[lastIndex] {
-                items[lastIndex] = .task(record, isFirst: isFirst, isLast: true)
+        // Fix isLast on the final task
+        if let lastTaskIndex = items.lastIndex(where: {
+            if case .task = $0 { return true }
+            return false
+        }) {
+            if case .task(let record, let isFirst, _) = items[lastTaskIndex] {
+                items[lastTaskIndex] = .task(record, isFirst: isFirst, isLast: true)
             }
         }
 
@@ -118,9 +137,12 @@ enum TimelineItem: Identifiable {
     /// Consolidate idle ActivityRecords into merged time ranges.
     /// Handles unfinalized idle records (no end_time) by estimating
     /// the end from the next activity record's timestamp.
+    /// The minDuration filter is applied **after** merging so that
+    /// adjacent short idles that combine into a long gap are kept.
     private static func consolidateIdlePeriods(_ activities: [ActivityRecord], minDuration: TimeInterval) -> [(start: Date, end: Date)] {
         let sorted = activities.sorted { $0.timestamp < $1.timestamp }
 
+        // Collect ALL idle ranges — no duration filter yet
         var idles: [(start: Date, end: Date)] = []
         for (i, record) in sorted.enumerated() {
             guard record.isIdle else { continue }
@@ -137,8 +159,7 @@ enum TimelineItem: Identifiable {
                 end = nextNonIdle?.timestamp ?? record.timestamp
             }
 
-            let duration = end.timeIntervalSince(record.timestamp)
-            guard duration >= minDuration else { continue }
+            guard end > record.timestamp else { continue }  // skip zero/negative
             idles.append((start: record.timestamp, end: end))
         }
 
@@ -154,7 +175,9 @@ enum TimelineItem: Identifiable {
             }
         }
 
-        return merged
+        // Filter by minDuration AFTER merging — small adjacent idles that
+        // combine into a longer gap are preserved.
+        return merged.filter { $0.end.timeIntervalSince($0.start) >= minDuration }
     }
 }
 
@@ -274,18 +297,20 @@ struct TaskTimelineView: View {
                     .opacity(viewModel.tasks.isEmpty ? 0.4 : 1)
                     .help("Export tasks as CSV")
 
-                    Button(action: { viewModel.generateSummary() }) {
-                        Image(systemName: "arrow.clockwise")
-                            .font(.system(size: 14, weight: .medium))
-                            .foregroundStyle(Theme.accent)
-                            .symbolEffect(.bounce, value: viewModel.isGeneratingSummary)
-                            .frame(width: 32, height: 32)
-                            .background(Theme.accent.opacity(0.08))
-                            .clipShape(Circle())
+                    if viewModel.isToday {
+                        Button(action: { viewModel.generateSummary() }) {
+                            Image(systemName: "arrow.clockwise")
+                                .font(.system(size: 14, weight: .medium))
+                                .foregroundStyle(Theme.accent)
+                                .symbolEffect(.bounce, value: viewModel.isGeneratingSummary)
+                                .frame(width: 32, height: 32)
+                                .background(Theme.accent.opacity(0.08))
+                                .clipShape(Circle())
+                        }
+                        .buttonStyle(.plain)
+                        .disabled(viewModel.isGeneratingSummary)
+                        .help("Regenerate tasks")
                     }
-                    .buttonStyle(.plain)
-                    .disabled(viewModel.isGeneratingSummary)
-                    .help("Regenerate tasks")
                 }
                 .padding(.horizontal, 24)
                 .padding(.top, 20)

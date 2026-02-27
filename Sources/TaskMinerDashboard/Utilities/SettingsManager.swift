@@ -73,4 +73,11 @@ final class SettingsManager {
         get { store?.minAwayMinutes ?? 15 }
         set { store?.minAwayMinutes = newValue }
     }
+
+    /// User-configured content exclusion rules.
+    /// Defaults to the built-in NSFW rule when no custom exclusions have been set.
+    var exclusions: [String] {
+        get { store?.exclusions ?? ["Exclude adult, explicit, or NSFW content"] }
+        set { store?.exclusions = newValue }
+    }
 }

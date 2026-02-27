@@ -87,7 +87,7 @@ struct DashboardApp: App {
         }
         .windowStyle(.titleBar)
         .windowToolbarStyle(.unified(showsTitle: false))
-        .defaultSize(width: 460, height: 560)
+        .defaultSize(width: 620, height: 480)
         .windowResizability(.contentSize)
     }
 

@@ -91,6 +91,10 @@ final class DashboardViewModel {
     // App name → bundle ID mapping (for icon resolution)
     var appNameBundleMap: [String: String] = [:]
 
+    // In-flight AI task handles (for cancellation on new request)
+    var recommendationsTask: Task<Void, Never>?
+    var habitsTask: Task<Void, Never>?
+
     // Pause
     var pauseState: PauseState?
     private var pauseTimer: Timer?
@@ -233,6 +237,7 @@ final class DashboardViewModel {
         let dateStr = SharedFormatters.dayFormatter.string(from: date)
 
         let memoryContext = memoryStore.contextString()
+        let recentProjectNames = loadRecentProjectNames(excluding: selectedDate, days: 7)
 
         // Compute significant idle breaks for session-aware task generation
         let minAwaySeconds = TimeInterval(SettingsManager.shared.minAwayMinutes * 60)
@@ -246,11 +251,23 @@ final class DashboardViewModel {
                     customPrompt: SettingsManager.shared.customPrompt,
                     memoryContext: memoryContext,
                     granularity: SettingsManager.shared.granularity,
-                    significantBreaks: significantBreaks
+                    significantBreaks: significantBreaks,
+                    recentProjectNames: recentProjectNames,
+                    exclusions: SettingsManager.shared.exclusions
                 )
 
                 try writer.deleteTasks(for: dateStr)
                 try writer.insertTasks(result.tasks)
+
+                // Persist project activities from the same AI response (no second call)
+                if !result.projects.isEmpty {
+                    let activities = Self.resolveProjectActivities(result.projects, tasks: result.tasks, dateStr: dateStr)
+                    self.persistProjectActivities(activities, dateStr: dateStr)
+                } else {
+                    // Fallback: AI didn't return projects — use one-per-task
+                    let fallback = ProjectActivityGenerator.fallbackActivities(from: result.tasks)
+                    self.persistProjectActivities(fallback, dateStr: dateStr)
+                }
 
                 // Merge new structured memory entries and re-synthesize profile
                 if !result.newMemoryEntries.isEmpty {
@@ -259,21 +276,87 @@ final class DashboardViewModel {
                     await profileSynth.synthesizeIfNeeded(store: self.memoryStore)
                 }
 
-                // Refresh all data for the day (tasks, activities, summary stats)
+                // Refresh all data for the day (tasks + project activities appear together)
                 self.loadDataForSelectedDate()
                 self.daySummaryText = result.daySummary
                 self.isGeneratingSummary = false
 
                 Analytics.summaryGenerated(taskCount: result.tasks.count)
-
-                // Also regenerate project activities now that tasks are fresh
-                self.generateProjectActivities(forceRegenerate: true)
             } catch {
                 self.summaryError = error.localizedDescription
                 self.isGeneratingSummary = false
                 Analytics.summaryFailed()
             }
         }
+    }
+
+    /// Convert ProjectClusterData from the AI response into ProjectActivity objects
+    /// using the actual task records to derive time ranges and durations.
+    static func resolveProjectActivities(_ clusters: [ProjectClusterData], tasks: [TaskRecord], dateStr: String) -> [ProjectActivity] {
+        let paletteSize = Theme.barPalette.count
+        var assignedIndices = Set<Int>()
+        var result: [ProjectActivity] = []
+
+        for cluster in clusters {
+            let validIndices = cluster.taskIndices.filter { $0 >= 0 && $0 < tasks.count && !assignedIndices.contains($0) }
+            guard !validIndices.isEmpty else { continue }
+
+            for idx in validIndices { assignedIndices.insert(idx) }
+
+            let clusterTasks = validIndices.map { tasks[$0] }
+            let totalDuration = clusterTasks.reduce(0.0) { $0 + $1.duration }
+            let startTime = clusterTasks.map(\.startTime).min() ?? clusterTasks[0].startTime
+            let endTime = clusterTasks.map(\.endTime).max() ?? clusterTasks[0].endTime
+
+            // Use AI-provided apps, or fall back to extracting from tasks
+            var appSet = Set<String>()
+            var appList: [String] = []
+            if !cluster.apps.isEmpty {
+                for app in cluster.apps where appSet.insert(app).inserted { appList.append(app) }
+            } else {
+                for task in clusterTasks {
+                    for app in task.appNamesList where appSet.insert(app).inserted { appList.append(app) }
+                }
+            }
+
+            result.append(ProjectActivity(
+                id: UUID(),
+                name: cluster.name,
+                summary: cluster.summary,
+                totalDuration: totalDuration,
+                appNames: appList,
+                taskTitles: clusterTasks.map(\.title),
+                startTime: startTime,
+                endTime: endTime,
+                colorIndex: ProjectActivity.stableColorIndex(for: cluster.name, paletteSize: paletteSize)
+            ))
+        }
+
+        // Catch-all: unassigned tasks go into "Other"
+        let unassigned = tasks.indices.filter { !assignedIndices.contains($0) }
+        if !unassigned.isEmpty {
+            let otherTasks = unassigned.map { tasks[$0] }
+            let totalDuration = otherTasks.reduce(0.0) { $0 + $1.duration }
+            var appSet = Set<String>()
+            var appList: [String] = []
+            for task in otherTasks {
+                for app in task.appNamesList where appSet.insert(app).inserted { appList.append(app) }
+            }
+            result.append(ProjectActivity(
+                id: UUID(),
+                name: "Other",
+                summary: "Miscellaneous activities.",
+                totalDuration: totalDuration,
+                appNames: appList,
+                taskTitles: otherTasks.map(\.title),
+                startTime: otherTasks.map(\.startTime).min() ?? otherTasks[0].startTime,
+                endTime: otherTasks.map(\.endTime).max() ?? otherTasks[0].endTime,
+                colorIndex: ProjectActivity.stableColorIndex(for: "Other", paletteSize: paletteSize)
+            ))
+        }
+
+        result.sort { $0.totalDuration > $1.totalDuration }
+        return result
     }
 
     // MARK: - Idle Break Consolidation
@@ -611,6 +694,7 @@ final class DashboardViewModel {
     }
 
     private func startPausePolling() {
+        pauseTimer?.invalidate()
         pauseState = pauseController.currentState()
         pauseTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
             Task { @MainActor in
@@ -654,6 +738,7 @@ final class DashboardViewModel {
     /// Reload activity data from the database every 15 minutes so the dashboard
     /// stays current while the daemon writes new data in the background.
     private func startPeriodicRefresh() {
+        refreshTimer?.invalidate()
         refreshTimer = Timer.scheduledTimer(withTimeInterval: 900, repeats: true) { [weak self] _ in
             Task { @MainActor in
                 guard let self else { return }

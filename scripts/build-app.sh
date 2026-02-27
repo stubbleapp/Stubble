@@ -4,7 +4,26 @@ set -euo pipefail
 # ─── Configuration ───────────────────────────────────────────────
 APP_NAME="Stubble"
 BUNDLE_ID="com.samattias.stubble"
-VERSION="${1:-1.6.0}"                       # pass version as first arg, e.g. ./build-app.sh 1.6.0
+GITHUB_REPO="samattias/stubble-releases"
+
+# ─── Version: explicit arg, or auto-increment from latest release ─
+if [ -n "${1:-}" ]; then
+    VERSION="$1"
+else
+    # Query latest release tag from GitHub (e.g. "v1.7.0" → "1.7.0")
+    LATEST_TAG=$(gh release view --repo "$GITHUB_REPO" --json tagName -q '.tagName' 2>/dev/null || echo "")
+    if [ -n "$LATEST_TAG" ]; then
+        LATEST_VERSION="${LATEST_TAG#v}"  # strip leading 'v'
+        # Split into major.minor.patch and bump minor
+        IFS='.' read -r MAJOR MINOR PATCH <<< "$LATEST_VERSION"
+        MINOR=$((MINOR + 1))
+        VERSION="$MAJOR.$MINOR.0"
+        echo "📌 Latest release: $LATEST_TAG → auto-incrementing to v$VERSION"
+    else
+        VERSION="1.0.0"
+        echo "📌 No existing releases found — starting at v$VERSION"
+    fi
+fi
 BUILD_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 OUTPUT_DIR="$BUILD_DIR/build"
 APP_BUNDLE="$OUTPUT_DIR/$APP_NAME.app"

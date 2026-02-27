@@ -21,7 +21,8 @@ extension DashboardViewModel {
         isGeneratingHabits = true
         habitsError = nil
 
-        Task {
+        habitsTask?.cancel()
+        habitsTask = Task {
             // Phase 1: Local aggregation
             let aggregator = HabitsDataAggregator(dbReader: db)
             guard let snapshot = aggregator.aggregate() else {
@@ -43,6 +44,8 @@ extension DashboardViewModel {
                 }
             }
 
+            guard !Task.isCancelled else { return }
+
             // Phase 2: AI analysis
             let memoryContext = memoryStore.contextString()
             let ocrDigest = loadOrBuildOCRDigest()
@@ -53,6 +56,7 @@ extension DashboardViewModel {
                     memoryContext: memoryContext,
                     ocrDigest: ocrDigest
                 )
+                guard !Task.isCancelled else { return }
                 self.habitsAnalysis = analysis
                 self.isGeneratingHabits = false
 

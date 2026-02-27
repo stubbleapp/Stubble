@@ -4,10 +4,6 @@ import TaskMinerShared
 
 class ActivityMonitor {
     var onAppChanged: ((NSRunningApplication) -> Void)?
-    /// Called when an app launches (not just activates). Provides the app for context logging.
-    var onAppLaunched: ((NSRunningApplication) -> Void)?
-    /// Called when an app terminates.
-    var onAppTerminated: ((NSRunningApplication) -> Void)?
 
     /// Set of bundle IDs launched during this session (for dedup / tracking).
     private(set) var launchedApps: Set<String> = []
@@ -68,13 +64,11 @@ class ActivityMonitor {
             launchedApps.insert(bundleId)
         }
         Logger.debug("App launched: \(app.localizedName ?? "unknown") (\(app.bundleIdentifier ?? "?"))")
-        onAppLaunched?(app)
     }
 
     @objc private func appDidTerminate(_ notification: Notification) {
         guard let app = notification.userInfo?[NSWorkspace.applicationUserInfoKey]
             as? NSRunningApplication else { return }
         Logger.debug("App terminated: \(app.localizedName ?? "unknown") (\(app.bundleIdentifier ?? "?"))")
-        onAppTerminated?(app)
     }
 }

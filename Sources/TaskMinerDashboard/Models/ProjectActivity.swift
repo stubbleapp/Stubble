@@ -1,4 +1,5 @@
 import Foundation
+import CryptoKit
 import TaskMinerShared
 
 /// A higher-level grouping of related tasks into a project or activity stream.
@@ -35,10 +36,25 @@ extension ProjectActivity: Hashable {
 }
 
 extension ProjectActivity {
+    /// Derive a stable UUID from date + name so the same project keeps its
+    /// identity across data reloads (preserving UI expansion state, etc.).
+    private static func stableID(date: String, name: String) -> UUID {
+        let data = Data((date + "|" + name).utf8)
+        let hash = SHA256.hash(data: data)
+        let bytes = Array(hash)
+        // Use first 16 bytes of SHA-256 as a UUID
+        return UUID(uuid: (
+            bytes[0], bytes[1], bytes[2], bytes[3],
+            bytes[4], bytes[5], bytes[6], bytes[7],
+            bytes[8], bytes[9], bytes[10], bytes[11],
+            bytes[12], bytes[13], bytes[14], bytes[15]
+        ))
+    }
+
     /// Create from a database record.
     init(from record: ProjectActivityRecord) {
         self.init(
-            id: UUID(),
+            id: Self.stableID(date: record.date, name: record.name),
             name: record.name,
             summary: record.summary,
             totalDuration: record.totalDuration,

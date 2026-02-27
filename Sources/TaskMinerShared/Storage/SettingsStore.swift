@@ -104,6 +104,11 @@ public final class SettingsStore {
         set { update { $0.minAwayMinutes = newValue } }
     }
 
+    public var exclusions: [String]? {
+        get { load().exclusions }
+        set { update { $0.exclusions = newValue } }
+    }
+
     // MARK: - Helpers
 
     private func update(_ mutate: (inout AppSettings) -> Void) {
@@ -125,6 +130,9 @@ public struct AppSettings: Codable, Equatable {
     public var hasCompletedSetup: Bool?
     public var launchAtLogin: Bool?
     public var minAwayMinutes: Int?
+    /// User-configured content exclusion rules (e.g. "Exclude adult content").
+    /// When nil, defaults are applied by SettingsManager.
+    public var exclusions: [String]?
 
     public init(
         geminiApiKey: String? = nil,
@@ -133,7 +141,8 @@ public struct AppSettings: Codable, Equatable {
         showScreensTab: Bool? = nil,
         hasCompletedSetup: Bool? = nil,
         launchAtLogin: Bool? = nil,
-        minAwayMinutes: Int? = nil
+        minAwayMinutes: Int? = nil,
+        exclusions: [String]? = nil
     ) {
         self.geminiApiKey = geminiApiKey
         self.customPrompt = customPrompt
@@ -142,5 +151,6 @@ public struct AppSettings: Codable, Equatable {
         self.hasCompletedSetup = hasCompletedSetup
         self.launchAtLogin = launchAtLogin
         self.minAwayMinutes = minAwayMinutes
+        self.exclusions = exclusions
     }
 }

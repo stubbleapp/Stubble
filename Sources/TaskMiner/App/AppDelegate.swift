@@ -314,6 +314,8 @@ class AppDelegate {
                 }
             }
             lastSummaryDate = today
+            // Reset daily tracked app launches at midnight
+            activityMonitor.resetLaunchedApps()
         }
 
         // 5. Daily memory review — run decay/pruning even on quiet days with no new entries.
@@ -323,11 +325,6 @@ class AppDelegate {
             let memoryStore = UserMemoryStore(filePath: config.shared.memoryPath)
             memoryStore.mergeStructured(newEntries: [])  // runs decay + pruning pass
             Logger.debug("Daily memory review: decay pass completed")
-        }
-
-        // 6. Reset daily tracked app launches at midnight
-        if today != lastSummaryDate {
-            activityMonitor.resetLaunchedApps()
         }
 
         // 7. Tiered screenshot pruning:
@@ -504,6 +501,15 @@ class AppDelegate {
         guard !idleDetector.isIdle else { return }
         guard !pauseController.isPaused else { return }
 
+        // Skip the expensive AI call if there's been minimal new activity since last run.
+        // Threshold: at least 5 non-idle activity records since last summarization.
+        let newActivityCount = db.nonIdleActivityCount(since: lastSummarizationTime)
+        guard newActivityCount >= 5 else {
+            Logger.debug("Skipping summarization — only \(newActivityCount) new activities since last run")
+            lastSummarizationTime = Date()
+            return
+        }
+
         lastSummarizationTime = Date()
         // Summarize the full day each time — the AI sees all activity and produces
         // a coherent set of tasks. Previous tasks are deleted and replaced.
@@ -545,6 +551,9 @@ class AppDelegate {
         let minAwaySeconds = TimeInterval((cliSettings?.minAwayMinutes ?? 15) * 60)
         let significantBreaks = Self.consolidateIdleBreaks(from: activityData, minDuration: minAwaySeconds)
 
+        // Load recent project names for consistent naming across days
+        let recentProjectNames = loadRecentProjectNames(db: db, excluding: todayString(), days: 7)
+
         let db = self.db
         let dateStr = todayString()
         Task {
@@ -557,7 +566,9 @@ class AppDelegate {
                     granularity: cliSettings?.granularity ?? .medium,
                     fileEvents: fileEvents,
                     calendarContext: calContext,
-                    significantBreaks: significantBreaks
+                    significantBreaks: significantBreaks,
+                    recentProjectNames: recentProjectNames,
+                    exclusions: cliSettings?.exclusions ?? ["Exclude adult, explicit, or NSFW content"]
                 )
                 guard !result.tasks.isEmpty else { return }
                 await MainActor.run {
@@ -581,6 +592,11 @@ class AppDelegate {
                         Logger.info("AI generated \(inserted) task(s)")
                     }
 
+                    // Persist project activities from the same AI response
+                    if !result.projects.isEmpty {
+                        Self.persistProjectClusters(result.projects, tasks: result.tasks, dateStr: dateStr, db: db)
+                    }
+
                     // Merge new structured memory entries
                     if !result.newMemoryEntries.isEmpty {
                         memoryStore.mergeStructured(newEntries: result.newMemoryEntries)
@@ -600,11 +616,91 @@ class AppDelegate {
         }
     }
 
+    /// Load recent project names from past days for consistent naming.
+    private func loadRecentProjectNames(db: DatabaseManager, excluding todayStr: String, days: Int) -> [String] {
+        let cal = Calendar.current
+        let today = Date()
+        var names = Set<String>()
+        for offset in 1...days {
+            guard let date = cal.date(byAdding: .day, value: -offset, to: today) else { continue }
+            let dateStr = SharedFormatters.dayFormatter.string(from: date)
+            for name in db.projectActivityNames(for: dateStr) {
+                names.insert(name)
+            }
+        }
+        return Array(names).sorted()
+    }
+
+    /// Convert ProjectClusterData into ProjectActivityRecords and persist to DB.
+    private static func persistProjectClusters(_ clusters: [ProjectClusterData], tasks: [TaskRecord], dateStr: String, db: DatabaseManager) {
+        do {
+            try db.deleteProjectActivities(for: dateStr)
+        } catch {
+            Logger.error("Failed to delete old project activities: \(error.localizedDescription)")
+            return
+        }
+
+        var records: [ProjectActivityRecord] = []
+        var assignedIndices = Set<Int>()
+
+        for cluster in clusters {
+            let validIndices = cluster.taskIndices.filter { $0 >= 0 && $0 < tasks.count && !assignedIndices.contains($0) }
+            guard !validIndices.isEmpty else { continue }
+            for idx in validIndices { assignedIndices.insert(idx) }
+
+            let clusterTasks = validIndices.map { tasks[$0] }
+            let totalDuration = clusterTasks.reduce(0.0) { $0 + $1.duration }
+            let startTime = clusterTasks.map(\.startTime).min() ?? clusterTasks[0].startTime
+            let endTime = clusterTasks.map(\.endTime).max() ?? clusterTasks[0].endTime
+
+            let appsJSON: String
+            if !cluster.apps.isEmpty {
+                appsJSON = (try? JSONSerialization.data(withJSONObject: cluster.apps)).flatMap { String(data: $0, encoding: .utf8) } ?? "[]"
+            } else {
+                var apps: [String] = []
+                var seen = Set<String>()
+                for task in clusterTasks {
+                    for app in task.appNamesList where seen.insert(app).inserted { apps.append(app) }
+                }
+                appsJSON = (try? JSONSerialization.data(withJSONObject: apps)).flatMap { String(data: $0, encoding: .utf8) } ?? "[]"
+            }
+
+            let titlesJSON = (try? JSONSerialization.data(withJSONObject: clusterTasks.map(\.title))).flatMap { String(data: $0, encoding: .utf8) } ?? "[]"
+
+            // Use djb2 hash for stable color index (same algorithm as ProjectActivity.stableColorIndex)
+            var hash: UInt64 = 5381
+            for byte in cluster.name.lowercased().utf8 {
+                hash = ((hash &<< 5) &+ hash) &+ UInt64(byte)
+            }
+            let colorIndex = Int(hash % 8) // 8 = typical barPalette size
+
+            records.append(ProjectActivityRecord(
+                date: dateStr,
+                name: cluster.name,
+                summary: cluster.summary,
+                totalDuration: totalDuration,
+                appNames: appsJSON,
+                taskTitles: titlesJSON,
+                startTime: startTime,
+                endTime: endTime,
+                colorIndex: colorIndex
+            ))
+        }
+
+        do {
+            try db.insertProjectActivities(records)
+            Logger.info("Persisted \(records.count) project activities")
+        } catch {
+            Logger.error("Failed to insert project activities: \(error.localizedDescription)")
+        }
+    }
+
     /// Minimal Codable struct to read the shared settings file from the dashboard.
     private struct CLISettings: Codable {
         var customPrompt: String?
         var granularity: TaskGranularity?
         var minAwayMinutes: Int?
+        var exclusions: [String]?
     }
 
     /// Consolidate idle activities into merged break periods, filtering by minimum duration.

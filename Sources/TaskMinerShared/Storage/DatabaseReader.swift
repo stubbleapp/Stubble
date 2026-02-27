@@ -240,8 +240,11 @@ public class DatabaseReader {
         return sqlite3_step(stmt) == SQLITE_ROW ? Int(sqlite3_column_int(stmt, 0)) : 0
     }
 
+    /// Note: PRAGMA doesn't support parameter binding — integer interpolation is safe here.
     private func setUserVersion(_ version: Int) {
-        sqlite3_exec(db, "PRAGMA user_version = \(version)", nil, nil, nil)
+        if sqlite3_exec(db, "PRAGMA user_version = \(version)", nil, nil, nil) != SQLITE_OK {
+            Logger.warning("Failed to set user_version to \(version)")
+        }
     }
 
     deinit {

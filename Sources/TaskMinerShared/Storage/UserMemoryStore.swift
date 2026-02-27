@@ -448,17 +448,6 @@ public final class UserMemoryStore: @unchecked Sendable {
         entries = entries.enumerated().compactMap { indicesToRemove.contains($0.offset) ? nil : $0.element }
     }
 
-    /// Legacy merge for flat string entries (backward compatibility with
-    /// callers that haven't been updated yet).
-    public func merge(newEntries: [String]) {
-        let structured = newEntries.compactMap { content -> MemoryEntry? in
-            let trimmed = content.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !trimmed.isEmpty else { return nil }
-            return MemoryEntry(category: .workflow, content: trimmed)
-        }
-        mergeStructured(newEntries: structured)
-    }
-
     // MARK: - Heuristic Matching
 
     /// Find the best matching existing entry for an incoming one.
