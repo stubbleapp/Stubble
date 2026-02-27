@@ -167,28 +167,28 @@ enum Theme {
 
     // MARK: - Chat overlay
 
-    /// Chat panel glass fill — translucent white in light, translucent dark in dark mode.
+    /// Chat panel background — solid, no translucency.
     static let chatSurface = adaptive(
-        light: NSColor(red: 1.0, green: 1.0, blue: 1.0, alpha: 0.88),
-        dark: NSColor(red: 0.16, green: 0.16, blue: 0.17, alpha: 0.92)
+        light: NSColor(red: 0.995, green: 0.993, blue: 0.988, alpha: 1.0),
+        dark: NSColor(red: 0.16, green: 0.16, blue: 0.17, alpha: 1.0)
     )
 
-    /// Chat panel border.
+    /// Chat panel border — solid.
     static let chatBorder = adaptive(
-        light: NSColor(red: 1.0, green: 1.0, blue: 1.0, alpha: 0.5),
-        dark: NSColor(red: 0.30, green: 0.30, blue: 0.32, alpha: 0.6)
+        light: NSColor(red: 0.88, green: 0.876, blue: 0.86, alpha: 1.0),
+        dark: NSColor(red: 0.30, green: 0.30, blue: 0.32, alpha: 1.0)
     )
 
     /// Subtle inner separator in the chat panel.
     static let chatSeparator = adaptive(
-        light: NSColor(red: 0.0, green: 0.0, blue: 0.0, alpha: 0.04),
-        dark: NSColor(red: 1.0, green: 1.0, blue: 1.0, alpha: 0.06)
+        light: NSColor(red: 0.0, green: 0.0, blue: 0.0, alpha: 0.06),
+        dark: NSColor(red: 1.0, green: 1.0, blue: 1.0, alpha: 0.08)
     )
 
-    /// Assistant message bubble background.
+    /// Assistant message bubble background — solid.
     static let chatAssistantBubble = adaptive(
-        light: NSColor(red: 1.0, green: 1.0, blue: 1.0, alpha: 0.7),
-        dark: NSColor(red: 0.22, green: 0.22, blue: 0.23, alpha: 0.8)
+        light: NSColor(red: 0.955, green: 0.953, blue: 0.945, alpha: 1.0),
+        dark: NSColor(red: 0.22, green: 0.22, blue: 0.23, alpha: 1.0)
     )
 
     // MARK: - Screenshot trigger badges

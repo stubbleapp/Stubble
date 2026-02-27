@@ -15,9 +15,10 @@ struct PauseControlView: View {
                     .font(.system(size: 13, weight: .medium))
                     .foregroundStyle(Theme.textPrimary)
                     .frame(width: iconSize, height: iconSize)
-                    .contentShape(Circle())
+                    .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
+            .frame(width: iconSize, height: iconSize)
             .modifier(NoToolbarGlassModifier())
             .accessibilityLabel("Resume monitoring")
         } else {
@@ -32,6 +33,7 @@ struct PauseControlView: View {
                 Button("Until resumed") { viewModel.pause(for: nil) }
             } label: {
                 Color.clear
+                    .frame(width: iconSize, height: iconSize)
             }
             .menuStyle(.borderlessButton)
             .menuIndicator(.hidden)
@@ -40,6 +42,7 @@ struct PauseControlView: View {
                 Image(systemName: "pause.fill")
                     .font(.system(size: 13, weight: .medium))
                     .foregroundStyle(Theme.textSecondary)
+                    .frame(width: iconSize, height: iconSize)
                     .allowsHitTesting(false)
             }
             .contentShape(Circle())

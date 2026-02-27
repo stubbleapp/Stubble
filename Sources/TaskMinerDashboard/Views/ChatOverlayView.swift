@@ -48,7 +48,7 @@ struct ChatOverlayView: View {
             }
             .background(
                 RoundedRectangle(cornerRadius: isExpanded ? 20 : 14, style: .continuous)
-                    .fill(Theme.chatSurface.opacity(isExpanded ? 0.85 : 1))
+                    .fill(Theme.chatSurface)
                     .shadow(color: .black.opacity(0.06), radius: 20, y: -6)
                     .shadow(color: .black.opacity(0.04), radius: 6, y: -2)
             )
@@ -116,7 +116,7 @@ struct ChatOverlayView: View {
                     .font(.system(size: 11, weight: .semibold))
                     .foregroundStyle(Theme.textMuted)
                     .frame(width: 24, height: 24)
-                    .background(.ultraThinMaterial)
+                    .background(Theme.chatSeparator)
                     .clipShape(Circle())
             }
             .buttonStyle(.plain)
@@ -164,7 +164,7 @@ struct ChatOverlayView: View {
                             .font(.system(size: 10))
                             .foregroundStyle(Theme.textMuted.opacity(0.6))
                             .frame(width: 22, height: 22)
-                            .background(.ultraThinMaterial)
+                            .background(Theme.chatSeparator)
                             .clipShape(Circle())
                     }
                     .buttonStyle(.plain)
@@ -180,7 +180,7 @@ struct ChatOverlayView: View {
                         .font(.system(size: 10, weight: .semibold))
                         .foregroundStyle(Theme.textMuted.opacity(0.6))
                         .frame(width: 22, height: 22)
-                        .background(.ultraThinMaterial)
+                        .background(Theme.chatSeparator)
                         .clipShape(Circle())
                 }
                 .buttonStyle(.plain)
@@ -196,10 +196,9 @@ struct ChatOverlayView: View {
                 .frame(height: 0.5)
                 .padding(.horizontal, 12)
 
-            // Messages or suggestions
+            // Messages
             if viewModel.chatMessages.isEmpty && !viewModel.isChatLoading {
                 Spacer(minLength: 0)
-                suggestionsPanel
             } else {
                 messagesScrollView
             }
@@ -209,38 +208,42 @@ struct ChatOverlayView: View {
                 .fill(Theme.chatSeparator)
                 .frame(height: 0.5)
                 .padding(.horizontal, 12)
+
+            // Horizontal suggestion pills — always visible
+            suggestionPills
         }
     }
 
-    // MARK: - Suggestions Panel
+    // MARK: - Suggestion Pills (horizontal scroll, always visible)
 
-    private var suggestionsPanel: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            ForEach(Self.suggestions, id: \.self) { suggestion in
-                Button {
-                    inputText = suggestion
-                    sendMessage()
-                } label: {
-                    HStack(spacing: 8) {
+    private var suggestionPills: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 6) {
+                ForEach(Self.suggestions, id: \.self) { suggestion in
+                    Button {
+                        inputText = suggestion
+                        sendMessage()
+                    } label: {
                         Text(suggestion)
-                            .font(.system(size: 12, weight: .medium))
-                            .foregroundStyle(Theme.textPrimary)
-
-                        Spacer()
-
-                        Image(systemName: "arrow.up.right")
-                            .font(.system(size: 9, weight: .semibold))
-                            .foregroundStyle(Theme.textQuaternary)
+                            .font(.system(size: 11, weight: .medium))
+                            .foregroundStyle(Theme.textSecondary)
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 5)
+                            .background(
+                                Capsule()
+                                    .fill(Theme.chatSeparator)
+                            )
+                            .overlay(
+                                Capsule()
+                                    .strokeBorder(Theme.chatBorder, lineWidth: 0.5)
+                            )
                     }
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 8)
-                    .contentShape(Rectangle())
+                    .buttonStyle(.plain)
                 }
-                .buttonStyle(SuggestionButtonStyle())
             }
+            .padding(.horizontal, 14)
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 10)
+        .padding(.vertical, 8)
     }
 
     // MARK: - Messages Scroll View
@@ -341,25 +344,6 @@ private struct StubbleIconView: View {
             .resizable()
             .aspectRatio(contentMode: .fit)
             .frame(width: size, height: size)
-    }
-}
-
-// MARK: - Suggestion Button Style (hover highlight)
-
-private struct SuggestionButtonStyle: ButtonStyle {
-    @State private var isHovering = false
-
-    func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .background(
-                RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .fill(isHovering ? Theme.chatSeparator : Color.clear)
-            )
-            .onHover { hovering in
-                withAnimation(.easeInOut(duration: 0.12)) {
-                    isHovering = hovering
-                }
-            }
     }
 }
 
