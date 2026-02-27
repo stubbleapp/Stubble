@@ -86,7 +86,7 @@ class DatabaseManager {
     }
 
     /// Current schema version — kept in sync with DatabaseReader's migrations.
-    private static let schemaVersion = 9
+    private static let schemaVersion = 11
 
     private func runMigrations() {
         let currentVersion = getUserVersion()
@@ -219,6 +219,28 @@ class DatabaseManager {
                 migrationFailed = true
             }
             sqlite3_exec(db, "CREATE INDEX IF NOT EXISTS idx_file_events_timestamp ON file_events(timestamp)", nil, nil, nil)
+        }
+
+        if currentVersion < 10 {
+            let habitsSql = """
+            CREATE TABLE IF NOT EXISTS habits_analysis (
+                id            INTEGER PRIMARY KEY AUTOINCREMENT,
+                generated_at  TEXT NOT NULL,
+                days_analyzed INTEGER NOT NULL,
+                analysis_json TEXT NOT NULL,
+                snapshot_hash TEXT NOT NULL
+            )
+            """
+            if !execMigration(habitsSql, label: "10: create habits_analysis table") {
+                migrationFailed = true
+            }
+        }
+
+        if currentVersion < 11 {
+            if !execMigration("ALTER TABLE tasks ADD COLUMN websites TEXT DEFAULT '[]'",
+                              label: "11: add websites to tasks", ignoreDuplicate: true) {
+                migrationFailed = true
+            }
         }
 
         // Only bump the version if all migrations succeeded — failed migrations

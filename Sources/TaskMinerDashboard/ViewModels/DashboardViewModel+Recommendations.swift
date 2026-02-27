@@ -24,7 +24,6 @@ extension DashboardViewModel {
         let recentTasks = loadRecentTasksForSelectedDate(days: 7)
         let currentProjectActivities = projectActivities
         let appsUsed = buildAppUsageMap(from: recentTasks)
-        let memoryContext = memoryStore.contextString()
         let activityLog = buildActivityLog()
         let weeklyTrends = buildWeeklyTrends(from: recentTasks)
         let ocrDigest = loadOrBuildOCRDigest()
@@ -34,6 +33,13 @@ extension DashboardViewModel {
 
         Task {
             do {
+                // Ensure user profile is fresh before generating recommendations
+                if let client = self.geminiClient {
+                    let synth = ProfileSynthesizer(geminiClient: client)
+                    await synth.synthesizeIfNeeded(store: self.memoryStore)
+                }
+                let memoryContext = self.memoryStore.contextString()
+
                 let content: StubsContent
                 if viewingToday {
                     content = try await generator.generate(
@@ -161,36 +167,63 @@ extension DashboardViewModel {
     }
 
     /// Analyze cross-day patterns: recurring projects, time distribution shifts, focus trends.
+    /// Uses actual project activity data from the DB rather than regex-based keyword extraction.
     private func buildWeeklyTrends(from recentTasks: [String: [TaskRecord]]) -> String? {
         guard recentTasks.count >= 2 else { return nil }
 
+        let formatter = SharedFormatters.dayFormatter
         var projectDays: [String: Int] = [:]
+        var projectMinutes: [String: Double] = [:]
         var dailyHours: [(date: String, hours: Double)] = []
+        var topicDays: [String: Int] = [:]
 
         for (dateStr, tasks) in recentTasks {
             let totalSecs = tasks.reduce(0.0) { $0 + $1.duration }
             dailyHours.append((dateStr, totalSecs / 3600))
 
-            // Extract project-like keywords from task titles
+            // Use real project activities from the DB for this date
+            if let db = dbReader, let date = formatter.date(from: dateStr) {
+                let paRecords = db.projectActivities(for: date)
+                for pa in paRecords {
+                    let name = pa.name
+                    projectDays[name, default: 0] += 1
+                    projectMinutes[name, default: 0] += pa.totalDuration / 60
+                }
+            }
+
+            // Also extract recurring themes from task descriptions for richer context
             for task in tasks {
-                let words = task.title
-                    .replacingOccurrences(of: "ing ", with: " ")
+                let combined = "\(task.title) \(task.description)"
+                let words = combined
                     .split(separator: " ")
-                    .filter { $0.count > 3 }
-                    .map { String($0) }
+                    .filter { $0.count > 4 }
+                    .map { String($0).trimmingCharacters(in: .punctuationCharacters) }
                 for word in words where word.first?.isUppercase == true {
-                    projectDays[word, default: 0] += 1
+                    topicDays[word, default: 0] += 1
                 }
             }
         }
 
         var lines: [String] = []
 
-        // Recurring topics (appeared on 2+ days)
-        let recurring = projectDays.filter { $0.value >= 2 }.sorted { $0.value > $1.value }
-        if !recurring.isEmpty {
-            let topics = recurring.prefix(8).map { "\($0.key) (\($0.value) days)" }.joined(separator: ", ")
-            lines.append("Recurring focus areas this week: \(topics)")
+        // Recurring projects from real project activity data (appeared 2+ days)
+        let recurringProjects = projectDays.filter { $0.value >= 2 }.sorted { $0.value > $1.value }
+        if !recurringProjects.isEmpty {
+            let projects = recurringProjects.prefix(8).map { name, days in
+                let mins = Int(projectMinutes[name] ?? 0)
+                return "\(name) (\(days) days, \(mins)m total)"
+            }.joined(separator: ", ")
+            lines.append("Recurring projects this week: \(projects)")
+        }
+
+        // Supplementary recurring topics from task titles (things not captured by project activities)
+        let projectNames = Set(projectDays.keys.map { $0.lowercased() })
+        let recurringTopics = topicDays
+            .filter { $0.value >= 2 && !projectNames.contains($0.key.lowercased()) }
+            .sorted { $0.value > $1.value }
+        if !recurringTopics.isEmpty {
+            let topics = recurringTopics.prefix(6).map { "\($0.key) (\($0.value) days)" }.joined(separator: ", ")
+            lines.append("Recurring themes: \(topics)")
         }
 
         // Daily active hours
@@ -203,7 +236,8 @@ extension DashboardViewModel {
         return lines.isEmpty ? nil : lines.joined(separator: "\n")
     }
 
-    /// Build a compact activity log from the selected date's grouped activities, including window titles.
+    /// Build a compact activity log from the selected date's grouped activities,
+    /// including window titles, browser URLs, and document paths.
     private func buildActivityLog() -> String? {
         guard !groupedActivities.isEmpty else { return nil }
         var lines: [String] = []
@@ -214,6 +248,26 @@ extension DashboardViewModel {
             lines.append("- [\(start)–\(end)] \(group.appName) (\(durMins)m)")
             for title in group.windowTitles.prefix(3) {
                 lines.append("  · \(title)")
+            }
+            // Browser URLs visited in this group (deduplicated)
+            let urls = group.activities
+                .compactMap(\.browserURL)
+                .filter { !$0.isEmpty }
+                .reduce(into: [String]()) { result, url in
+                    if !result.contains(url) { result.append(url) }
+                }
+            for url in urls.prefix(3) {
+                lines.append("  → \(url)")
+            }
+            // Document paths opened in this group (deduplicated)
+            let docs = group.activities
+                .compactMap(\.documentPath)
+                .filter { !$0.isEmpty }
+                .reduce(into: [String]()) { result, doc in
+                    if !result.contains(doc) { result.append(doc) }
+                }
+            for doc in docs.prefix(3) {
+                lines.append("  📄 \(doc)")
             }
         }
         return lines.joined(separator: "\n")

@@ -80,6 +80,14 @@ final class DashboardViewModel {
     /// expands, sends the message, and clears it.
     var pendingChatQuestion: String?
 
+    // Habits (cross-day analysis)
+    var habitsAnalysis: HabitsAnalysis?
+    var habitsSnapshot: HabitsDataSnapshot?
+    var isGeneratingHabits = false
+    var habitsError: String?
+    var habitsGenerator: HabitsGenerator?
+    var hasAttemptedHabitsGeneration = false
+
     // App name → bundle ID mapping (for icon resolution)
     var appNameBundleMap: [String: String] = [:]
 
@@ -87,6 +95,8 @@ final class DashboardViewModel {
     var pauseState: PauseState?
     private var pauseTimer: Timer?
     private var refreshTimer: Timer?
+    private var wakeObserver: NSObjectProtocol?
+    private var timeChangeObserver: NSObjectProtocol?
 
     deinit {
         // deinit is nonisolated but this @MainActor class is always deallocated on
@@ -95,6 +105,8 @@ final class DashboardViewModel {
         MainActor.assumeIsolated {
             pauseTimer?.invalidate()
             refreshTimer?.invalidate()
+            if let wakeObserver { NotificationCenter.default.removeObserver(wakeObserver) }
+            if let timeChangeObserver { NotificationCenter.default.removeObserver(timeChangeObserver) }
         }
     }
 
@@ -139,12 +151,14 @@ final class DashboardViewModel {
             self.taskSummarizer = TaskSummarizer(geminiClient: client)
             self.activityGenerator = ProjectActivityGenerator(geminiClient: client)
             self.recommendationGenerator = RecommendationGenerator(geminiClient: client)
+            self.habitsGenerator = HabitsGenerator(geminiClient: client)
             self.hasGeminiKey = true
         } else {
             self.geminiClient = nil
             self.taskSummarizer = nil
             self.activityGenerator = nil
             self.recommendationGenerator = nil
+            self.habitsGenerator = nil
             self.hasGeminiKey = false
         }
 
@@ -154,6 +168,7 @@ final class DashboardViewModel {
         loadAppNameMap()
         startPausePolling()
         startPeriodicRefresh()
+        observeSystemWake()
 
         // Auto-generate day summaries for recent past days that don't have one yet
         autoGeneratePendingSummaries()
@@ -371,12 +386,14 @@ final class DashboardViewModel {
             self.taskSummarizer = TaskSummarizer(geminiClient: client)
             self.activityGenerator = ProjectActivityGenerator(geminiClient: client)
             self.recommendationGenerator = RecommendationGenerator(geminiClient: client)
+            self.habitsGenerator = HabitsGenerator(geminiClient: client)
             self.hasGeminiKey = true
         } else {
             self.geminiClient = nil
             self.taskSummarizer = nil
             self.activityGenerator = nil
             self.recommendationGenerator = nil
+            self.habitsGenerator = nil
             self.hasGeminiKey = false
         }
     }
@@ -426,23 +443,6 @@ final class DashboardViewModel {
     /// Global top-3 activities ordered by duration (stable column positions).
     var top3Activities: [(name: String, color: Color)] {
         resolvedTop3.map { ($0.activity.name, $0.color) }
-    }
-
-    /// Top-3 activities formatted for the day summary legend.
-    /// Durations are normalized so the total across all project activities
-    /// never exceeds the actual active time for the day.
-    var topActivityLegendItems: [ActivityLegendItem] {
-        let rawTotal = projectActivities.reduce(0.0) { $0 + $1.totalDuration }
-        let activeCap = activeSeconds > 0 ? activeSeconds : rawTotal
-        let scale = rawTotal > activeCap && rawTotal > 0 ? activeCap / rawTotal : 1.0
-
-        return resolvedTop3.map { item in
-            ActivityLegendItem(
-                name: item.activity.name,
-                color: item.color,
-                duration: item.activity.totalDuration * scale
-            )
-        }
     }
 
     /// Returns all top-3 activity colors whose time range overlaps the given task.
@@ -601,6 +601,10 @@ final class DashboardViewModel {
         daySummaryText = nil
         summaryError = nil
         recommendationsError = nil
+        habitsAnalysis = nil
+        habitsSnapshot = nil
+        habitsError = nil
+        hasAttemptedHabitsGeneration = false
 
         Logger.info("All data cleared by user")
         Analytics.dataClearedByUser()
@@ -613,6 +617,38 @@ final class DashboardViewModel {
                 self?.pauseState = self?.pauseController.currentState()
             }
         }
+    }
+
+    /// Listen for system wake and significant time changes (e.g. midnight rollover)
+    /// so the dashboard auto-advances to today instead of showing yesterday's stale data.
+    private func observeSystemWake() {
+        wakeObserver = NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.didWakeNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in self?.advanceToTodayIfNeeded() }
+        }
+
+        timeChangeObserver = NotificationCenter.default.addObserver(
+            forName: .NSCalendarDayChanged,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in self?.advanceToTodayIfNeeded() }
+        }
+    }
+
+    /// If the selected date is no longer today, auto-switch to today and reload.
+    private func advanceToTodayIfNeeded() {
+        guard !Calendar.current.isDateInToday(selectedDate) else {
+            // Still today — just refresh data (daemon may have written new rows)
+            loadAvailableDates()
+            loadDataForSelectedDate()
+            return
+        }
+        Logger.info("Dashboard: date rolled over, advancing to today")
+        selectDate(Date())
     }
 
     /// Reload activity data from the database every 15 minutes so the dashboard

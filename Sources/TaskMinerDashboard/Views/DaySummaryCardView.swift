@@ -4,9 +4,11 @@ import TaskMinerShared
 struct DaySummaryCardView: View {
     let tasks: [TaskRecord]
     let aiSummary: String?
-    let topActivities: [ActivityLegendItem]
+    var daySummaryContent: String? = nil
+    var projectActivities: [ProjectActivity] = []
 
     @State private var isExpanded = false
+    @State private var expandedActivityID: UUID?
 
     /// Locally-computed fallback when no AI summary is available.
     private var localSummary: String {
@@ -35,60 +37,109 @@ struct DaySummaryCardView: View {
         return parts.joined(separator: ", ")
     }
 
-    private var displaySummary: String {
+    /// Short summary for collapsed state.
+    private var collapsedSummary: String {
         aiSummary ?? localSummary
+    }
+
+    private var sortedProjects: [ProjectActivity] {
+        projectActivities.sorted { $0.totalDuration > $1.totalDuration }
+    }
+
+    /// Collapsed: top 3, Expanded: all
+    private var visibleProjects: [ProjectActivity] {
+        isExpanded ? sortedProjects : Array(sortedProjects.prefix(3))
     }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            // Top 3 projects in a vertical column
-            if !topActivities.isEmpty {
-                VStack(alignment: .leading, spacing: 6) {
-                    ForEach(Array(topActivities.enumerated()), id: \.offset) { _, item in
-                        HStack(spacing: 6) {
-                            ActivityHaloDot(color: item.color, size: 18)
-                            Text(item.name)
-                                .font(.system(size: 12, weight: .medium))
-                                .foregroundStyle(Theme.textPrimary)
-                                .lineLimit(1)
-                            Spacer()
-                            Text(formatDuration(item.duration))
-                                .font(.system(size: 11).monospacedDigit())
-                                .foregroundStyle(Theme.textMuted)
-                        }
+            // Activity rows — top 3 when collapsed, all when expanded
+            if !visibleProjects.isEmpty {
+                VStack(spacing: 0) {
+                    ForEach(visibleProjects) { activity in
+                        ProjectRow(activity: activity, expandedID: $expandedActivityID)
                     }
                 }
             }
 
-            // Summary description — collapsed: 2 lines, expanded: full
-            if !displaySummary.isEmpty {
-                Text(displaySummary)
-                    .font(.system(size: 12))
-                    .foregroundStyle(Theme.textSecondary)
-                    .lineLimit(isExpanded ? nil : 2)
-                    .fixedSize(horizontal: false, vertical: isExpanded)
+            if isExpanded {
+                // Expanded: rich summary below activities (text selectable, taps don't collapse)
+                expandedSummary
+
+                // Collapse button
+                HStack {
+                    Spacer()
+                    Button {
+                        withAnimation(.easeInOut(duration: 0.2)) {
+                            isExpanded = false
+                        }
+                    } label: {
+                        HStack(spacing: 4) {
+                            Text("Show less")
+                                .font(.system(size: 12, weight: .medium))
+                            Image(systemName: "chevron.up")
+                                .font(.system(size: 9, weight: .semibold))
+                        }
+                        .foregroundStyle(Theme.accent)
+                    }
+                    .buttonStyle(.plain)
+                    Spacer()
+                }
+                .padding(.top, 4)
+            } else {
+                // Collapsed: 2-line plain summary — tappable to expand
+                if !collapsedSummary.isEmpty {
+                    Text(collapsedSummary)
+                        .font(.system(size: 12))
+                        .foregroundStyle(Theme.textSecondary)
+                        .lineLimit(2)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .contentShape(Rectangle())
+                        .onTapGesture {
+                            withAnimation(.easeInOut(duration: 0.2)) {
+                                isExpanded = true
+                            }
+                        }
+                }
             }
         }
         .padding(14)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(.ultraThinMaterial)
-        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .stroke(Theme.cardBorder.opacity(0.6), lineWidth: 0.5)
+        .background(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(Theme.cardBackground)
         )
-        .contentShape(Rectangle())
-        .onTapGesture {
-            withAnimation(.easeInOut(duration: 0.2)) {
-                isExpanded.toggle()
+        .overlay(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .strokeBorder(Theme.cardBorder, lineWidth: 0.5)
+        )
+    }
+
+    @ViewBuilder
+    private var expandedSummary: some View {
+        if let richSummary = daySummaryContent {
+            // Richer stubs narrative with markdown rendering
+            if let attributed = MarkdownHelper.renderMarkdown(richSummary) {
+                Text(attributed)
+                    .font(.system(size: 13))
+                    .foregroundStyle(Theme.textSecondary)
+                    .lineSpacing(3)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .textSelection(.enabled)
+            } else {
+                Text(richSummary)
+                    .font(.system(size: 13))
+                    .foregroundStyle(Theme.textSecondary)
+                    .lineSpacing(3)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .textSelection(.enabled)
             }
+        } else if !collapsedSummary.isEmpty {
+            // Fall back to AI summary / local summary (full text)
+            Text(collapsedSummary)
+                .font(.system(size: 12))
+                .foregroundStyle(Theme.textSecondary)
+                .fixedSize(horizontal: false, vertical: true)
         }
     }
-}
-
-/// Data for the activity legend in the day summary card.
-struct ActivityLegendItem {
-    let name: String
-    let color: Color
-    let duration: TimeInterval
 }

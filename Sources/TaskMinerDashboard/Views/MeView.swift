@@ -30,7 +30,7 @@ struct MeView: View {
                     if !synthesizedProfile.isEmpty {
                         profileCard
                             .padding(.horizontal, 24)
-                            .padding(.bottom, 20)
+                            .padding(.bottom, 16)
                     }
 
                     // Category sections
@@ -108,8 +108,10 @@ struct MeView: View {
             .textSelection(.enabled)
             .padding(16)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(.ultraThinMaterial)
-            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .background(
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .fill(Theme.cardBackground)
+            )
             .overlay(
                 RoundedRectangle(cornerRadius: 12, style: .continuous)
                     .strokeBorder(Theme.cardBorder, lineWidth: 0.5)

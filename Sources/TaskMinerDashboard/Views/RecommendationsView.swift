@@ -12,16 +12,6 @@ struct RecommendationsView: View {
 
     private var hasContent: Bool {
         !viewModel.recommendations.isEmpty
-            || viewModel.daySummaryContent != nil
-            || !viewModel.projectActivities.isEmpty
-    }
-
-    private var displaySummary: String? {
-        viewModel.daySummaryContent ?? viewModel.daySummaryText
-    }
-
-    private var sortedProjects: [ProjectActivity] {
-        viewModel.projectActivities.sorted { $0.totalDuration > $1.totalDuration }
     }
 
     var body: some View {
@@ -81,28 +71,14 @@ struct RecommendationsView: View {
                                 .padding(.bottom, 12)
                         }
 
-                        // 2. Day Summary
-                        if let summary = displaySummary {
-                            daySummaryCard(summary)
-                                .padding(.horizontal, 24)
-                                .padding(.bottom, 16)
-                        }
-
-                        // 3. Top Projects
-                        if !sortedProjects.isEmpty {
-                            projectsSection
-                                .padding(.horizontal, 24)
-                                .padding(.bottom, 16)
-                        }
-
-                        // 4. Recommendations (horizontal scroll cards)
-                        if viewModel.isViewingToday && !viewModel.recommendations.isEmpty {
+                        // 2. Recommendations (horizontal scroll cards)
+                        if !viewModel.recommendations.isEmpty {
                             recommendationCardsSection
                                 .padding(.bottom, 16)
                         }
 
-                        // 5. Suggested Questions
-                        if viewModel.isViewingToday && !viewModel.suggestedQuestions.isEmpty {
+                        // 3. Suggested Questions
+                        if !viewModel.suggestedQuestions.isEmpty {
                             questionPills
                                 .padding(.bottom, 16)
                         }
@@ -129,19 +105,11 @@ struct RecommendationsView: View {
     private var headerSection: some View {
         HStack(alignment: .top) {
             VStack(alignment: .leading, spacing: 4) {
-                if viewModel.isViewingToday {
-                    Text("Hey, \(firstName)")
-                        .font(Theme.headerFont(size: 24))
-                        .foregroundStyle(Theme.textPrimary)
-                } else {
-                    Text(SharedFormatters.headerDateFormatter.string(from: viewModel.selectedDate))
-                        .font(Theme.headerFont(size: 24))
-                        .foregroundStyle(Theme.textPrimary)
-                }
+                Text("Hey, \(firstName)")
+                    .font(Theme.headerFont(size: 24))
+                    .foregroundStyle(Theme.textPrimary)
 
-                // Only show the greeting context teaser for today —
-                // past days have a full day summary card below instead.
-                if viewModel.isViewingToday, let context = viewModel.greetingContext {
+                if let context = viewModel.greetingContext {
                     Text(context)
                         .font(.system(size: 13))
                         .foregroundStyle(Theme.textPrimary)
@@ -195,44 +163,6 @@ struct RecommendationsView: View {
         )
     }
 
-    // MARK: - Day Summary Card
-
-    @ViewBuilder
-    private func daySummaryCard(_ summary: String) -> some View {
-        let rendered = Self.renderMarkdown(summary)
-        VStack(alignment: .leading, spacing: 0) {
-            if let attributed = rendered {
-                Text(attributed)
-                    .font(.system(size: 13))
-                    .foregroundStyle(Theme.textSecondary)
-                    .lineSpacing(3)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .textSelection(.enabled)
-            } else {
-                Text(summary)
-                    .font(.system(size: 13))
-                    .foregroundStyle(Theme.textSecondary)
-                    .lineSpacing(3)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .textSelection(.enabled)
-            }
-        }
-        .padding(16)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(.ultraThinMaterial)
-        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .strokeBorder(Theme.cardBorder, lineWidth: 0.5)
-        )
-    }
-
-    // MARK: - Projects Section
-
-    private var projectsSection: some View {
-        ProjectsExpandableView(projects: sortedProjects)
-    }
-
     // MARK: - Recommendation Cards (horizontal scroll)
 
     private var recommendationCardsSection: some View {
@@ -276,58 +206,14 @@ struct RecommendationsView: View {
         }
         .padding(.horizontal, 24)
     }
-
-    // MARK: - Markdown Helpers
-
-    private static func renderMarkdown(_ source: String) -> AttributedString? {
-        let processed = preprocessMarkdown(source)
-        var options = AttributedString.MarkdownParsingOptions()
-        options.interpretedSyntax = .inlineOnlyPreservingWhitespace
-        guard var attributed = try? AttributedString(markdown: processed, options: options) else {
-            return nil
-        }
-        for run in attributed.runs {
-            if run.inlinePresentationIntent?.contains(.code) == true {
-                let range = run.range
-                attributed[range].font = .system(size: 13, design: .monospaced)
-            }
-        }
-        return attributed
-    }
-
-    private static func preprocessMarkdown(_ source: String) -> String {
-        source
-            .split(separator: "\n", omittingEmptySubsequences: false)
-            .map { line in
-                let str = String(line)
-                if let match = str.range(of: #"^(\s{2,}|\t)[\-\*]\s"#, options: .regularExpression) {
-                    let indent = str[str.startIndex..<str.index(before: match.upperBound)]
-                    let rest = str[match.upperBound...]
-                    let indentStr = String(indent)
-                        .replacingOccurrences(of: "-", with: "\u{25E6}")
-                        .replacingOccurrences(of: "*", with: "\u{25E6}")
-                    return "\(indentStr) \(rest)"
-                }
-                if let range = str.range(of: #"^[\-\*]\s"#, options: .regularExpression) {
-                    return "\u{2022}\u{2002}" + str[range.upperBound...]
-                }
-                if str.hasPrefix("## ") {
-                    return "**" + str.dropFirst(3) + "**"
-                }
-                if str.hasPrefix("### ") {
-                    return "**" + str.dropFirst(4) + "**"
-                }
-                return str
-            }
-            .joined(separator: "\n")
-    }
 }
 
 // MARK: - Projects Expandable View
 
-private struct ProjectsExpandableView: View {
+struct ProjectsExpandableView: View {
     let projects: [ProjectActivity]
     @State private var showAll = false
+    @State private var expandedActivityID: UUID?
     @Environment(DashboardViewModel.self) var viewModel
 
     private var visibleProjects: [ProjectActivity] {
@@ -347,7 +233,7 @@ private struct ProjectsExpandableView: View {
 
             VStack(spacing: 0) {
                 ForEach(visibleProjects) { activity in
-                    ProjectRow(activity: activity)
+                    ProjectRow(activity: activity, expandedID: $expandedActivityID)
                 }
             }
 
@@ -374,10 +260,14 @@ private struct ProjectsExpandableView: View {
 
 // MARK: - Single Project Row (expandable)
 
-private struct ProjectRow: View {
+struct ProjectRow: View {
     let activity: ProjectActivity
-    @State private var isExpanded = false
+    @Binding var expandedID: UUID?
     @Environment(DashboardViewModel.self) var viewModel
+
+    private var isExpanded: Bool {
+        expandedID == activity.id
+    }
 
     private var activityColor: Color {
         Theme.barPalette[activity.colorIndex % Theme.barPalette.count]
@@ -387,7 +277,7 @@ private struct ProjectRow: View {
         VStack(alignment: .leading, spacing: 0) {
             Button {
                 withAnimation(.easeInOut(duration: 0.2)) {
-                    isExpanded.toggle()
+                    expandedID = isExpanded ? nil : activity.id
                 }
             } label: {
                 HStack(spacing: 10) {
@@ -423,27 +313,6 @@ private struct ProjectRow: View {
                             .foregroundStyle(Theme.textSecondary)
                             .lineSpacing(2)
                             .fixedSize(horizontal: false, vertical: true)
-                    }
-
-                    // App icons
-                    if !activity.appNames.isEmpty {
-                        HStack(spacing: 4) {
-                            ForEach(activity.appNames.prefix(6), id: \.self) { app in
-                                HoverableAppIconView(
-                                    appName: app,
-                                    bundleId: viewModel.bundleId(forAppName: app),
-                                    size: 18
-                                )
-                            }
-                            if activity.appNames.count > 6 {
-                                Text("+\(activity.appNames.count - 6)")
-                                    .font(.system(size: 9, weight: .medium))
-                                    .foregroundStyle(Theme.textMuted)
-                                    .frame(width: 18, height: 18)
-                                    .background(Theme.surfaceElevated)
-                                    .clipShape(Circle())
-                            }
-                        }
                     }
 
                     // Time range
@@ -542,7 +411,12 @@ struct LiquidGlassCardModifier: ViewModifier {
     func body(content: Content) -> some View {
         if #available(macOS 26, *) {
             content
-                .glassEffect(.regular.interactive(), in: .rect(cornerRadius: 12, style: .continuous))
+                .background(
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .fill(Theme.primaryBackground.opacity(0.55))
+                )
+                .compositingGroup()
+                .glassEffect(.regular, in: .rect(cornerRadius: 12, style: .continuous))
         } else {
             content
                 .background(
@@ -561,7 +435,12 @@ struct LiquidGlassPillModifier: ViewModifier {
     func body(content: Content) -> some View {
         if #available(macOS 26, *) {
             content
-                .glassEffect(.regular.interactive(), in: .capsule)
+                .background(
+                    Capsule()
+                        .fill(Theme.primaryBackground.opacity(0.55))
+                )
+                .compositingGroup()
+                .glassEffect(.regular, in: .capsule)
         } else {
             content
                 .background(.ultraThinMaterial)

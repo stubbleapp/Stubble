@@ -251,56 +251,72 @@ struct TaskTimelineView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            // Date title + regenerate
-            HStack {
-                Text(SharedFormatters.headerDateFormatter.string(from: viewModel.selectedDate))
-                    .font(Theme.headerFont(size: 24))
-                    .foregroundStyle(Theme.textPrimary)
+            // Fixed header — stays above scrolling content
+            VStack(spacing: 0) {
+                // Date title + regenerate
+                HStack(alignment: .top) {
+                    Text(SharedFormatters.headerDateFormatter.string(from: viewModel.selectedDate))
+                        .font(Theme.headerFont(size: 24))
+                        .foregroundStyle(Theme.textPrimary)
 
-                Spacer()
-
-                Button(action: { viewModel.generateSummary() }) {
-                    Image(systemName: "arrow.clockwise")
-                        .font(.system(size: 14, weight: .medium))
-                        .foregroundStyle(Theme.accent)
-                        .symbolEffect(.bounce, value: viewModel.isGeneratingSummary)
-                        .frame(width: 32, height: 32)
-                        .background(Theme.accent.opacity(0.08))
-                        .clipShape(Circle())
-                }
-                .buttonStyle(.plain)
-                .disabled(viewModel.isGeneratingSummary)
-                .help("Regenerate tasks")
-            }
-            .padding(.horizontal, 20)
-            .padding(.top, 16)
-            .padding(.bottom, 8)
-
-            // Error banner
-            if let error = viewModel.summaryError {
-                HStack(spacing: 8) {
-                    Image(systemName: "exclamationmark.triangle.fill")
-                        .foregroundStyle(Theme.statusError)
-                        .font(.caption)
-                    Text(error)
-                        .font(.caption)
-                        .foregroundStyle(Theme.textSecondary)
-                        .lineLimit(3)
                     Spacer()
-                    Button {
-                        viewModel.summaryError = nil
-                    } label: {
-                        Image(systemName: "xmark")
-                            .font(.caption2)
-                            .foregroundStyle(Theme.textMuted)
+
+                    Button(action: { viewModel.exportTasksCSV() }) {
+                        Image(systemName: "square.and.arrow.up")
+                            .font(.system(size: 14, weight: .medium))
+                            .foregroundStyle(Theme.accent)
+                            .frame(width: 32, height: 32)
+                            .background(Theme.accent.opacity(0.08))
+                            .clipShape(Circle())
                     }
-                    .buttonStyle(.borderless)
+                    .buttonStyle(.plain)
+                    .disabled(viewModel.tasks.isEmpty)
+                    .opacity(viewModel.tasks.isEmpty ? 0.4 : 1)
+                    .help("Export tasks as CSV")
+
+                    Button(action: { viewModel.generateSummary() }) {
+                        Image(systemName: "arrow.clockwise")
+                            .font(.system(size: 14, weight: .medium))
+                            .foregroundStyle(Theme.accent)
+                            .symbolEffect(.bounce, value: viewModel.isGeneratingSummary)
+                            .frame(width: 32, height: 32)
+                            .background(Theme.accent.opacity(0.08))
+                            .clipShape(Circle())
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(viewModel.isGeneratingSummary)
+                    .help("Regenerate tasks")
                 }
-                .padding(10)
-                .background(Theme.statusError.opacity(0.06))
-                .cornerRadius(8)
-                .padding(.horizontal, 16)
-                .padding(.top, 10)
+                .padding(.horizontal, 24)
+                .padding(.top, 20)
+                .padding(.bottom, 16)
+
+                // Error banner
+                if let error = viewModel.summaryError {
+                    HStack(spacing: 8) {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                            .foregroundStyle(Theme.statusError)
+                            .font(.caption)
+                        Text(error)
+                            .font(.caption)
+                            .foregroundStyle(Theme.textSecondary)
+                            .lineLimit(3)
+                        Spacer()
+                        Button {
+                            viewModel.summaryError = nil
+                        } label: {
+                            Image(systemName: "xmark")
+                                .font(.caption2)
+                                .foregroundStyle(Theme.textMuted)
+                        }
+                        .buttonStyle(.borderless)
+                    }
+                    .padding(10)
+                    .background(Theme.statusError.opacity(0.06))
+                    .cornerRadius(8)
+                    .padding(.horizontal, 24)
+                    .padding(.top, 10)
+                }
             }
 
             // Content
@@ -338,23 +354,17 @@ struct TaskTimelineView: View {
             } else {
                 // Task list — keep visible during regeneration
                 ScrollView {
-                    // Regenerating spinner
-                    if viewModel.isGeneratingSummary {
-                        ProgressView()
-                            .scaleEffect(0.5)
-                            .frame(width: 12, height: 12)
-                            .padding(.top, 8)
-                    }
-
                     // Day summary card
                     DaySummaryCardView(
                         tasks: viewModel.tasks,
                         aiSummary: viewModel.daySummaryText,
-                        topActivities: viewModel.topActivityLegendItems
+                        daySummaryContent: viewModel.daySummaryContent,
+                        projectActivities: viewModel.projectActivities
                     )
-                    .padding(.horizontal, 20)
-                    .padding(.top, 16)
-                    .padding(.bottom, 8)
+                    .redacted(reason: viewModel.isGeneratingSummary ? .placeholder : [])
+                    .shimmer(active: viewModel.isGeneratingSummary)
+                    .padding(.horizontal, 24)
+                    .padding(.bottom, 16)
 
                     let timelineItems = TimelineItem.build(from: viewModel.tasks, idleActivities: viewModel.activities, minIdleDuration: TimelineItem.settingsMinIdleDuration)
                     LazyVStack(spacing: 0) {
@@ -375,9 +385,11 @@ struct TaskTimelineView: View {
                             }
                         }
                     }
-                    .opacity(viewModel.isGeneratingSummary ? 0.5 : 1.0)
+                    .redacted(reason: viewModel.isGeneratingSummary ? .placeholder : [])
+                    .shimmer(active: viewModel.isGeneratingSummary)
+                    .allowsHitTesting(!viewModel.isGeneratingSummary)
                     .animation(.easeInOut(duration: 0.2), value: viewModel.isGeneratingSummary)
-                    .padding(.horizontal, 20)
+                    .padding(.horizontal, 24)
 
                     // Extra space so content isn't hidden behind the floating chat bar
                     Spacer()

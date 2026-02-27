@@ -35,8 +35,8 @@ final class RecommendationGenerator: Sendable {
 
         let systemInstruction = """
         You are a knowledgeable assistant embedded in a desktop activity tracker called Stubble. \
-        You know this user — their role, projects, goals, and working patterns are provided in the \
-        User Profile section. USE THIS PROFILE to frame every recommendation around what matters \
+        You know this user — their role, projects, goals, working patterns, and interests are provided \
+        in the User Profile section. USE THIS PROFILE to frame every recommendation around what matters \
         to THEM specifically. A recommendation for a Swift/macOS developer should be completely different \
         from one for a web developer, even if the activity looks similar. \
         \
@@ -46,9 +46,12 @@ final class RecommendationGenerator: Sendable {
            IMPORTANT: Do NOT include any greeting like "Hey", "Hi", "Hello", or the user's name — \
            the UI already displays a greeting header. Just jump straight into the context \
            (e.g. "You've been deep into the permission system this week..." not "Hey Sam, you've been..."). \
-        2. suggested_questions: 3-4 SHORT questions (max 6-8 words each) the user might ask about their work. \
-           Keep them punchy and concise — e.g. "Best WAL checkpoint strategy?", "Handle TCC after rebuild?". \
-           Reference their actual projects and technologies but stay brief. \
+        2. suggested_questions: 3-4 SHORT questions (max 6-8 words each) the user might ask about their \
+           work, interests, or areas of curiosity. At least one question should be exploratory or \
+           interest-driven — something they'd enjoy learning about, not just need for work. \
+           Keep them punchy and concise — e.g. "Best WAL checkpoint strategy?", "Handle TCC after rebuild?", \
+           "Latest advances in on-device ML?". \
+           Reference their actual projects, technologies, and interests but stay brief. \
         3. recommendations: 3-6 actionable items (see categories below). \
         \
         Categories: \
@@ -58,14 +61,23 @@ final class RecommendationGenerator: Sendable {
         - best_practice: A concrete technique or methodology. Explain WHY it applies to their current work. \
         - workflow: A specific workflow improvement based on patterns you've observed across their week. \
         - learning: A skill or knowledge area that would accelerate their current projects. \
+        - exploration: A resource, community, or topic that connects to the user's interests or curiosity \
+          areas beyond their daily tasks. Could be a conference talk, research paper, podcast, community, \
+          or side-project idea. Use this when you spot something that bridges their work and interests. \
         \
         Rules: \
         - The User Profile is your primary lens. If the user is building a macOS app in Swift, recommend \
           Swift/macOS resources, not generic productivity tools. If they do legal work, recommend legal \
           tech and compliance resources. \
+        - If the User Profile mentions interests or curiosity areas, weave at least one recommendation \
+          that expands on those — a deeper resource, adjacent topic, or something that connects their \
+          interests with their current work. \
         - Cross-reference the weekly trends with the user profile to find the most impactful recommendations. \
           For example, if they've spent 3 days on a database layer, recommend specific database optimization \
           techniques for their stack. \
+        - Use the browser URLs and document paths from the activity log to understand EXACTLY what pages \
+          they're reading and what files they're editing — then recommend resources that go deeper on those \
+          specific topics. \
         - Use relevant links from tasks (repos, docs, file paths) to understand EXACTLY what projects and \
           codebases they're working in, then recommend resources specific to those. \
         - Every recommendation's "reason" must cite specific projects, tasks, or patterns from the data. \
@@ -187,25 +199,33 @@ final class RecommendationGenerator: Sendable {
     ) -> String {
         var lines: [String] = []
 
-        // User profile FIRST — this is the primary lens for personalization
+        // 1. User profile FIRST — this is the primary lens for personalization
         if let memory = memoryContext, !memory.isEmpty {
             lines.append("## User Profile")
-            lines.append("This is what you know about this user. Use it to make every recommendation deeply relevant to their specific role, projects, and goals.")
+            lines.append("This is what you know about this user. Use it to make every recommendation deeply relevant to their specific role, projects, goals, and interests.")
             lines.append(memory)
             lines.append("")
         }
 
-        // Weekly trends — cross-day patterns
+        // 2. OCR-derived screen content — high-signal data about what was actually on screen
+        if let digest = ocrDigest, !digest.isEmpty {
+            lines.append("## Screen Content Analysis (extracted from screenshots)")
+            lines.append("This is what was actually visible on screen — URLs visited, code being written, documents open, communications. Use this to understand what topics and resources the user is actively engaging with:")
+            lines.append(digest)
+            lines.append("")
+        }
+
+        // 3. Weekly trends — cross-day patterns
         if let trends = weeklyTrends, !trends.isEmpty {
             lines.append("## Weekly Patterns")
             lines.append(trends)
             lines.append("")
         }
 
+        // 4. Recent tasks by day — expanded detail with links
         lines.append("## Recent Activity Data")
         lines.append("")
 
-        // Recent tasks by day — expanded detail with links
         let sortedDates = recentTasks.keys.sorted().reversed()
         for dateStr in sortedDates {
             guard let tasks = recentTasks[dateStr] else { continue }
@@ -225,7 +245,7 @@ final class RecommendationGenerator: Sendable {
             lines.append("")
         }
 
-        // Project activities (higher-level grouping)
+        // 5. Project activities (higher-level grouping)
         if !projectActivities.isEmpty {
             lines.append("## Current Project Activities")
             for activity in projectActivities {
@@ -238,7 +258,7 @@ final class RecommendationGenerator: Sendable {
             lines.append("")
         }
 
-        // Apps and time spent
+        // 6. Apps and time spent
         if !appsUsed.isEmpty {
             lines.append("## Apps Used (sorted by time)")
             let sorted = appsUsed.sorted { $0.value > $1.value }
@@ -251,18 +271,10 @@ final class RecommendationGenerator: Sendable {
             lines.append("")
         }
 
-        // Detailed activity log — window titles reveal specific documents, URLs, and content
+        // 7. Detailed activity log — window titles, browser URLs, and document paths
         if let log = activityLog, !log.isEmpty {
-            lines.append("## Today's Detailed Activity (window titles)")
+            lines.append("## Today's Detailed Activity (window titles, URLs visited, files opened)")
             lines.append(log)
-            lines.append("")
-        }
-
-        // OCR-derived screen content analysis
-        if let digest = ocrDigest, !digest.isEmpty {
-            lines.append("## Screen Content Analysis (extracted from screenshots)")
-            lines.append("This is what was actually visible on screen — URLs visited, code being written, documents open, communications:")
-            lines.append(digest)
             lines.append("")
         }
 
@@ -291,10 +303,10 @@ final class RecommendationGenerator: Sendable {
 
         Top-level fields:
         - greeting_context: 1-2 warm, personal sentences (NO greeting/name — UI shows that) that reference the user's actual projects by name
-        - suggested_questions: 3-4 SHORT questions (max 6-8 words each) tied to their current work
+        - suggested_questions: 3-4 SHORT questions (max 6-8 words each) tied to their current work, interests, or curiosity areas. At least one should be exploratory/interest-driven.
 
         Recommendation fields:
-        - category: one of "article", "tool", "best_practice", "workflow", "learning"
+        - category: one of "article", "tool", "best_practice", "workflow", "learning", "exploration"
         - title: concise, specific title that would only make sense for THIS user
         - description: 2-3 sentences explaining what this is and why it's valuable for THIS user's specific situation
         - reason: 1 sentence citing specific tasks, projects, or multi-day patterns from the data

@@ -198,6 +198,13 @@ enum Theme {
     static let triggerPeriodic = Color(red: 0.35, green: 0.72, blue: 0.55)
     static let triggerManual = Color(red: 0.62, green: 0.48, blue: 0.75)
 
+    // MARK: - Shimmer placeholder color
+
+    /// The shimmer highlight — white in light mode, lighter gray in dark.
+    static let shimmerHighlight = adaptive(
+        light: NSColor(white: 1.0, alpha: 0.6),
+        dark: NSColor(white: 1.0, alpha: 0.15)
+    )
 }
 
 // MARK: - Activity Halo Dot
@@ -225,5 +232,57 @@ struct ActivityHaloDot: View {
                 )
             )
             .frame(width: size, height: size)
+    }
+}
+
+// MARK: - Shimmer Effect
+
+/// Animated shimmer overlay for skeleton/placeholder loading states.
+/// A soft gradient sweeps left-to-right across the content in a loop.
+struct ShimmerModifier: ViewModifier {
+    let active: Bool
+    @State private var phase: CGFloat = 0
+
+    func body(content: Content) -> some View {
+        content
+            .overlay {
+                if active {
+                    GeometryReader { geo in
+                        let bandWidth = geo.size.width * 0.4
+                        let travel = geo.size.width + bandWidth
+                        LinearGradient(
+                            colors: [.clear, Theme.shimmerHighlight, .clear],
+                            startPoint: .leading,
+                            endPoint: .trailing
+                        )
+                        .frame(width: bandWidth)
+                        .offset(x: -bandWidth + phase * travel)
+                    }
+                    .clipped()
+                }
+            }
+            .onAppear {
+                guard active else { return }
+                withAnimation(.linear(duration: 1.5).repeatForever(autoreverses: false)) {
+                    phase = 1.0
+                }
+            }
+            .onChange(of: active) { _, isActive in
+                if isActive {
+                    phase = 0
+                    withAnimation(.linear(duration: 1.5).repeatForever(autoreverses: false)) {
+                        phase = 1.0
+                    }
+                } else {
+                    phase = 0
+                }
+            }
+    }
+}
+
+extension View {
+    /// Applies a shimmer animation overlay when `active` is true.
+    func shimmer(active: Bool) -> some View {
+        modifier(ShimmerModifier(active: active))
     }
 }

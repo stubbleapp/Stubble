@@ -78,7 +78,7 @@ struct ChatOverlayView: View {
             withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) { isExpanded = true }
         } label: {
             HStack(spacing: 10) {
-                StubbleIconView(size: 18)
+                ActivityHaloDot(color: Theme.accent, size: 20)
 
                 Text("Ask Stubble\u{2026}")
                     .font(.system(size: 13))
@@ -148,7 +148,7 @@ struct ChatOverlayView: View {
         VStack(spacing: 0) {
             // Header
             HStack {
-                StubbleIconView(size: 14)
+                ActivityHaloDot(color: Theme.accent, size: 16)
 
                 Text("Chat")
                     .font(.system(size: 12, weight: .semibold))

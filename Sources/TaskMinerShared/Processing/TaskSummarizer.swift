@@ -204,15 +204,17 @@ public final class TaskSummarizer: Sendable {
         - Professional role or domain
         - Key repositories, codebases, or services they maintain
         - Recurring workflows or habits observed across multiple sessions
+        - Topics or domains the user seems genuinely curious about (browsing docs, reading articles, exploring new technologies)
 
         DO NOT include:
         - "Uses [app name]" entries — knowing someone uses Chrome or Terminal is not useful
-        - Transient activities (reading a specific article, checking email count)
+        - Transient activities (checking email count, routine web browsing)
         - System processes or utility apps
-        - One-time research topics unless they clearly relate to an ongoing project
         - Anything that would be stale or irrelevant within a week
 
-        The bar for inclusion is HIGH. Prefer 0-3 high-quality entries over many low-quality ones.
+        For the "interest" category, be MORE permissive than for other categories. If the user spent meaningful time reading about a topic, exploring documentation, or watching talks on a subject — even if it's not directly tied to a current project — that's a valid interest entry. Interests help personalize the experience over time.
+
+        The bar for inclusion is HIGH for identity/project/technology/workflow. For interests, the bar is MODERATE — genuine curiosity signals are worth capturing. Prefer 0-4 high-quality entries over many low-quality ones.
 
         Apps used: \(appNames.joined(separator: ", "))
         Sample window titles: \(windowTitles.joined(separator: " | "))
@@ -599,6 +601,7 @@ public final class TaskSummarizer: Sendable {
               "end_time": "HH:mm:ss",
               "active_seconds": 1800,
               "app_names": ["Xcode"],
+              "websites": ["github.com", "stackoverflow.com"],
               "confidence": 0.85,
               "relevant_links": ["https://github.com/user/repo", "/Users/name/project/file.swift"]
             }
@@ -622,6 +625,7 @@ public final class TaskSummarizer: Sendable {
         - Idle periods are marked with BREAK lines in the activity log — respect them as session boundaries
         - Silently skip any activity involving adult, explicit, or NSFW content — never include it in tasks or the day summary
         - relevant_links: extract any URLs (https://...) or local file paths (/Users/...) visible in the OCR text or window titles that relate to this task. Include website URLs, document links, repository URLs, and file paths. Return [] if none found. Only include real URLs/paths seen in the data, never fabricate them.
+        - websites: list the DOMAIN NAMES (not full URLs) of websites where significant time was spent during this task. Extract domains from the Browser URLs section. Only include domains that were meaningfully used (not fleeting visits). Use bare domain without protocol (e.g. "github.com" not "https://github.com"). Return [] if no websites were relevant. Maximum 5 domains per task.
         - If there's not enough information, return {"tasks": [], "day_summary": null}
         """)
 
@@ -681,6 +685,9 @@ public final class TaskSummarizer: Sendable {
             let links = dict["relevant_links"] as? [String] ?? []
             let linksJSON = (try? JSONSerialization.data(withJSONObject: links))
                 .flatMap { String(data: $0, encoding: .utf8) } ?? "[]"
+            let websites = dict["websites"] as? [String] ?? []
+            let websitesJSON = (try? JSONSerialization.data(withJSONObject: websites))
+                .flatMap { String(data: $0, encoding: .utf8) } ?? "[]"
             // AI reports active seconds (sum of constituent block durations, excluding gaps)
             let activeSeconds = dict["active_seconds"] as? Double
 
@@ -693,7 +700,8 @@ public final class TaskSummarizer: Sendable {
                 appNames: appNamesJSON,
                 confidence: confidence,
                 relevantLinks: linksJSON,
-                activeDuration: activeSeconds
+                activeDuration: activeSeconds,
+                websites: websitesJSON
             )
         }
 
@@ -750,6 +758,17 @@ public final class TaskSummarizer: Sendable {
             let linksJSON = (try? JSONSerialization.data(withJSONObject: linkList))
                 .flatMap { String(data: $0, encoding: .utf8) } ?? "[]"
 
+            // Merge websites (deduplicate)
+            var siteSet = Set<String>()
+            var siteList: [String] = []
+            for t in group {
+                for site in t.websitesList where siteSet.insert(site).inserted {
+                    siteList.append(site)
+                }
+            }
+            let websitesJSON = (try? JSONSerialization.data(withJSONObject: siteList))
+                .flatMap { String(data: $0, encoding: .utf8) } ?? "[]"
+
             // Merge active durations — sum them if any are present
             let durations = group.compactMap(\.activeDuration)
             let mergedDuration: TimeInterval? = durations.isEmpty ? nil : durations.reduce(0, +)
@@ -763,7 +782,8 @@ public final class TaskSummarizer: Sendable {
                 appNames: appNamesJSON,
                 confidence: confidence,
                 relevantLinks: linksJSON,
-                activeDuration: mergedDuration
+                activeDuration: mergedDuration,
+                websites: websitesJSON
             )
         }
     }

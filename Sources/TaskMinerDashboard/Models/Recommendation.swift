@@ -27,6 +27,7 @@ struct Recommendation: Identifiable {
         case bestPractice = "best_practice"
         case workflow = "workflow"
         case learning = "learning"
+        case exploration = "exploration"
 
         var displayName: String {
             switch self {
@@ -35,6 +36,7 @@ struct Recommendation: Identifiable {
             case .bestPractice: return "Best Practice"
             case .workflow: return "Workflow"
             case .learning: return "Learning"
+            case .exploration: return "Exploration"
             }
         }
 
@@ -45,6 +47,7 @@ struct Recommendation: Identifiable {
             case .bestPractice: return "lightbulb"
             case .workflow: return "arrow.triangle.branch"
             case .learning: return "book"
+            case .exploration: return "sparkle.magnifyingglass"
             }
         }
 
@@ -55,6 +58,7 @@ struct Recommendation: Identifiable {
             case .bestPractice: return "Learn More"
             case .workflow: return "Learn More"
             case .learning: return "Explore"
+            case .exploration: return "Explore"
             }
         }
     }

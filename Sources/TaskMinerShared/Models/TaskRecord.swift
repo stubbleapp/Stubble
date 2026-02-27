@@ -14,6 +14,9 @@ public struct TaskRecord: Identifiable, Hashable, Sendable {
     /// Actual active time in seconds (sum of constituent activity block durations).
     /// When nil, falls back to endTime - startTime.
     public let activeDuration: TimeInterval?
+    /// JSON array of domain names (e.g. ["github.com", "stackoverflow.com"]) for
+    /// websites where significant time was spent during this task.
+    public let websites: String
 
     public init(
         id: Int64? = nil,
@@ -25,7 +28,8 @@ public struct TaskRecord: Identifiable, Hashable, Sendable {
         appNames: String = "[]",
         confidence: Double = 0.0,
         relevantLinks: String = "[]",
-        activeDuration: TimeInterval? = nil
+        activeDuration: TimeInterval? = nil,
+        websites: String = "[]"
     ) {
         self.id = id
         self.date = date
@@ -37,6 +41,7 @@ public struct TaskRecord: Identifiable, Hashable, Sendable {
         self.confidence = confidence
         self.relevantLinks = relevantLinks
         self.activeDuration = activeDuration
+        self.websites = websites
     }
 
     /// The best available duration for this task.
@@ -47,6 +52,14 @@ public struct TaskRecord: Identifiable, Hashable, Sendable {
 
     public var appNamesList: [String] {
         guard let data = appNames.data(using: .utf8),
+              let arr = try? JSONDecoder().decode([String].self, from: data)
+        else { return [] }
+        return arr
+    }
+
+    /// Parsed website domain names from the websites JSON.
+    public var websitesList: [String] {
+        guard let data = websites.data(using: .utf8),
               let arr = try? JSONDecoder().decode([String].self, from: data)
         else { return [] }
         return arr

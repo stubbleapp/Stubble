@@ -20,11 +20,13 @@ struct ContentView: View {
     /// NSEvent monitor reference so we can remove it on disappear.
     @State private var flagsMonitor: Any?
 
-    private let meTabIndex = 2
-    private let screensTabIndex = 3
+    private let stubsTabIndex = 1
+    private let habitsTabIndex = 2
+    private let meTabIndex = 3
+    private let screensTabIndex = 4
 
     private var tabItems: [String] {
-        var items = ["Day", "Stubs"]
+        var items = ["Day", "Stubs", "Habits"]
         if showDebugTabs {
             items.append("Me")
             items.append("Log")
@@ -47,12 +49,15 @@ struct ContentView: View {
                 .background(Theme.statusError.opacity(0.12))
             }
 
-            DaySelectorView()
-                .background(Theme.secondaryBackground)
+            // Hide date selector on Stubs (day-agnostic) and Habits (cross-day analysis)
+            if selectedTab != stubsTabIndex && selectedTab != habitsTabIndex {
+                DaySelectorView()
+                    .background(Theme.secondaryBackground)
 
-            Rectangle()
-                .fill(Theme.separator)
-                .frame(height: 1)
+                Rectangle()
+                    .fill(Theme.separator)
+                    .frame(height: 1)
+            }
 
             ZStack(alignment: .bottom) {
                 switch selectedTab {
@@ -61,13 +66,15 @@ struct ContentView: View {
                 case 1:
                     RecommendationsView()
                 case 2:
+                    HabitsView()
+                case 3:
                     MeView()
                 default:
                     ActivityLogView()
                 }
 
-                // Single chat overlay shared across all tabs (except Screens)
-                if selectedTab < 3 {
+                // Single chat overlay shared across all tabs (except Log)
+                if selectedTab < 4 {
                     ChatOverlayView()
                 }
             }
@@ -85,26 +92,8 @@ struct ContentView: View {
             }
 
             ToolbarItem(placement: .primaryAction) {
-                HStack(spacing: 2) {
-                    Button {
-                        viewModel.exportTasksCSV()
-                    } label: {
-                        Image(systemName: "square.and.arrow.up")
-                            .font(.system(size: 13, weight: .medium))
-                            .foregroundStyle(Theme.textSecondary)
-                            .frame(width: ToolbarLayout.iconButtonSize, height: ToolbarLayout.iconButtonSize)
-                            .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel("Export Tasks")
-                    .accessibilityIdentifier("content-export")
-                    .help("Export tasks as CSV")
-                    .disabled(viewModel.tasks.isEmpty)
-                    .opacity(viewModel.tasks.isEmpty ? 0.4 : 1)
-
-                    PauseControlView(iconSize: ToolbarLayout.iconButtonSize)
-                }
-                .padding(.trailing, ToolbarLayout.toolbarTrailingPadding)
+                PauseControlView(iconSize: ToolbarLayout.iconButtonSize)
+                    .padding(.trailing, ToolbarLayout.toolbarTrailingPadding)
             }
         }
         .onAppear {
@@ -141,14 +130,18 @@ struct ContentView: View {
                     showDebugTabs = false
                 }
             }
+            // Stubs is day-agnostic — always show today's recommendations
+            if newTab == stubsTabIndex && !viewModel.isViewingToday {
+                viewModel.selectDate(Date())
+            }
             // Keep ViewModel's currentScreen in sync so chat context knows which tab is active
-            let screenNames = ["Day", "Stubs", "Me", "Log"]
+            let screenNames = ["Day", "Stubs", "Habits", "Me", "Log"]
             viewModel.currentScreen = newTab < screenNames.count ? screenNames[newTab] : "Stubs"
         }
     }
 }
 
-/// Segmented picker — pill style, HIG-aligned spacing and touch targets.
+/// Segmented picker — capsule pill with liquid glass, HIG-aligned spacing and touch targets.
 struct SegmentedPicker: View {
     let items: [String]
     @Binding var selection: Int
@@ -171,9 +164,9 @@ struct SegmentedPicker: View {
                         .padding(.horizontal, segmentPaddingH)
                         .padding(.vertical, segmentPaddingV)
                         .frame(minHeight: ToolbarLayout.minTouchTarget)
-                        .contentShape(Rectangle())
+                        .contentShape(Capsule())
                         .background(
-                            RoundedRectangle(cornerRadius: 6, style: .continuous)
+                            Capsule()
                                 .fill(isSelected ? Theme.selectedSurface : Color.clear)
                         )
                 }
@@ -183,9 +176,29 @@ struct SegmentedPicker: View {
             }
         }
         .padding(trackPadding)
-        .background(
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .fill(Theme.surfaceElevated)
-        )
+        .modifier(SegmentedPickerGlassModifier())
+    }
+}
+
+/// Liquid glass capsule for the segmented picker track.
+private struct SegmentedPickerGlassModifier: ViewModifier {
+    func body(content: Content) -> some View {
+        if #available(macOS 26, *) {
+            content
+                .background(
+                    Capsule()
+                        .fill(Theme.primaryBackground.opacity(0.55))
+                )
+                .compositingGroup()
+                .glassEffect(.regular, in: .capsule)
+        } else {
+            content
+                .background(.ultraThinMaterial)
+                .clipShape(Capsule())
+                .overlay(
+                    Capsule()
+                        .strokeBorder(Theme.cardBorder, lineWidth: 0.5)
+                )
+        }
     }
 }

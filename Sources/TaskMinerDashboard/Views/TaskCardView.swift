@@ -134,6 +134,7 @@ struct TaskCardView: View {
                         }
                     }
                 }
+                .unredacted()
                 .padding(.trailing, 6)
                 .padding(.leading, 4)
             } else {
@@ -192,7 +193,7 @@ struct TaskCardView: View {
                             .foregroundStyle(Theme.textMuted)
                     }
 
-                    if !task.appNamesList.isEmpty {
+                    if !task.appNamesList.isEmpty || !task.websitesList.isEmpty {
                         HStack(spacing: 4) {
                             ForEach(task.appNamesList, id: \.self) { app in
                                 HoverableAppIconView(
@@ -200,6 +201,9 @@ struct TaskCardView: View {
                                     bundleId: viewModel.bundleId(forAppName: app),
                                     size: 16
                                 )
+                            }
+                            ForEach(task.websitesList, id: \.self) { domain in
+                                HoverableFaviconView(domain: domain, size: 16)
                             }
                         }
                         .padding(.top, 2)
@@ -221,10 +225,11 @@ struct TaskCardView: View {
 
             Spacer(minLength: 4)
 
-            // Collapsed: app icons
-            if !isExpanded && !isEditing && !task.appNamesList.isEmpty {
+            // Collapsed: app icons + favicons
+            if !isExpanded && !isEditing && (!task.appNamesList.isEmpty || !task.websitesList.isEmpty) {
                 AppIconStackView(
                     appNames: task.appNamesList,
+                    websites: task.websitesList,
                     bundleIdResolver: { viewModel.bundleId(forAppName: $0) }
                 )
                 .padding(.top, 12)
@@ -450,24 +455,42 @@ struct FlowLayout: Layout {
     }
 }
 
-/// Overlapping app icon stack.
+/// Overlapping stack of app icons and website favicons for the collapsed task card.
 struct AppIconStackView: View {
     let appNames: [String]
+    var websites: [String] = []
     let bundleIdResolver: (String) -> String?
 
+    private let maxIcons = 3
+
     var body: some View {
+        let totalCount = appNames.count + websites.count
+        let appSlice = Array(appNames.prefix(maxIcons))
+        let remainingSlots = max(0, maxIcons - appSlice.count)
+        let siteSlice = Array(websites.prefix(remainingSlots))
+        let shownCount = appSlice.count + siteSlice.count
+
         HStack(spacing: -4) {
-            ForEach(Array(appNames.prefix(3).enumerated()), id: \.offset) { index, name in
+            ForEach(Array(appSlice.enumerated()), id: \.offset) { index, name in
                 AppIconView(bundleId: bundleIdResolver(name), size: 20)
                     .background(
                         Circle()
                             .fill(Theme.primaryBackground)
                             .frame(width: 22, height: 22)
                     )
-                    .zIndex(Double(appNames.count - index))
+                    .zIndex(Double(totalCount - index))
             }
-            if appNames.count > 3 {
-                Text("+\(appNames.count - 3)")
+            ForEach(Array(siteSlice.enumerated()), id: \.offset) { index, domain in
+                FaviconView(domain: domain, size: 20)
+                    .background(
+                        Circle()
+                            .fill(Theme.primaryBackground)
+                            .frame(width: 22, height: 22)
+                    )
+                    .zIndex(Double(totalCount - appSlice.count - index))
+            }
+            if totalCount > maxIcons {
+                Text("+\(totalCount - shownCount)")
                     .font(.system(size: 9, weight: .medium))
                     .foregroundStyle(Theme.textMuted)
                     .frame(width: 20, height: 20)
