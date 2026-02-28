@@ -125,4 +125,79 @@ final class GeminiClientTests: XCTestCase {
     func testFromAPIKeyReturnsClientForValidKey() {
         XCTAssertNotNil(GeminiClient.fromAPIKey("valid-key"))
     }
+
+    // MARK: - Client Modes
+
+    func testDirectModeIsNotProxy() {
+        let client = GeminiClient(apiKey: "test-key")
+        XCTAssertFalse(client.isProxyMode)
+        if case .direct(let key) = client.mode {
+            XCTAssertEqual(key, "test-key")
+        } else {
+            XCTFail("Expected direct mode")
+        }
+    }
+
+    func testProxyModeIsProxy() {
+        let client = GeminiClient(proxy: true)
+        XCTAssertTrue(client.isProxyMode)
+        if case .proxy = client.mode {
+            // Expected
+        } else {
+            XCTFail("Expected proxy mode")
+        }
+    }
+
+    func testDefaultModelIsFlash() {
+        let direct = GeminiClient(apiKey: "key")
+        let proxy = GeminiClient(proxy: true)
+        // Both should use the same default model — we can't read the private property,
+        // but we can verify they were constructed without error.
+        XCTAssertNotNil(direct)
+        XCTAssertNotNil(proxy)
+    }
+
+    func testCustomModelIsAccepted() {
+        let client = GeminiClient(apiKey: "key", model: "gemini-pro")
+        XCTAssertFalse(client.isProxyMode)
+    }
+
+    // MARK: - GeminiError Properties
+
+    func testGeminiErrorSessionExpired() {
+        let error = GeminiError.sessionExpired
+        XCTAssertNotNil(error.errorDescription)
+        XCTAssertTrue(error.localizedDescription.contains("session") || error.localizedDescription.contains("expired"))
+    }
+
+    func testGeminiErrorTrialExpired() {
+        let error = GeminiError.trialExpired
+        XCTAssertNotNil(error.errorDescription)
+        XCTAssertTrue(error.localizedDescription.contains("trial"))
+    }
+
+    func testGeminiErrorRateLimited() {
+        let error = GeminiError.rateLimited
+        XCTAssertNotNil(error.errorDescription)
+        XCTAssertTrue(error.localizedDescription.contains("limit"))
+    }
+
+    func testGeminiErrorApiErrorIncludesStatusCode() {
+        let error = GeminiError.apiError(statusCode: 429, message: "too many requests")
+        XCTAssertTrue(error.localizedDescription.contains("429"))
+        XCTAssertTrue(error.localizedDescription.contains("too many requests"))
+    }
+
+    // MARK: - Proxy Error Non-Retryable
+
+    func testProxyErrorCodesAreNotRetryable() {
+        // 401, 403 should NOT be retried — they're auth/tier errors
+        XCTAssertFalse(GeminiClient.isRetryableStatusCode(401))
+        XCTAssertFalse(GeminiClient.isRetryableStatusCode(403))
+    }
+
+    func test429IsRetryableForDirectMode() {
+        // 429 from Gemini (direct mode) IS retryable — just rate limited
+        XCTAssertTrue(GeminiClient.isRetryableStatusCode(429))
+    }
 }

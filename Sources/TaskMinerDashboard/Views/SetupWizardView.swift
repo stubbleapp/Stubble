@@ -31,7 +31,7 @@ struct SetupWizardView: View {
                     // Auto-advance to Permissions after a brief delay
                     Task { @MainActor in
                         try? await Task.sleep(for: .seconds(1.5))
-                        withAnimation(.easeInOut(duration: 0.25)) {
+                        _ = withAnimation(.easeInOut(duration: 0.25)) {
                             flow.advance()
                         }
                     }
