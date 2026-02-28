@@ -146,7 +146,7 @@ extension DashboardViewModel {
                     assistantMessage.isStreaming = false
                     self.persistMessage(assistantMessage)
                 }
-                self.chatError = error.localizedDescription
+                self.chatError = Self.friendlyChatError(error)
                 self.isChatLoading = false
             }
         }
@@ -262,6 +262,23 @@ extension DashboardViewModel {
         }
 
         return lines.joined(separator: "\n")
+    }
+
+    /// Convert GeminiError into a user-friendly chat error with actionable guidance.
+    private static func friendlyChatError(_ error: Error) -> String {
+        if let gemini = error as? GeminiError {
+            switch gemini {
+            case .trialExpired:
+                return "Your free trial has ended. Open Settings → Account to upgrade to Pro."
+            case .sessionExpired:
+                return "Your session has expired. Open Settings → Account to sign in again."
+            case .rateLimited:
+                return "You've reached today's request limit. Upgrade to Pro for more requests."
+            default:
+                return gemini.localizedDescription
+            }
+        }
+        return error.localizedDescription
     }
 
     /// Build Gemini-compatible conversation history from previous messages (excluding the latest user message).

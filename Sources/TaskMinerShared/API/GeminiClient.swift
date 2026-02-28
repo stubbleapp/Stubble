@@ -1,20 +1,52 @@
 import Foundation
 
 /// Lightweight Gemini REST API client using URLSession (text-only, no vision).
+///
+/// Supports two modes:
+/// - **Direct** (BYOK): requests go directly to Google's Gemini API using a user-provided key.
+/// - **Proxy**: requests go through the Stubble Cloudflare Worker, authenticated with a Supabase JWT.
+///   The Worker adds the Gemini API key and enforces tier/rate limits.
 public final class GeminiClient: Sendable {
-    private let apiKey: String
+
+    /// How this client authenticates with the AI backend.
+    public enum ClientMode: Sendable {
+        /// Direct Gemini API access using a user-provided API key (BYOK).
+        case direct(apiKey: String)
+        /// Proxy mode via Cloudflare Worker. JWT is resolved at request time from AuthManager.
+        case proxy
+    }
+
+    public let mode: ClientMode
     private let model: String
-    private let baseURL: String
+
+    /// Gemini API base URL for direct mode.
+    private static let geminiBaseURL = "https://generativelanguage.googleapis.com/v1beta/models"
 
     /// Maximum number of retry attempts for transient failures.
     private static let maxRetries = 2
     /// Base delay between retries (doubles each attempt).
     private static let retryBaseDelay: TimeInterval = 1.0
 
+    /// Create a direct-mode client with an explicit API key (BYOK).
     public init(apiKey: String, model: String = "gemini-2.5-flash") {
-        self.apiKey = apiKey
+        self.mode = .direct(apiKey: apiKey)
         self.model = model
-        self.baseURL = "https://generativelanguage.googleapis.com/v1beta/models"
+    }
+
+    /// Create a proxy-mode client that authenticates via Supabase JWT.
+    public init(proxy: Bool, model: String = "gemini-2.5-flash") {
+        self.mode = .proxy
+        self.model = model
+    }
+
+    /// The base URL for API requests, derived from mode.
+    private var baseURL: String {
+        switch mode {
+        case .direct:
+            return Self.geminiBaseURL
+        case .proxy:
+            return "\(StubbleAPIConfig.proxyBaseURL)/v1beta/models"
+        }
     }
 
     /// Create from GEMINI_API_KEY environment variable. Returns nil if not set.
@@ -32,13 +64,30 @@ public final class GeminiClient: Sendable {
         return GeminiClient(apiKey: key)
     }
 
-    /// Resolve client: settings file first, then GEMINI_API_KEY env var.
-    /// Both the Dashboard and CLI/daemon share the same settings.json file.
+    /// Resolve the best available client:
+    /// 1. Proxy mode if signed in with valid session + backend configured
+    /// 2. BYOK from settings.json
+    /// 3. BYOK from GEMINI_API_KEY env var
+    ///
+    /// Both the Dashboard and CLI/daemon share the same resolution logic.
     public static func resolvedClient() -> GeminiClient? {
+        // 1. Try proxy mode: signed in + backend configured + trial not expired
+        let auth = AuthManager.shared
+        if auth.isSignedIn && StubbleAPIConfig.isConfigured && !auth.isTrialExpired {
+            return GeminiClient(proxy: true)
+        }
+
+        // 2. Fall back to BYOK
         if let key = readKeyFromSettings(), let client = GeminiClient.fromAPIKey(key) {
             return client
         }
         return GeminiClient.fromEnvironment()
+    }
+
+    /// Whether this client is using proxy mode.
+    public var isProxyMode: Bool {
+        if case .proxy = mode { return true }
+        return false
     }
 
     /// Read the Gemini API key from the shared settings.json file.
@@ -51,6 +100,8 @@ public final class GeminiClient: Sendable {
         else { return nil }
         return key
     }
+
+    // MARK: - Public API (unchanged signatures — zero consumer changes needed)
 
     /// Send a text prompt to Gemini and return the response text.
     public func generateContent(prompt: String, systemInstruction: String? = nil) async throws -> String {
@@ -121,7 +172,7 @@ public final class GeminiClient: Sendable {
                     ])
 
                     var components = URLComponents(string: baseURL)
-                    components?.path = "/v1beta/models/\(model):streamGenerateContent"
+                    components?.path += "/\(model):streamGenerateContent"
                     components?.queryItems = [URLQueryItem(name: "alt", value: "sse")]
 
                     guard let url = components?.url else {
@@ -145,7 +196,7 @@ public final class GeminiClient: Sendable {
                     var request = URLRequest(url: url)
                     request.httpMethod = "POST"
                     request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-                    request.setValue(apiKey, forHTTPHeaderField: "x-goog-api-key")
+                    try await self.applyAuth(to: &request)
                     request.httpBody = jsonData
                     request.timeoutInterval = 120
 
@@ -153,6 +204,12 @@ public final class GeminiClient: Sendable {
 
                     guard let httpResponse = response as? HTTPURLResponse else {
                         continuation.finish(throwing: GeminiError.invalidResponse)
+                        return
+                    }
+
+                    // Handle proxy-specific error codes
+                    if let proxyError = self.checkProxyError(statusCode: httpResponse.statusCode) {
+                        continuation.finish(throwing: proxyError)
                         return
                     }
 
@@ -203,6 +260,34 @@ public final class GeminiClient: Sendable {
 
     // MARK: - Private
 
+    /// Apply authentication headers based on the client mode.
+    private func applyAuth(to request: inout URLRequest) async throws {
+        switch mode {
+        case .direct(let apiKey):
+            request.setValue(apiKey, forHTTPHeaderField: "x-goog-api-key")
+        case .proxy:
+            let token = try await AuthManager.shared.validAccessToken()
+            request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        }
+    }
+
+    /// Check for proxy-specific HTTP error codes and return a user-friendly error.
+    /// Returns nil if the status code is not a known proxy error.
+    private func checkProxyError(statusCode: Int) -> GeminiError? {
+        guard isProxyMode else { return nil }
+
+        switch statusCode {
+        case 401:
+            return .sessionExpired
+        case 403:
+            return .trialExpired
+        case 429:
+            return .rateLimited
+        default:
+            return nil
+        }
+    }
+
     /// Common request + retry + response parsing.
     private func sendRequest(
         contents: [[String: Any]],
@@ -210,7 +295,7 @@ public final class GeminiClient: Sendable {
         generationConfig: [String: Any]
     ) async throws -> String {
         var components = URLComponents(string: baseURL)
-        components?.path = "/v1beta/models/\(model):generateContent"
+        components?.path += "/\(model):generateContent"
         guard let url = components?.url else {
             throw GeminiError.invalidURL
         }
@@ -232,7 +317,7 @@ public final class GeminiClient: Sendable {
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.setValue(apiKey, forHTTPHeaderField: "x-goog-api-key")
+        try await applyAuth(to: &request)
         request.httpBody = jsonData
         request.timeoutInterval = 120
 
@@ -243,6 +328,9 @@ public final class GeminiClient: Sendable {
                 let delay = Self.retryBaseDelay * pow(2.0, Double(attempt - 1))
                 Logger.warning("GeminiClient: retry \(attempt)/\(Self.maxRetries) after \(String(format: "%.1f", delay))s delay")
                 try await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
+
+                // Re-apply auth for retries (token may have been refreshed)
+                try await applyAuth(to: &request)
             }
 
             do {
@@ -250,6 +338,11 @@ public final class GeminiClient: Sendable {
 
                 guard let httpResponse = response as? HTTPURLResponse else {
                     throw GeminiError.invalidResponse
+                }
+
+                // Check for proxy-specific errors (non-retryable)
+                if let proxyError = checkProxyError(statusCode: httpResponse.statusCode) {
+                    throw proxyError
                 }
 
                 // Retry on transient HTTP errors
@@ -329,6 +422,12 @@ public enum GeminiError: Error, LocalizedError {
     case invalidResponse
     case apiError(statusCode: Int, message: String)
     case parseError(String)
+    /// Proxy: session expired or invalid JWT (401).
+    case sessionExpired
+    /// Proxy: trial has expired (403).
+    case trialExpired
+    /// Proxy: rate limit exceeded (429).
+    case rateLimited
 
     public var errorDescription: String? {
         switch self {
@@ -340,6 +439,12 @@ public enum GeminiError: Error, LocalizedError {
             return "Gemini API error \(code): \(msg)"
         case .parseError(let msg):
             return "Failed to parse Gemini response: \(msg)"
+        case .sessionExpired:
+            return "Your session has expired. Please sign in again."
+        case .trialExpired:
+            return "Your free trial has ended. Upgrade to Pro for unlimited access."
+        case .rateLimited:
+            return "Daily request limit reached. Upgrade to Pro for unlimited access."
         }
     }
 }

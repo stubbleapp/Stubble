@@ -45,28 +45,41 @@ extension DashboardViewModel {
                 guard !Task.isCancelled else { return }
                 let memoryContext = self.memoryStore.contextString()
 
-                let content: StubsContent
-                if viewingToday {
-                    content = try await generator.generate(
-                        recentTasks: recentTasks,
-                        projectActivities: currentProjectActivities,
-                        appsUsed: appsUsed,
-                        memoryContext: memoryContext,
-                        activityLog: activityLog,
-                        weeklyTrends: weeklyTrends,
-                        ocrDigest: ocrDigest
-                    )
-                } else {
-                    content = try await generator.generateDaySummary(
-                        recentTasks: recentTasks,
-                        projectActivities: currentProjectActivities,
-                        appsUsed: appsUsed,
-                        memoryContext: memoryContext,
-                        activityLog: activityLog,
-                        weeklyTrends: weeklyTrends,
-                        ocrDigest: ocrDigest,
-                        dateLabel: dateLabel
-                    )
+                // Capture all values needed by the sendable closure before entering the timeout
+                let capturedGenerator = generator
+                let capturedRecentTasks = recentTasks
+                let capturedProjectActivities = currentProjectActivities
+                let capturedAppsUsed = appsUsed
+                let capturedMemoryContext = memoryContext
+                let capturedActivityLog = activityLog
+                let capturedWeeklyTrends = weeklyTrends
+                let capturedOcrDigest = ocrDigest
+                let capturedDateLabel = dateLabel
+                let capturedViewingToday = viewingToday
+
+                let content = try await withThrowingTimeout(seconds: 90) {
+                    if capturedViewingToday {
+                        return try await capturedGenerator.generate(
+                            recentTasks: capturedRecentTasks,
+                            projectActivities: capturedProjectActivities,
+                            appsUsed: capturedAppsUsed,
+                            memoryContext: capturedMemoryContext,
+                            activityLog: capturedActivityLog,
+                            weeklyTrends: capturedWeeklyTrends,
+                            ocrDigest: capturedOcrDigest
+                        )
+                    } else {
+                        return try await capturedGenerator.generateDaySummary(
+                            recentTasks: capturedRecentTasks,
+                            projectActivities: capturedProjectActivities,
+                            appsUsed: capturedAppsUsed,
+                            memoryContext: capturedMemoryContext,
+                            activityLog: capturedActivityLog,
+                            weeklyTrends: capturedWeeklyTrends,
+                            ocrDigest: capturedOcrDigest,
+                            dateLabel: capturedDateLabel
+                        )
+                    }
                 }
 
                 guard !Task.isCancelled else { return }
@@ -86,9 +99,13 @@ extension DashboardViewModel {
                 self.lastStubsTaskFingerprint = fingerprintAtGeneration
                 self.lastStubsGenerationTime = Date()
                 Analytics.recommendationsGenerated(count: content.recommendations.count)
+            } catch is CancellationError {
+                // Task was cancelled (e.g. user navigated away) — don't set error
+                self.isGeneratingRecommendations = false
             } catch {
                 self.recommendationsError = error.localizedDescription
                 self.isGeneratingRecommendations = false
+                Logger.error("Stubs generation failed: \(error.localizedDescription)")
             }
         }
     }
@@ -456,5 +473,34 @@ extension DashboardViewModel {
         } catch {
             Logger.error("Failed to auto-generate summary for \(dateStr): \(error.localizedDescription)")
         }
+    }
+}
+
+// MARK: - Timeout Helper
+
+private struct TimeoutError: LocalizedError {
+    let seconds: Int
+    var errorDescription: String? { "Request timed out after \(seconds) seconds" }
+}
+
+/// Run an async operation with a timeout. Throws `TimeoutError` if the work doesn't complete in time.
+private func withThrowingTimeout<T: Sendable>(
+    seconds: Int,
+    operation: @escaping @Sendable () async throws -> T
+) async throws -> T {
+    try await withThrowingTaskGroup(of: T.self) { group in
+        group.addTask {
+            try await operation()
+        }
+        group.addTask {
+            try await Task.sleep(for: .seconds(seconds))
+            throw TimeoutError(seconds: seconds)
+        }
+        // The first task to complete wins; cancel the other
+        guard let result = try await group.next() else {
+            throw CancellationError()
+        }
+        group.cancelAll()
+        return result
     }
 }

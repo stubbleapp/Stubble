@@ -1,9 +1,11 @@
 import SwiftUI
+import AuthenticationServices
 import TaskMinerShared
 
 // MARK: - Settings Category
 
 private enum SettingsCategory: String, CaseIterable, Identifiable {
+    case account
     case general
     case exclusions
     case personalisation
@@ -13,6 +15,7 @@ private enum SettingsCategory: String, CaseIterable, Identifiable {
 
     var label: String {
         switch self {
+        case .account: return "Account"
         case .general: return "General"
         case .exclusions: return "Exclusions"
         case .personalisation: return "Personalisation"
@@ -22,6 +25,7 @@ private enum SettingsCategory: String, CaseIterable, Identifiable {
 
     var icon: String {
         switch self {
+        case .account: return "person.crop.circle"
         case .general: return "gearshape"
         case .exclusions: return "eye.slash"
         case .personalisation: return "person"
@@ -49,7 +53,11 @@ private enum AwayDuration: Int, CaseIterable, Identifiable {
 struct SettingsView: View {
     @Environment(DashboardViewModel.self) var viewModel
     @Environment(\.dismiss) var dismiss
-    @State private var selectedCategory: SettingsCategory? = .general
+    @State private var selectedCategory: SettingsCategory? = .account
+
+    // Account
+    @State private var isSigningIn = false
+    @State private var signInError: String?
 
     // General
     @State private var apiKey: String = ""
@@ -108,7 +116,9 @@ struct SettingsView: View {
             // Detail pane
             ScrollView {
                 VStack(alignment: .leading, spacing: 24) {
-                    switch selectedCategory ?? .general {
+                    switch selectedCategory ?? .account {
+                    case .account:
+                        accountPane
                     case .general:
                         generalPane
                     case .exclusions:
@@ -239,43 +249,46 @@ struct SettingsView: View {
                 )
             }
 
-            // API Key
-            VStack(alignment: .leading, spacing: 8) {
-                Text("Gemini API Key")
+            // Advanced: API Key (BYOK)
+            DisclosureGroup {
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack(spacing: 8) {
+                        Group {
+                            if showKey {
+                                TextField("Enter your Gemini API key", text: $apiKey)
+                            } else {
+                                SecureField("Enter your Gemini API key", text: $apiKey)
+                            }
+                        }
+                        .textFieldStyle(.plain)
+                        .font(.system(size: 13, design: .monospaced))
+                        .padding(8)
+                        .background(Theme.surfaceElevated)
+                        .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+                        .accessibilityIdentifier("settings-api-key")
+
+                        Button {
+                            showKey.toggle()
+                        } label: {
+                            Image(systemName: showKey ? "eye.slash" : "eye")
+                                .font(.system(size: 12))
+                                .foregroundStyle(Theme.textMuted)
+                                .frame(width: 28, height: 28)
+                                .background(Theme.surfaceElevated)
+                                .clipShape(Circle())
+                        }
+                        .buttonStyle(.plain)
+                    }
+
+                    Text("Use your own Gemini API key instead of a Stubble account. Get a key from Google AI Studio.")
+                        .font(.caption2)
+                        .foregroundStyle(Theme.textMuted)
+                }
+                .padding(.top, 4)
+            } label: {
+                Text("Gemini API Key (BYOK)")
                     .font(.subheadline.weight(.medium))
                     .foregroundStyle(Theme.textPrimary)
-
-                HStack(spacing: 8) {
-                    Group {
-                        if showKey {
-                            TextField("Enter your Gemini API key", text: $apiKey)
-                        } else {
-                            SecureField("Enter your Gemini API key", text: $apiKey)
-                        }
-                    }
-                    .textFieldStyle(.plain)
-                    .font(.system(size: 13, design: .monospaced))
-                    .padding(8)
-                    .background(Theme.surfaceElevated)
-                    .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
-                    .accessibilityIdentifier("settings-api-key")
-
-                    Button {
-                        showKey.toggle()
-                    } label: {
-                        Image(systemName: showKey ? "eye.slash" : "eye")
-                            .font(.system(size: 12))
-                            .foregroundStyle(Theme.textMuted)
-                            .frame(width: 28, height: 28)
-                            .background(Theme.surfaceElevated)
-                            .clipShape(Circle())
-                    }
-                    .buttonStyle(.plain)
-                }
-
-                Text("Get a key from Google AI Studio.")
-                    .font(.caption2)
-                    .foregroundStyle(Theme.textMuted)
             }
 
             // Task Granularity
@@ -375,6 +388,294 @@ struct SettingsView: View {
                     .foregroundStyle(Theme.textMuted)
                     .italic()
             }
+        }
+    }
+
+    // MARK: - Account Pane
+
+    private var accountPane: some View {
+        VStack(alignment: .leading, spacing: 24) {
+            if AuthManager.shared.isSignedIn {
+                signedInAccountView
+            } else {
+                signedOutAccountView
+            }
+        }
+    }
+
+    private var signedInAccountView: some View {
+        VStack(alignment: .leading, spacing: 20) {
+            // User info
+            HStack(spacing: 12) {
+                // Avatar
+                if let avatarURL = AuthManager.shared.userAvatarURL {
+                    AsyncImage(url: avatarURL) { image in
+                        image.resizable()
+                            .aspectRatio(contentMode: .fill)
+                    } placeholder: {
+                        Image(systemName: "person.crop.circle.fill")
+                            .font(.system(size: 36))
+                            .foregroundStyle(Theme.textMuted)
+                    }
+                    .frame(width: 40, height: 40)
+                    .clipShape(Circle())
+                } else {
+                    Image(systemName: "person.crop.circle.fill")
+                        .font(.system(size: 36))
+                        .foregroundStyle(Theme.textMuted)
+                }
+
+                VStack(alignment: .leading, spacing: 2) {
+                    if let name = AuthManager.shared.userName {
+                        Text(name)
+                            .font(.system(size: 14, weight: .semibold))
+                            .foregroundStyle(Theme.textPrimary)
+                    }
+                    if let email = AuthManager.shared.userEmail {
+                        Text(email)
+                            .font(.system(size: 12))
+                            .foregroundStyle(Theme.textSecondary)
+                    }
+                }
+
+                Spacer()
+            }
+
+            // Subscription tier badge
+            subscriptionBadge
+
+            Divider()
+
+            // Tier actions
+            tierActionsView
+
+            Divider()
+
+            // Sign out
+            Button {
+                AuthManager.shared.signOut()
+                viewModel.refreshForAuthChange()
+            } label: {
+                Text("Sign Out")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(Theme.statusError)
+            }
+            .buttonStyle(.plain)
+        }
+    }
+
+    @ViewBuilder
+    private var subscriptionBadge: some View {
+        let auth = AuthManager.shared
+        HStack(spacing: 8) {
+            switch auth.currentState {
+            case .trial(let daysRemaining):
+                Image(systemName: "clock")
+                    .font(.system(size: 12))
+                    .foregroundStyle(Theme.accent)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text("Free Trial")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(Theme.textPrimary)
+                    Text("\(daysRemaining) days remaining")
+                        .font(.system(size: 11))
+                        .foregroundStyle(Theme.textSecondary)
+                }
+            case .pro:
+                Image(systemName: "checkmark.seal.fill")
+                    .font(.system(size: 12))
+                    .foregroundStyle(Theme.statusActive)
+                Text("Pro")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(Theme.statusActive)
+            case .expired:
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .font(.system(size: 12))
+                    .foregroundStyle(Theme.statusError)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text("Trial Expired")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(Theme.statusError)
+                    Text("Upgrade to Pro for unlimited access")
+                        .font(.system(size: 11))
+                        .foregroundStyle(Theme.textSecondary)
+                }
+            default:
+                EmptyView()
+            }
+        }
+        .padding(10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Theme.surfaceElevated)
+        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+    }
+
+    private var tierActionsView: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            // Upgrade to Pro
+            if AuthManager.shared.currentState != .pro {
+                Button {
+                    if let url = URL(string: StubbleAPIConfig.paddleCheckoutURL) {
+                        NSWorkspace.shared.open(url)
+                    }
+                } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: "star.fill")
+                            .font(.system(size: 11))
+                        Text("Upgrade to Pro")
+                            .font(.system(size: 12, weight: .semibold))
+                    }
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 8)
+                    .background(Theme.accent)
+                    .clipShape(Capsule())
+                }
+                .buttonStyle(.plain)
+            }
+
+            // Enterprise
+            Button {
+                if let url = URL(string: StubbleAPIConfig.enterpriseContactURL) {
+                    NSWorkspace.shared.open(url)
+                }
+            } label: {
+                HStack(spacing: 4) {
+                    Image(systemName: "building.2")
+                        .font(.system(size: 10))
+                    Text("Enterprise")
+                        .font(.system(size: 12, weight: .medium))
+                    Image(systemName: "arrow.up.right")
+                        .font(.system(size: 9))
+                }
+                .foregroundStyle(Theme.textSecondary)
+            }
+            .buttonStyle(.plain)
+        }
+    }
+
+    private var signedOutAccountView: some View {
+        VStack(alignment: .leading, spacing: 20) {
+            Text("Account")
+                .font(.subheadline.weight(.medium))
+                .foregroundStyle(Theme.textPrimary)
+
+            Text("Sign in with Google to get a 30-day free trial with full AI features. No API key needed.")
+                .font(.caption)
+                .foregroundStyle(Theme.textSecondary)
+
+            // Google sign-in button
+            Button {
+                startGoogleSignIn()
+            } label: {
+                HStack(spacing: 8) {
+                    if isSigningIn {
+                        ProgressView()
+                            .controlSize(.small)
+                    } else {
+                        Image(systemName: "g.circle.fill")
+                            .font(.system(size: 16))
+                    }
+                    Text(isSigningIn ? "Signing in..." : "Sign in with Google")
+                        .font(.system(size: 13, weight: .semibold))
+                }
+                .foregroundStyle(.white)
+                .padding(.horizontal, 20)
+                .padding(.vertical, 10)
+                .background(Theme.accent)
+                .clipShape(Capsule())
+            }
+            .buttonStyle(.plain)
+            .disabled(isSigningIn)
+
+            if let error = signInError {
+                HStack(spacing: 6) {
+                    Image(systemName: "exclamationmark.circle.fill")
+                        .font(.system(size: 12))
+                    Text(error)
+                        .font(.system(size: 12))
+                }
+                .foregroundStyle(Theme.statusError)
+            }
+
+            Divider()
+
+            // BYOK alternative
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Or use your own API key")
+                    .font(.caption.weight(.medium))
+                    .foregroundStyle(Theme.textSecondary)
+
+                Text("If you prefer to use your own Gemini API key, enter it in the General tab under \"Gemini API Key (BYOK)\".")
+                    .font(.caption2)
+                    .foregroundStyle(Theme.textMuted)
+            }
+        }
+    }
+
+    private func startGoogleSignIn() {
+        guard let (url, codeVerifier) = AuthManager.shared.buildGoogleSignInURL() else {
+            signInError = "Backend not configured yet. Use a BYOK API key in General settings."
+            return
+        }
+
+        isSigningIn = true
+        signInError = nil
+
+        let session = ASWebAuthenticationSession(
+            url: url,
+            callbackURLScheme: StubbleAPIConfig.callbackScheme
+        ) { callbackURL, error in
+            Task { @MainActor in
+                defer { isSigningIn = false }
+
+                if let error = error {
+                    if (error as NSError).code == ASWebAuthenticationSessionError.canceledLogin.rawValue {
+                        // User cancelled — no error to show
+                        return
+                    }
+                    signInError = Self.friendlyAuthError(error)
+                    return
+                }
+
+                guard let callbackURL = callbackURL,
+                      let code = AuthManager.extractAuthCode(from: callbackURL)
+                else {
+                    signInError = "No authorization code received."
+                    return
+                }
+
+                do {
+                    try await AuthManager.shared.exchangeCode(code, codeVerifier: codeVerifier)
+                    viewModel.refreshForAuthChange()
+                } catch {
+                    signInError = Self.friendlyAuthError(error)
+                }
+            }
+        }
+
+        session.presentationContextProvider = SettingsAuthContextProvider.shared
+        session.prefersEphemeralWebBrowserSession = false
+
+        if !session.start() {
+            isSigningIn = false
+            signInError = "Could not start authentication session."
+        }
+    }
+
+    /// Convert raw OAuth/network errors into user-friendly messages.
+    private static func friendlyAuthError(_ error: Error) -> String {
+        let desc = error.localizedDescription.lowercased()
+        if desc.contains("network") || desc.contains("offline") || desc.contains("not connected") {
+            return "No internet connection. Please check your network and try again."
+        } else if desc.contains("timeout") || desc.contains("timed out") {
+            return "The request timed out. Please try again."
+        } else if desc.contains("unsupported_grant_type") || desc.contains("invalid_grant") {
+            return "Authentication configuration error. Please try again or use an API key."
+        } else if desc.contains("server") || desc.contains("500") || desc.contains("503") {
+            return "The authentication server is temporarily unavailable. Please try again later."
+        } else {
+            return "Sign-in failed. Please try again."
         }
     }
 
@@ -671,5 +972,16 @@ struct SettingsView: View {
         case .light: return "sun.max"
         case .dark: return "moon"
         }
+    }
+}
+
+// MARK: - ASWebAuthenticationSession Presentation Context
+
+@MainActor
+private class SettingsAuthContextProvider: NSObject, ASWebAuthenticationPresentationContextProviding {
+    static let shared = SettingsAuthContextProvider()
+
+    func presentationAnchor(for session: ASWebAuthenticationSession) -> ASPresentationAnchor {
+        NSApplication.shared.keyWindow ?? NSApplication.shared.windows.first ?? NSWindow()
     }
 }

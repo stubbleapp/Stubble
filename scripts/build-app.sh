@@ -158,6 +158,17 @@ cat > "$APP_BUNDLE/Contents/Info.plist" << PLIST
 $SPARKLE_PLIST_ENTRIES
     <key>TelemetryDeckAppID</key>
     <string>$TELEMETRY_DECK_APP_ID</string>
+    <key>CFBundleURLTypes</key>
+    <array>
+        <dict>
+            <key>CFBundleURLSchemes</key>
+            <array>
+                <string>com.stubble</string>
+            </array>
+            <key>CFBundleURLName</key>
+            <string>com.stubble.auth</string>
+        </dict>
+    </array>
 </dict>
 </plist>
 PLIST

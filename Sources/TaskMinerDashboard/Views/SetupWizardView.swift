@@ -1,5 +1,6 @@
 import SwiftUI
 import ServiceManagement
+import AuthenticationServices
 import TaskMinerShared
 
 /// First-launch setup wizard that guides the user through:
@@ -26,8 +27,16 @@ struct SetupWizardView: View {
                 switch flow.currentPage {
                 case 0: WelcomePage()
                     .accessibilityIdentifier("wizard-welcome")
-                case 1: ApiKeyPage(apiKey: $flow.apiKey, error: flow.apiKeyError, isValidating: flow.isValidating)
-                    .accessibilityIdentifier("wizard-api-key")
+                case 1: SignInPage(flow: flow) {
+                    // Auto-advance to Permissions after a brief delay
+                    Task { @MainActor in
+                        try? await Task.sleep(for: .seconds(1.5))
+                        withAnimation(.easeInOut(duration: 0.25)) {
+                            flow.advance()
+                        }
+                    }
+                }
+                    .accessibilityIdentifier("wizard-sign-in")
                 case 2: PermissionsPage(allGranted: $permissionsGranted)
                     .accessibilityIdentifier("wizard-permissions")
                 case 3: PreferencesPage(onComplete: finish)
@@ -228,7 +237,7 @@ private struct WelcomePage: View {
                         Text("You're in Control")
                             .font(.system(size: 13, weight: .semibold))
                             .foregroundStyle(Theme.textPrimary)
-                        Text("No accounts, no sign-ups, no tracking. You use your own API key directly. Delete anything at any time.")
+                        Text("Sign in for a free trial, or bring your own API key. Delete anything at any time.")
                             .font(.system(size: 12))
                             .foregroundStyle(Theme.textSecondary)
                             .fixedSize(horizontal: false, vertical: true)
@@ -261,121 +270,295 @@ private struct WelcomePage: View {
     }
 }
 
-// MARK: - Page 2: API Key
+// MARK: - Page 2: Sign In
 
-private struct ApiKeyPage: View {
-    @Binding var apiKey: String
-    let error: String?
-    let isValidating: Bool
+private struct SignInPage: View {
+    @Bindable var flow: SetupFlowController
+    var onSignInSuccess: (() -> Void)?
 
+    @State private var isSigningIn = false
+    @State private var signInError: String?
     @State private var showKey = false
 
     var body: some View {
         VStack(spacing: 0) {
             Spacer()
 
-            Image(systemName: "key.fill")
+            Image(systemName: "person.crop.circle.badge.checkmark")
                 .font(.system(size: 36, weight: .thin))
                 .foregroundStyle(Theme.accent)
                 .padding(.bottom, 16)
 
-            Text("Gemini API Key")
-                .font(.system(size: 22, weight: .semibold))
-                .foregroundStyle(Theme.textPrimary)
-                .padding(.bottom, 6)
+            if flow.isSignedInViaGoogle {
+                // Success state
+                signInSuccessView
+            } else {
+                Text("Sign In")
+                    .font(.system(size: 22, weight: .semibold))
+                    .foregroundStyle(Theme.textPrimary)
+                    .padding(.bottom, 6)
 
-            Text("Stubble requires a Google Gemini API key to work.\nIt's free and takes less than a minute to set up.")
-                .font(.system(size: 13))
-                .foregroundStyle(Theme.textSecondary)
-                .multilineTextAlignment(.center)
-                .lineSpacing(2)
-                .padding(.bottom, 24)
-                .padding(.horizontal, 40)
+                Text("Sign in to get a 30-day free trial with full AI features.\nNo credit card required.")
+                    .font(.system(size: 13))
+                    .foregroundStyle(Theme.textSecondary)
+                    .multilineTextAlignment(.center)
+                    .lineSpacing(2)
+                    .padding(.bottom, 28)
+                    .padding(.horizontal, 40)
 
-            VStack(alignment: .leading, spacing: 14) {
-                // Step-by-step instructions
-                VStack(alignment: .leading, spacing: 8) {
-                    SetupStep(number: "1", text: "Open Google AI Studio and sign in with Google")
-                    SetupStep(number: "2", text: "Click \"Create API Key\" and copy it")
-                    SetupStep(number: "3", text: "Paste the key below")
-                }
-
-                Button {
-                    if let url = URL(string: "https://aistudio.google.com/apikey") {
-                        NSWorkspace.shared.open(url)
-                    }
-                } label: {
-                    HStack(spacing: 4) {
-                        Image(systemName: "arrow.up.right.square")
-                            .font(.system(size: 10))
-                        Text("Open Google AI Studio")
-                            .font(.system(size: 12))
-                    }
-                    .foregroundStyle(Theme.accent)
-                }
-                .buttonStyle(.plain)
-                .padding(.bottom, 2)
-
-                // Key input
-                HStack(spacing: 8) {
-                    Group {
-                        if showKey {
-                            TextField("Paste your API key here", text: $apiKey)
-                        } else {
-                            SecureField("Paste your API key here", text: $apiKey)
-                        }
-                    }
-                    .textFieldStyle(.plain)
-                    .font(.system(size: 13, design: .monospaced))
-                    .padding(10)
-                    .background(.ultraThinMaterial)
-                    .cornerRadius(8)
-                    .accessibilityIdentifier("wizard-api-key-input")
-
+                VStack(spacing: 16) {
+                    // Google sign-in button
                     Button {
-                        showKey.toggle()
+                        startGoogleSignIn()
                     } label: {
-                        Image(systemName: showKey ? "eye.slash" : "eye")
-                            .font(.system(size: 12))
-                            .foregroundStyle(Theme.textMuted)
-                            .frame(width: 30, height: 30)
-                            .background(.ultraThinMaterial)
-                            .clipShape(Circle())
+                        HStack(spacing: 8) {
+                            if isSigningIn {
+                                ProgressView()
+                                    .controlSize(.small)
+                                    .tint(.white)
+                            } else {
+                                Image(systemName: "g.circle.fill")
+                                    .font(.system(size: 18))
+                            }
+                            Text(isSigningIn ? "Signing in..." : "Sign in with Google")
+                                .font(.system(size: 14, weight: .semibold))
+                        }
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 24)
+                        .padding(.vertical, 11)
+                        .background(Theme.accent)
+                        .clipShape(Capsule())
                     }
                     .buttonStyle(.plain)
-                    .accessibilityIdentifier("wizard-api-key-toggle")
-                }
+                    .disabled(isSigningIn)
+                    .accessibilityIdentifier("wizard-google-signin")
 
-                // Error message
-                if let error {
-                    HStack(spacing: 6) {
-                        Image(systemName: "exclamationmark.circle.fill")
-                            .font(.system(size: 12))
-                        Text(error)
-                            .font(.system(size: 12))
+                    // Error
+                    if let error = signInError {
+                        HStack(spacing: 6) {
+                            Image(systemName: "exclamationmark.circle.fill")
+                                .font(.system(size: 12))
+                            Text(error)
+                                .font(.system(size: 12))
+                        }
+                        .foregroundStyle(Theme.statusError)
                     }
-                    .foregroundStyle(Theme.statusError)
-                    .accessibilityIdentifier("wizard-api-key-error")
+
+                    // BYOK toggle
+                    Button {
+                        withAnimation(.easeInOut(duration: 0.2)) {
+                            flow.showBYOKInput.toggle()
+                        }
+                    } label: {
+                        HStack(spacing: 4) {
+                            Image(systemName: "key")
+                                .font(.system(size: 10))
+                            Text("I have my own API key")
+                                .font(.system(size: 12))
+                        }
+                        .foregroundStyle(Theme.textSecondary)
+                    }
+                    .buttonStyle(.plain)
+                    .padding(.top, 4)
+
+                    // BYOK input (conditionally shown)
+                    if flow.showBYOKInput {
+                        byokInputView
+                    }
+
+                    // Skip
+                    Button {
+                        flow.skipSignIn()
+                    } label: {
+                        Text("Skip for now")
+                            .font(.system(size: 11))
+                            .foregroundStyle(Theme.textMuted)
+                            .underline()
+                    }
+                    .buttonStyle(.plain)
+                    .padding(.top, 4)
+                    .accessibilityIdentifier("wizard-skip-signin")
                 }
+                .padding(.horizontal, 60)
             }
-            .padding(.horizontal, 60)
 
             Spacer()
         }
-        .onAppear {
-            apiKey = SettingsManager.shared.geminiApiKey ?? ""
+    }
+
+    private var signInSuccessView: some View {
+        VStack(spacing: 12) {
+            Image(systemName: "checkmark.circle.fill")
+                .font(.system(size: 48))
+                .foregroundStyle(Theme.statusActive)
+
+            Text("Signed In")
+                .font(.system(size: 22, weight: .semibold))
+                .foregroundStyle(Theme.textPrimary)
+
+            if let email = AuthManager.shared.userEmail {
+                Text(email)
+                    .font(.system(size: 13))
+                    .foregroundStyle(Theme.textSecondary)
+            }
+
+            if let remaining = AuthManager.shared.trialDaysRemaining {
+                Text("\(remaining)-day free trial started")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(Theme.accent)
+                    .padding(.top, 4)
+            }
         }
-        .onChange(of: apiKey) { _, newValue in
-            // Persist to settings.json so the daemon and GeminiClient can read it
+    }
+
+    private var byokInputView: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 8) {
+                Group {
+                    if showKey {
+                        TextField("Paste your Gemini API key", text: $flow.apiKey)
+                    } else {
+                        SecureField("Paste your Gemini API key", text: $flow.apiKey)
+                    }
+                }
+                .textFieldStyle(.plain)
+                .font(.system(size: 13, design: .monospaced))
+                .padding(10)
+                .background(.ultraThinMaterial)
+                .cornerRadius(8)
+                .accessibilityIdentifier("wizard-api-key-input")
+
+                Button {
+                    showKey.toggle()
+                } label: {
+                    Image(systemName: showKey ? "eye.slash" : "eye")
+                        .font(.system(size: 12))
+                        .foregroundStyle(Theme.textMuted)
+                        .frame(width: 30, height: 30)
+                        .background(.ultraThinMaterial)
+                        .clipShape(Circle())
+                }
+                .buttonStyle(.plain)
+            }
+
+            if let error = flow.apiKeyError {
+                HStack(spacing: 6) {
+                    Image(systemName: "exclamationmark.circle.fill")
+                        .font(.system(size: 12))
+                    Text(error)
+                        .font(.system(size: 12))
+                }
+                .foregroundStyle(Theme.statusError)
+            }
+
+            Button {
+                if let url = URL(string: "https://aistudio.google.com/apikey") {
+                    NSWorkspace.shared.open(url)
+                }
+            } label: {
+                HStack(spacing: 4) {
+                    Image(systemName: "arrow.up.right.square")
+                        .font(.system(size: 10))
+                    Text("Get a free key from Google AI Studio")
+                        .font(.system(size: 11))
+                }
+                .foregroundStyle(Theme.accent)
+            }
+            .buttonStyle(.plain)
+        }
+        .onAppear {
+            flow.apiKey = SettingsManager.shared.geminiApiKey ?? ""
+        }
+        .onChange(of: flow.apiKey) { _, newValue in
             let trimmed = newValue.trimmingCharacters(in: .whitespacesAndNewlines)
             if !trimmed.isEmpty {
                 SettingsManager.shared.geminiApiKey = trimmed
             }
         }
     }
+
+    private func startGoogleSignIn() {
+        guard let (url, codeVerifier) = AuthManager.shared.buildGoogleSignInURL() else {
+            signInError = "Backend not configured. Use an API key instead."
+            flow.showBYOKInput = true
+            return
+        }
+
+        isSigningIn = true
+        signInError = nil
+
+        let session = ASWebAuthenticationSession(
+            url: url,
+            callbackURLScheme: StubbleAPIConfig.callbackScheme
+        ) { callbackURL, error in
+            Task { @MainActor in
+                defer { isSigningIn = false }
+
+                if let error = error {
+                    if (error as NSError).code == ASWebAuthenticationSessionError.canceledLogin.rawValue {
+                        return
+                    }
+                    signInError = Self.friendlyAuthError(error)
+                    return
+                }
+
+                guard let callbackURL = callbackURL,
+                      let code = AuthManager.extractAuthCode(from: callbackURL)
+                else {
+                    signInError = "No authorization code received."
+                    return
+                }
+
+                do {
+                    try await AuthManager.shared.exchangeCode(code, codeVerifier: codeVerifier)
+                    withAnimation(.easeInOut(duration: 0.3)) {
+                        flow.isSignedInViaGoogle = true
+                    }
+                    // Auto-advance after a brief pause so the user sees the success state
+                    onSignInSuccess?()
+                } catch {
+                    signInError = Self.friendlyAuthError(error)
+                }
+            }
+        }
+
+        session.presentationContextProvider = WizardAuthContextProvider.shared
+        session.prefersEphemeralWebBrowserSession = false
+
+        if !session.start() {
+            isSigningIn = false
+            signInError = "Could not start authentication session."
+        }
+    }
+
+    /// Convert raw OAuth/network errors into user-friendly messages.
+    private static func friendlyAuthError(_ error: Error) -> String {
+        let desc = error.localizedDescription.lowercased()
+        if desc.contains("network") || desc.contains("offline") || desc.contains("not connected") {
+            return "No internet connection. Please check your network and try again."
+        } else if desc.contains("timeout") || desc.contains("timed out") {
+            return "The request timed out. Please try again."
+        } else if desc.contains("unsupported_grant_type") || desc.contains("invalid_grant") {
+            return "Authentication configuration error. Please try again or use an API key."
+        } else if desc.contains("server") || desc.contains("500") || desc.contains("503") {
+            return "The authentication server is temporarily unavailable. Please try again later."
+        } else {
+            return "Sign-in failed. Please try again."
+        }
+    }
 }
 
-/// Numbered step label for the API key instructions.
+/// ASWebAuthenticationSession presentation context for the setup wizard window.
+@MainActor
+private class WizardAuthContextProvider: NSObject, ASWebAuthenticationPresentationContextProviding {
+    static let shared = WizardAuthContextProvider()
+
+    func presentationAnchor(for session: ASWebAuthenticationSession) -> ASPresentationAnchor {
+        NSApplication.shared.keyWindow ?? NSApplication.shared.windows.first ?? NSWindow()
+    }
+}
+
+/// Numbered step label for setup instructions.
 private struct SetupStep: View {
     let number: String
     let text: String

@@ -18,6 +18,11 @@ public final class SetupFlowController {
     public private(set) var apiKeyError: String?
     public private(set) var apiKeyValidated: Bool = false
 
+    /// Whether the user completed Google OAuth sign-in during setup.
+    public var isSignedInViaGoogle: Bool = false
+    /// Whether the user is showing the BYOK API key input on the sign-in page.
+    public var showBYOKInput: Bool = false
+
     /// Permission flags — the view layer polls and updates these.
     public var accessibilityGranted: Bool = false
     public var screenRecordingGranted: Bool = false
@@ -34,7 +39,9 @@ public final class SetupFlowController {
         case 0:
             return true
         case 1:
-            return !apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !isValidating
+            // Allow continue if: signed in via Google, or BYOK key entered
+            return isSignedInViaGoogle
+                || (!apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !isValidating)
         case 2:
             return allPermissionsGranted
         default:
@@ -87,10 +94,22 @@ public final class SetupFlowController {
     public func handleContinue() -> ContinueAction {
         guard canContinue else { return .blocked }
         if currentPage == 1 {
+            // If signed in via Google, just advance — no key validation needed
+            if isSignedInViaGoogle {
+                advance()
+                return .advance
+            }
+            // BYOK path — validate the API key
             return .validate
         }
         advance()
         return .advance
+    }
+
+    /// Skip the sign-in step entirely (user can configure later in Settings).
+    public func skipSignIn() {
+        guard currentPage == 1 else { return }
+        advance()
     }
 
     // MARK: - API Key Validation

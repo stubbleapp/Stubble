@@ -481,7 +481,28 @@ final class DashboardViewModel {
 
     // MARK: - Settings
 
+    /// Reinitialize all AI clients based on current auth state.
+    /// Called when auth state changes (sign in, sign out, token refresh).
+    func refreshForAuthChange() {
+        if let client = GeminiClient.resolvedClient() {
+            self.geminiClient = client
+            self.taskSummarizer = TaskSummarizer(geminiClient: client)
+            self.activityGenerator = ProjectActivityGenerator(geminiClient: client)
+            self.recommendationGenerator = RecommendationGenerator(geminiClient: client)
+            self.habitsGenerator = HabitsGenerator(geminiClient: client)
+            self.hasGeminiKey = true
+        } else {
+            self.geminiClient = nil
+            self.taskSummarizer = nil
+            self.activityGenerator = nil
+            self.recommendationGenerator = nil
+            self.habitsGenerator = nil
+            self.hasGeminiKey = false
+        }
+    }
+
     /// Update the Gemini API key, persist it, and reinitialize the summarizer.
+    /// Falls back to proxy mode if BYOK key is empty but user is signed in.
     func updateGeminiKey(_ key: String?) {
         let trimmed = key?.trimmingCharacters(in: .whitespacesAndNewlines)
         let effectiveKey = (trimmed?.isEmpty == false) ? trimmed : nil
@@ -496,12 +517,8 @@ final class DashboardViewModel {
             self.habitsGenerator = HabitsGenerator(geminiClient: client)
             self.hasGeminiKey = true
         } else {
-            self.geminiClient = nil
-            self.taskSummarizer = nil
-            self.activityGenerator = nil
-            self.recommendationGenerator = nil
-            self.habitsGenerator = nil
-            self.hasGeminiKey = false
+            // No BYOK key — try proxy mode (signed-in user) before giving up
+            refreshForAuthChange()
         }
     }
 

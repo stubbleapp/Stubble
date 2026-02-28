@@ -48,8 +48,10 @@ struct DashboardApp: App {
                         .frame(minWidth: 600, maxWidth: 1200, minHeight: 400, maxHeight: 850)
                 } else {
                     SetupWizardView {
-                        // Re-initialize Gemini client now that the key may have been saved
-                        if let key = SettingsManager.shared.geminiApiKey {
+                        // Re-initialize Gemini client — could be BYOK key or proxy-mode auth
+                        if AuthManager.shared.isSignedIn {
+                            viewModel.refreshForAuthChange()
+                        } else if let key = SettingsManager.shared.geminiApiKey {
                             viewModel.updateGeminiKey(key)
                         }
                         viewModel.loadDataForSelectedDate()
@@ -68,6 +70,19 @@ struct DashboardApp: App {
             .preferredColorScheme(colorScheme)
             .onReceive(NotificationCenter.default.publisher(for: .appearanceModeChanged)) { _ in
                 appearanceMode = SettingsManager.shared.appearanceMode
+            }
+            .onOpenURL { url in
+                // Handle OAuth callback from Supabase Google sign-in
+                Task {
+                    let handled = await AuthManager.shared.handleCallback(url: url)
+                    if handled {
+                        // Auth state changed — reinitialize GeminiClient for proxy mode
+                        viewModel.refreshForAuthChange()
+                    }
+                }
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .authStateChanged)) { _ in
+                viewModel.refreshForAuthChange()
             }
         }
         .defaultSize(width: hasCompletedSetup ? 1100 : 560, height: hasCompletedSetup ? 750 : 480)

@@ -4,6 +4,7 @@ import TaskMinerShared
 
 struct ChatOverlayView: View {
     @Environment(DashboardViewModel.self) var viewModel
+    @Environment(\.openWindow) private var openWindow
     @State private var inputText = ""
     @State private var isExpanded = false
 
@@ -242,13 +243,20 @@ struct ChatOverlayView: View {
 
     private var suggestionPills: some View {
         HStack(spacing: 0) {
-            // Refresh button
+            // Refresh button — spins while generating
             Button {
                 viewModel.generateRecommendations()
             } label: {
                 Image(systemName: "arrow.clockwise")
                     .font(.system(size: 10, weight: .medium))
-                    .foregroundStyle(Theme.textMuted)
+                    .foregroundStyle(viewModel.isGeneratingRecommendations ? Theme.accent : Theme.textMuted)
+                    .rotationEffect(.degrees(viewModel.isGeneratingRecommendations ? 360 : 0))
+                    .animation(
+                        viewModel.isGeneratingRecommendations
+                            ? .linear(duration: 1).repeatForever(autoreverses: false)
+                            : .default,
+                        value: viewModel.isGeneratingRecommendations
+                    )
                     .frame(width: 22, height: 22)
                     .background(
                         Circle()
@@ -257,7 +265,8 @@ struct ChatOverlayView: View {
                     .contentShape(Circle())
             }
             .buttonStyle(.plain)
-            .help("Refresh suggestions")
+            .disabled(viewModel.isGeneratingRecommendations)
+            .help(viewModel.isGeneratingRecommendations ? "Generating…" : "Refresh suggestions")
             .padding(.leading, 14)
 
             ScrollView(.horizontal, showsIndicators: false) {
@@ -325,24 +334,46 @@ struct ChatOverlayView: View {
 
     // MARK: - Error Row
 
+    /// Whether the error message indicates a proxy account issue (trial/session/rate limit).
+    private func isAccountError(_ error: String) -> Bool {
+        error.contains("trial has ended") || error.contains("session has expired") || error.contains("request limit")
+    }
+
     private func errorRow(_ error: String) -> some View {
-        HStack(spacing: 6) {
-            Image(systemName: "exclamationmark.triangle.fill")
-                .font(.caption2)
-                .foregroundStyle(Theme.statusError.opacity(0.7))
-            Text(error)
-                .font(.system(size: 11))
-                .foregroundStyle(Theme.textSecondary)
-                .lineLimit(2)
-            Spacer()
-            Button {
-                viewModel.chatError = nil
-            } label: {
-                Image(systemName: "xmark")
-                    .font(.system(size: 8, weight: .semibold))
-                    .foregroundStyle(Theme.textMuted)
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 6) {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .font(.caption2)
+                    .foregroundStyle(Theme.statusError.opacity(0.7))
+                Text(error)
+                    .font(.system(size: 11))
+                    .foregroundStyle(Theme.textSecondary)
+                    .lineLimit(3)
+                Spacer()
+                Button {
+                    viewModel.chatError = nil
+                } label: {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 8, weight: .semibold))
+                        .foregroundStyle(Theme.textMuted)
+                }
+                .buttonStyle(.plain)
             }
-            .buttonStyle(.plain)
+
+            if isAccountError(error) {
+                Button {
+                    openWindow(id: "settings")
+                } label: {
+                    HStack(spacing: 4) {
+                        Image(systemName: "gearshape")
+                            .font(.system(size: 9))
+                        Text("Open Settings")
+                            .font(.system(size: 11, weight: .medium))
+                    }
+                    .foregroundStyle(Theme.accent)
+                }
+                .buttonStyle(.plain)
+            }
         }
         .padding(8)
         .background(Theme.statusError.opacity(0.04))
