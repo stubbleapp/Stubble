@@ -14,6 +14,12 @@ final class MenuBarDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         Logger.enableFileLogging()
 
+        // Terminate any stale instance from before an update.  Sparkle relaunches
+        // the new binary before the old one has fully exited, which causes two Dock
+        // icons.  We ask the old process to quit, then wait briefly so macOS cleans
+        // up its Dock entry before we register ours.
+        terminateStaleInstances()
+
         // When launched via `swift run` or from an IDE (Cursor, Xcode, etc.) the process
         // has no .app bundle, so macOS defaults it to an activation policy that does NOT
         // grant keyboard focus. Setting .regular tells macOS this is a normal foreground
@@ -198,6 +204,38 @@ final class MenuBarDelegate: NSObject, NSApplicationDelegate {
         }
         image.isTemplate = true
         return image
+    }
+
+    // MARK: - Stale Instance Cleanup
+
+    /// Terminate any previous instance of this app that is still running.
+    /// Sparkle relaunches the new binary before the old one has fully exited,
+    /// which causes two Dock icons.  We send the old process a `.terminate()`
+    /// and then sleep briefly so macOS removes its Dock tile before we
+    /// register our own `.regular` activation policy.
+    private func terminateStaleInstances() {
+        guard let bundleId = Bundle.main.bundleIdentifier else { return }
+
+        let myPID = ProcessInfo.processInfo.processIdentifier
+        let others = NSRunningApplication.runningApplications(withBundleIdentifier: bundleId)
+            .filter { $0.processIdentifier != myPID }
+
+        guard !others.isEmpty else { return }
+
+        for app in others {
+            Logger.info("Terminating stale instance PID \(app.processIdentifier)")
+            app.terminate()
+        }
+
+        // Give macOS a moment to tear down the old Dock entry.
+        // 0.5s is enough for the WindowServer to remove the tile.
+        Thread.sleep(forTimeInterval: 0.5)
+
+        // If any are still alive after the grace period, force-kill them.
+        for app in others where !app.isTerminated {
+            Logger.info("Force-killing stale instance PID \(app.processIdentifier)")
+            app.forceTerminate()
+        }
     }
 
     // MARK: - Daemon Lifecycle

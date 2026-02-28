@@ -7,14 +7,34 @@ struct ChatOverlayView: View {
     @State private var inputText = ""
     @State private var isExpanded = false
 
-    /// Quick-action suggestions shown when chat is expanded with no messages.
-    private static let suggestions = [
-        "Describe my day",
-        "What did I work on?",
-        "How much time on each project?",
-        "What apps did I use most?",
-        "Any tips for tomorrow?"
-    ]
+    /// AI-generated suggestions preferred, with static fallback.
+    private var activeSuggestions: [String] {
+        if !viewModel.suggestedQuestions.isEmpty {
+            return viewModel.suggestedQuestions
+        }
+        return [
+            "Describe my day",
+            "What did I work on?",
+            "How much time on each project?",
+            "What apps did I use most?",
+            "Any tips for tomorrow?"
+        ]
+    }
+
+    /// Derive a conversation title from the first user message.
+    private var conversationTitle: String? {
+        guard let firstUserMessage = viewModel.chatMessages.first(where: { $0.role == .user }) else {
+            return nil
+        }
+        let text = firstUserMessage.content.trimmingCharacters(in: .whitespacesAndNewlines)
+        if text.count <= 40 { return text }
+        let truncated = text.prefix(37)
+        // Avoid cutting mid-word — find the last space
+        if let lastSpace = truncated.lastIndex(of: " ") {
+            return String(truncated[truncated.startIndex..<lastSpace]) + "…"
+        }
+        return String(truncated) + "…"
+    }
 
     var body: some View {
         ZStack(alignment: .bottom) {
@@ -31,44 +51,35 @@ struct ChatOverlayView: View {
                     .transition(.opacity)
             }
 
-            // Chat card
+            // Unified chat card — suggestion pills persist across states
             VStack(spacing: 0) {
-                // Message panel (slides up when expanded)
+                // Message panel slides in above the pills when expanded
                 if isExpanded {
-                    messagePanel
+                    messagePanelContent
                         .transition(.move(edge: .bottom).combined(with: .opacity))
                 }
 
-                // Input bar — collapsed: tappable placeholder, expanded: real text field
+                // Suggestion pills — always present, never re-rendered
+                suggestionPills
+
+                // Input bar
                 if isExpanded {
                     expandedInputBar
                 } else {
                     collapsedInputBar
                 }
             }
-            .background {
-                if isExpanded {
-                    RoundedRectangle(cornerRadius: 20, style: .continuous)
-                        .fill(Theme.chatSurface)
-                        .shadow(color: .black.opacity(0.12), radius: 24, y: -4)
-                        .shadow(color: .black.opacity(0.06), radius: 8, y: -2)
-                } else {
-                    Capsule()
-                        .fill(Theme.chatSurface)
-                        .shadow(color: .black.opacity(0.12), radius: 24, y: -4)
-                        .shadow(color: .black.opacity(0.06), radius: 8, y: -2)
-                }
-            }
-            .overlay {
-                if isExpanded {
-                    RoundedRectangle(cornerRadius: 20, style: .continuous)
-                        .strokeBorder(Theme.chatBorder, lineWidth: 0.5)
-                } else {
-                    Capsule()
-                        .strokeBorder(Theme.chatBorder, lineWidth: 0.5)
-                }
-            }
-            .clipShape(.rect(cornerRadius: isExpanded ? 20 : 100))
+            .background(
+                RoundedRectangle(cornerRadius: 20, style: .continuous)
+                    .fill(Theme.chatSurface)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 20, style: .continuous)
+                    .strokeBorder(Theme.chatBorder, lineWidth: 0.5)
+            )
+            .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
+            .shadow(color: .black.opacity(0.10), radius: 20, y: 0)
+            .shadow(color: .black.opacity(0.06), radius: 8, y: 2)
             .padding(.horizontal, 20)
             .padding(.bottom, 16)
             .fixedSize(horizontal: false, vertical: !isExpanded)
@@ -93,7 +104,7 @@ struct ChatOverlayView: View {
                 ActivityHaloDot(color: Theme.accent, size: 20)
 
                 Text("Ask Stubble\u{2026}")
-                    .font(.system(size: 13))
+                    .font(.system(size: 12))
                     .foregroundStyle(Theme.textMuted)
 
                 Spacer()
@@ -155,13 +166,20 @@ struct ChatOverlayView: View {
         .padding(.vertical, 10)
     }
 
-    // MARK: - Message Panel
+    // MARK: - Message Panel Content (header + messages, no suggestion pills)
 
-    private var messagePanel: some View {
+    private var messagePanelContent: some View {
         VStack(spacing: 0) {
             // Header
-            HStack {
-                ActivityHaloDot(color: Theme.accent, size: 16)
+            HStack(spacing: 8) {
+                ActivityHaloDot(color: Theme.accent, size: 14)
+
+                if let title = conversationTitle {
+                    Text(title)
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(Theme.textSecondary)
+                        .lineLimit(1)
+                }
 
                 Spacer()
 
@@ -217,36 +235,56 @@ struct ChatOverlayView: View {
                 .fill(Theme.chatSeparator)
                 .frame(height: 0.5)
                 .padding(.horizontal, 12)
-
-            // Horizontal suggestion pills — always visible
-            suggestionPills
         }
     }
 
-    // MARK: - Suggestion Pills (horizontal scroll, always visible)
+    // MARK: - Suggestion Pills (horizontal scroll with refresh button)
 
     private var suggestionPills: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 6) {
-                ForEach(Self.suggestions, id: \.self) { suggestion in
-                    Button {
-                        inputText = suggestion
-                        sendMessage()
-                    } label: {
-                        Text(suggestion)
-                            .font(.system(size: 11, weight: .medium))
-                            .foregroundStyle(Theme.textSecondary)
-                            .padding(.horizontal, 10)
-                            .padding(.vertical, 5)
-                            .modifier(LiquidGlassPillModifier())
-                    }
-                    .buttonStyle(.plain)
-                }
+        HStack(spacing: 0) {
+            // Refresh button
+            Button {
+                viewModel.generateRecommendations()
+            } label: {
+                Image(systemName: "arrow.clockwise")
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundStyle(Theme.textMuted)
+                    .frame(width: 22, height: 22)
+                    .background(
+                        Circle()
+                            .strokeBorder(Theme.cardBorder, lineWidth: 0.5)
+                    )
+                    .contentShape(Circle())
             }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 8)
+            .buttonStyle(.plain)
+            .help("Refresh suggestions")
+            .padding(.leading, 14)
+
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 6) {
+                    ForEach(activeSuggestions, id: \.self) { suggestion in
+                        Button {
+                            inputText = suggestion
+                            sendMessage()
+                        } label: {
+                            Text(suggestion)
+                                .font(.system(size: 11, weight: .medium))
+                                .foregroundStyle(Theme.textSecondary)
+                                .padding(.horizontal, 10)
+                                .padding(.vertical, 5)
+                                .background(
+                                    Capsule()
+                                        .strokeBorder(Theme.cardBorder, lineWidth: 0.5)
+                                )
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .padding(.leading, 8)
+                .padding(.trailing, 14)
+                .padding(.vertical, 8)
+            }
         }
-        .scrollClipDisabled(true)
     }
 
     // MARK: - Messages Scroll View
@@ -254,7 +292,7 @@ struct ChatOverlayView: View {
     private var messagesScrollView: some View {
         ScrollViewReader { proxy in
             ScrollView {
-                LazyVStack(spacing: 10) {
+                LazyVStack(spacing: 16) {
                     ForEach(viewModel.chatMessages) { message in
                         MessageBubble(message: message)
                             .id(message.id)
@@ -350,7 +388,7 @@ private struct ChatTextField: NSViewRepresentable {
         field.isBordered = false
         field.drawsBackground = false
         field.focusRingType = .none
-        field.font = .systemFont(ofSize: 13)
+        field.font = .systemFont(ofSize: 12)
         field.textColor = .labelColor
         field.delegate = context.coordinator
         field.lineBreakMode = .byTruncatingTail
@@ -401,65 +439,119 @@ private struct ChatTextField: NSViewRepresentable {
 
 private struct MessageBubble: View {
     let message: ChatMessage
+    @State private var showCopied = false
 
     var body: some View {
         HStack {
             if message.role == .user { Spacer(minLength: 48) }
 
-            Group {
-                if message.isStreaming && message.content.isEmpty {
-                    streamingDotsView
-                } else if message.role == .assistant {
-                    assistantContentView
-                } else {
-                    Text(message.content)
+            if message.role == .user {
+                userBubble
+            } else {
+                VStack(alignment: .leading, spacing: 6) {
+                    assistantContent
+
+                    // Copy button below completed assistant responses
+                    if !message.isStreaming && !message.content.isEmpty {
+                        Button {
+                            NSPasteboard.general.clearContents()
+                            NSPasteboard.general.setString(message.content, forType: .string)
+                            showCopied = true
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+                                showCopied = false
+                            }
+                        } label: {
+                            HStack(spacing: 4) {
+                                Image(systemName: showCopied ? "checkmark" : "doc.on.doc")
+                                    .font(.system(size: 9, weight: .medium))
+                                if showCopied {
+                                    Text("Copied")
+                                        .font(.system(size: 10, weight: .medium))
+                                }
+                            }
+                            .foregroundStyle(showCopied ? Theme.accent : Theme.textMuted)
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 4)
+                            .background(
+                                Capsule()
+                                    .fill(Theme.chatSeparator.opacity(showCopied ? 0 : 0.6))
+                            )
+                            .contentShape(Capsule())
+                        }
+                        .buttonStyle(.plain)
+                        .help("Copy response")
+                        .animation(.easeInOut(duration: 0.2), value: showCopied)
+                    }
                 }
             }
-            .font(.system(size: 13))
-            .foregroundStyle(message.role == .user ? .white : Theme.textPrimary)
-            .textSelection(.enabled)
-            .lineSpacing(3)
-            .padding(.horizontal, 12)
-            .padding(.vertical, 10)
-            .background(bubbleBackground)
-            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-            .overlay(
-                message.role == .assistant
-                    ? RoundedRectangle(cornerRadius: 16, style: .continuous)
-                        .strokeBorder(Theme.chatSeparator, lineWidth: 0.5)
-                    : nil
-            )
-            .shadow(
-                color: message.role == .user ? Theme.accent.opacity(0.15) : .black.opacity(0.03),
-                radius: message.role == .user ? 6 : 3,
-                y: 2
-            )
 
             if message.role == .assistant { Spacer(minLength: 48) }
         }
     }
 
-    @ViewBuilder
-    private var bubbleBackground: some View {
-        if message.role == .user {
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .fill(Theme.accent)
-        } else {
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .fill(Theme.chatAssistantBubble)
-        }
+    // MARK: - User Bubble (accent pill)
+
+    private var userBubble: some View {
+        Text(message.content)
+            .font(.system(size: 12))
+            .foregroundStyle(.white)
+            .textSelection(.enabled)
+            .lineSpacing(2)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .background(
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .fill(Theme.accent)
+            )
+            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .shadow(color: Theme.accent.opacity(0.15), radius: 6, y: 2)
     }
 
-    /// Assistant text — plain text during streaming for performance, markdown after completion.
+    // MARK: - Assistant Content (block-based rendering, no container)
+
+    private var assistantContent: some View {
+        Group {
+            if message.isStreaming && message.content.isEmpty {
+                streamingDotsView
+            } else if message.isStreaming {
+                // Plain text while streaming for performance
+                Text(message.content + "\u{258E}")
+            } else {
+                // Block-based markdown after completion
+                let blocks = Self.parseBlocks(message.content)
+                VStack(alignment: .leading, spacing: 6) {
+                    ForEach(blocks) { block in
+                        blockView(block)
+                    }
+                }
+            }
+        }
+        .font(.system(size: 12))
+        .foregroundStyle(Theme.textSecondary)
+        .textSelection(.enabled)
+        .lineSpacing(3)
+        .padding(.vertical, 6)
+    }
+
     @ViewBuilder
-    private var assistantContentView: some View {
-        if message.isStreaming {
-            Text(message.content + "\u{258E}")
+    private func blockView(_ block: ContentBlock) -> some View {
+        switch block.kind {
+        case .paragraph(let text):
+            Text(Self.inlineMarkdown(text))
+
+        case .heading(let text):
+            Text(Self.inlineMarkdown(text))
                 .foregroundStyle(Theme.textPrimary)
-        } else if let rendered = markdownText(message.content) {
-            Text(rendered)
-        } else {
-            Text(message.content)
+                .fontWeight(.semibold)
+                .padding(.top, 2)
+
+        case .bullet(let text, let level):
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                Text(level == 0 ? "\u{2022}" : "\u{25E6}")
+                    .foregroundStyle(Theme.accent)
+                Text(Self.inlineMarkdown(text))
+            }
+            .padding(.leading, CGFloat(level) * 16)
         }
     }
 
@@ -482,42 +574,94 @@ private struct MessageBubble: View {
         .frame(height: 14)
     }
 
-    private static func preprocessMarkdown(_ source: String) -> String {
-        source
-            .split(separator: "\n", omittingEmptySubsequences: false)
-            .map { line in
-                let str = String(line)
-                if let match = str.range(of: #"^(\s{2,}|\t)[\-\*]\s"#, options: .regularExpression) {
-                    let indent = str[str.startIndex..<str.index(before: match.upperBound)]
-                    let rest = str[match.upperBound...]
-                    let indentStr = String(indent).replacingOccurrences(of: "-", with: "\u{25E6}").replacingOccurrences(of: "*", with: "\u{25E6}")
-                    return "\(indentStr) \(rest)"
-                }
-                if let range = str.range(of: #"^[\-\*]\s"#, options: .regularExpression) {
-                    return "\u{2022}\u{2002}" + str[range.upperBound...]
-                }
-                if let range = str.range(of: #"^#{1,3}\s+"#, options: .regularExpression) {
-                    return "**" + str[range.upperBound...] + "**"
-                }
-                return str
+    // MARK: - Block-Based Markdown Parsing
+
+    /// Parse markdown source into structured blocks (paragraphs, bullets, headings).
+    private static func parseBlocks(_ source: String) -> [ContentBlock] {
+        guard !source.isEmpty else { return [] }
+
+        var blocks: [ContentBlock] = []
+        let lines = source.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
+        var paragraphLines: [String] = []
+
+        func flushParagraph() {
+            let text = paragraphLines.joined(separator: " ").trimmingCharacters(in: .whitespacesAndNewlines)
+            if !text.isEmpty {
+                blocks.append(ContentBlock(kind: .paragraph(text)))
             }
-            .joined(separator: "\n")
+            paragraphLines = []
+        }
+
+        for line in lines {
+            let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
+
+            // Blank line → paragraph break
+            if trimmed.isEmpty {
+                flushParagraph()
+                continue
+            }
+
+            // Heading (# / ## / ###)
+            if let range = line.range(of: #"^#{1,3}\s+"#, options: .regularExpression) {
+                flushParagraph()
+                blocks.append(ContentBlock(kind: .heading(String(line[range.upperBound...]))))
+                continue
+            }
+
+            // Nested bullet (indented - or *)
+            if let match = line.range(of: #"^(\s{2,}|\t)[\-\*]\s"#, options: .regularExpression) {
+                flushParagraph()
+                blocks.append(ContentBlock(kind: .bullet(String(line[match.upperBound...]), level: 1)))
+                continue
+            }
+
+            // Top-level bullet (- or *)
+            if let match = line.range(of: #"^[\-\*]\s"#, options: .regularExpression) {
+                flushParagraph()
+                blocks.append(ContentBlock(kind: .bullet(String(line[match.upperBound...]), level: 0)))
+                continue
+            }
+
+            // Numbered list (1. 2. etc.)
+            if let match = line.range(of: #"^\d+\.\s"#, options: .regularExpression) {
+                flushParagraph()
+                blocks.append(ContentBlock(kind: .bullet(String(line[match.upperBound...]), level: 0)))
+                continue
+            }
+
+            // Regular text → accumulate into paragraph
+            paragraphLines.append(line)
+        }
+
+        flushParagraph()
+        return blocks
     }
 
-    private func markdownText(_ source: String) -> AttributedString? {
-        guard !source.isEmpty else { return nil }
-        let processed = Self.preprocessMarkdown(source)
+    /// Parse inline markdown (bold, italic, code) into an AttributedString.
+    private static func inlineMarkdown(_ text: String) -> AttributedString {
         var options = AttributedString.MarkdownParsingOptions()
         options.interpretedSyntax = .inlineOnlyPreservingWhitespace
-        guard var attributed = try? AttributedString(markdown: processed, options: options) else {
-            return nil
+        guard var attributed = try? AttributedString(markdown: text, options: options) else {
+            return AttributedString(text)
         }
         for run in attributed.runs {
             if run.inlinePresentationIntent?.contains(.code) == true {
-                let range = run.range
-                attributed[range].font = .system(size: 13, design: .monospaced)
+                attributed[run.range].font = .system(size: 12, design: .monospaced)
             }
         }
         return attributed
+    }
+}
+
+// MARK: - Content Block Model
+
+private struct ContentBlock: Identifiable {
+    let id = UUID()
+    let kind: Kind
+
+    enum Kind {
+        case paragraph(String)
+        case bullet(String, level: Int)
+        case heading(String)
     }
 }

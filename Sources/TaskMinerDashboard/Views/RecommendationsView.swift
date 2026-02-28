@@ -77,13 +77,7 @@ struct RecommendationsView: View {
                                 .padding(.bottom, 16)
                         }
 
-                        // 3. Suggested Questions
-                        if !viewModel.suggestedQuestions.isEmpty {
-                            questionPills
-                                .padding(.bottom, 16)
-                        }
-
-                        Spacer().frame(height: 64)
+                        Spacer().frame(height: 100)
                     }
                 }
             }
@@ -186,26 +180,6 @@ struct RecommendationsView: View {
         }
     }
 
-    // MARK: - Question Pills (horizontal scroll)
-
-    private var questionPills: some View {
-        FlowLayout(spacing: 8) {
-            ForEach(viewModel.suggestedQuestions, id: \.self) { question in
-                Button {
-                    viewModel.pendingChatQuestion = question
-                } label: {
-                    Text(question)
-                        .font(.system(size: 12, weight: .medium))
-                        .foregroundStyle(Theme.textPrimary)
-                        .padding(.horizontal, 14)
-                        .padding(.vertical, 8)
-                        .modifier(LiquidGlassPillModifier())
-                }
-                .buttonStyle(.plain)
-            }
-        }
-        .padding(.horizontal, 24)
-    }
 }
 
 // MARK: - Single Project Row (expandable)

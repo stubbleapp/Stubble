@@ -88,8 +88,8 @@ struct ContentView: View {
             }
 
             ToolbarItem(placement: .primaryAction) {
-                PauseControlView(iconSize: ToolbarLayout.iconButtonSize)
-                    .padding(.trailing, ToolbarLayout.toolbarTrailingPadding)
+                PauseControlView()
+                    .accessibilityIdentifier("toolbar-pause-control")
             }
         }
         .onAppear {

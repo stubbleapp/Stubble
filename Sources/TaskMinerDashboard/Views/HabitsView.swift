@@ -115,7 +115,7 @@ struct HabitsView: View {
                                 .padding(.bottom, 16)
                         }
 
-                        Spacer().frame(height: 64)
+                        Spacer().frame(height: 100)
                     }
                 }
             }

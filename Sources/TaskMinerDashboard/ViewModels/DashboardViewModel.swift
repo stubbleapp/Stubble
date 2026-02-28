@@ -61,6 +61,24 @@ final class DashboardViewModel {
     /// so we don't re-trigger on every tab switch.
     var hasAttemptedStubsGeneration = false
 
+    /// Fingerprint of the task data when stubs were last generated.
+    /// Format: "count|latestEndTimeISO" — detects when new daemon data warrants a refresh.
+    var lastStubsTaskFingerprint: String = ""
+
+    /// Timestamp of last stubs generation (or load from DB). Enforces minimum interval.
+    var lastStubsGenerationTime: Date = .distantPast
+
+    /// Minimum interval between automatic stubs refreshes (30 minutes).
+    static let minStubsRefreshInterval: TimeInterval = 1800
+
+    /// Lightweight fingerprint of the current task data.
+    /// Changes when tasks are added, removed, or their time ranges shift.
+    var currentTaskFingerprint: String {
+        guard !tasks.isEmpty else { return "0|" }
+        let latestEnd = tasks.map(\.endTime).max() ?? Date.distantPast
+        return "\(tasks.count)|\(SharedFormatters.iso8601.string(from: latestEnd))"
+    }
+
     /// Whether the user is viewing today's date (forward-looking stubs) or a past day (retrospective summary).
     var isViewingToday: Bool {
         Calendar.current.isDateInToday(selectedDate)
@@ -193,6 +211,8 @@ final class DashboardViewModel {
         daySummaryContent = nil
         suggestedQuestions = []
         hasAttemptedStubsGeneration = false
+        lastStubsTaskFingerprint = ""
+        lastStubsGenerationTime = .distantPast
         recommendationsError = nil
         loadDataForSelectedDate()
         loadChatHistory()
@@ -639,6 +659,8 @@ final class DashboardViewModel {
         // Mark as already loaded so auto-generate doesn't fire
         if !recommendations.isEmpty || daySummaryContent != nil {
             hasAttemptedStubsGeneration = true
+            lastStubsTaskFingerprint = currentTaskFingerprint
+            lastStubsGenerationTime = record.generatedAt
         }
     }
 
@@ -735,6 +757,7 @@ final class DashboardViewModel {
             // Still today — just refresh data (daemon may have written new rows)
             loadAvailableDates()
             loadDataForSelectedDate()
+            checkStubsStaleness()
             return
         }
         Logger.info("Dashboard: date rolled over, advancing to today")
@@ -751,6 +774,7 @@ final class DashboardViewModel {
                 guard self.isViewingToday else { return }
                 self.loadAvailableDates()
                 self.loadDataForSelectedDate()
+                self.checkStubsStaleness()
                 Logger.debug("Periodic dashboard refresh completed")
             }
         }

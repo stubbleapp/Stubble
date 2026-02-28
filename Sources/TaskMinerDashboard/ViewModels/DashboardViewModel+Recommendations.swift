@@ -31,6 +31,9 @@ extension DashboardViewModel {
         let dateLabel = SharedFormatters.headerDateFormatter.string(from: selectedDate)
         let dateString = SharedFormatters.dayFormatter.string(from: selectedDate)
 
+        // Capture the task fingerprint at generation time so we can track staleness
+        let fingerprintAtGeneration = currentTaskFingerprint
+
         recommendationsTask?.cancel()
         recommendationsTask = Task {
             do {
@@ -80,6 +83,8 @@ extension DashboardViewModel {
                     self.suggestedQuestions = content.suggestedQuestions
                 }
                 self.isGeneratingRecommendations = false
+                self.lastStubsTaskFingerprint = fingerprintAtGeneration
+                self.lastStubsGenerationTime = Date()
                 Analytics.recommendationsGenerated(count: content.recommendations.count)
             } catch {
                 self.recommendationsError = error.localizedDescription
@@ -91,6 +96,35 @@ extension DashboardViewModel {
     /// Remove a single recommendation from the list.
     func dismissRecommendation(id: UUID) {
         recommendations.removeAll { $0.id == id }
+    }
+
+    // MARK: - Auto-Refresh Staleness Check
+
+    /// Check whether stubs should be auto-refreshed based on task data changes.
+    /// Called from the periodic refresh timer after loading fresh data from the DB.
+    func checkStubsStaleness() {
+        // Only auto-refresh for today's date
+        guard isViewingToday else { return }
+
+        // Only if stubs have been generated at least once
+        guard hasAttemptedStubsGeneration else { return }
+
+        // Don't interrupt an in-progress generation
+        guard !isGeneratingRecommendations else { return }
+
+        // Need an API key and tasks to work with
+        guard hasGeminiKey, !tasks.isEmpty else { return }
+
+        // Enforce minimum interval between auto-refreshes
+        let elapsed = Date().timeIntervalSince(lastStubsGenerationTime)
+        guard elapsed >= Self.minStubsRefreshInterval else { return }
+
+        // Compare task fingerprints — skip if data hasn't changed
+        let fingerprint = currentTaskFingerprint
+        guard fingerprint != lastStubsTaskFingerprint else { return }
+
+        Logger.debug("Stubs data changed (\(lastStubsTaskFingerprint) → \(fingerprint)) — auto-refreshing")
+        generateRecommendations()
     }
 
     // MARK: - Persistence

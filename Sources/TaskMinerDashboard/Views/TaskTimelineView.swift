@@ -177,24 +177,21 @@ struct TaskTimelineView: View {
 
             // Content
             if viewModel.tasks.isEmpty && !viewModel.isGeneratingSummary {
-                // Empty state — no tasks at all
+                // Empty state — no tasks yet
                 Spacer()
                 VStack(spacing: 10) {
-                    Image(systemName: "sparkles")
+                    Image(systemName: "cup.and.heat.waves")
                         .font(.system(size: 36))
                         .foregroundStyle(Theme.textQuaternary)
 
-                    Text("No tasks yet")
+                    Text("Your timeline is brewing")
                         .font(.title3.weight(.medium))
                         .foregroundStyle(Theme.textSecondary)
 
-                    Button(action: { viewModel.generateSummary() }) {
-                        Label("Generate Summary", systemImage: "sparkles")
-                            .font(.system(size: 13, weight: .medium))
-                    }
-                    .buttonStyle(.borderless)
-                    .foregroundStyle(Theme.accent)
-                    .padding(.top, 4)
+                    Text("Carry on about your day — check back\nin a bit to see what you've been up to.")
+                        .font(.system(size: 13))
+                        .foregroundStyle(Theme.textMuted)
+                        .multilineTextAlignment(.center)
                 }
                 Spacer()
             } else if viewModel.tasks.isEmpty && viewModel.isGeneratingSummary {
@@ -247,9 +244,9 @@ struct TaskTimelineView: View {
                     .animation(.easeInOut(duration: 0.2), value: viewModel.isGeneratingSummary)
                     .padding(.horizontal, 24)
 
-                    // Extra space so content isn't hidden behind the floating chat bar
+                    // Extra space so content isn't hidden behind the floating chat bar + suggestion pills
                     Spacer()
-                        .frame(height: 64)
+                        .frame(height: 100)
                 }
             }
         }

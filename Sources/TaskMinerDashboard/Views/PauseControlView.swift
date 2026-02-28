@@ -9,19 +9,29 @@ struct PauseControlView: View {
     var iconSize: CGFloat = 28
 
     var body: some View {
-        if viewModel.pauseState != nil {
-            // Paused → simple play button to resume
+        if let state = viewModel.pauseState {
+            // Paused → pill showing remaining time + tap to resume
             Button(action: { viewModel.resumeMonitoring() }) {
-                Image(systemName: "play.fill")
-                    .font(.system(size: 13, weight: .medium))
-                    .foregroundStyle(Theme.textPrimary)
-                    .frame(width: iconSize, height: iconSize)
-                    .contentShape(Rectangle())
+                HStack(spacing: 4) {
+                    Image(systemName: "play.fill")
+                        .font(.system(size: 11, weight: .medium))
+                    Text(pauseLabel(for: state))
+                        .font(.system(size: 11, weight: .medium))
+                        .monospacedDigit()
+                }
+                .foregroundStyle(Theme.accent)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 5)
+                .background(
+                    Capsule()
+                        .fill(Theme.accent.opacity(0.12))
+                )
+                .contentShape(Capsule())
             }
             .buttonStyle(.plain)
-            .frame(width: iconSize, height: iconSize)
             .modifier(NoToolbarGlassModifier())
             .accessibilityLabel("Resume monitoring")
+            .accessibilityHint("Tap to resume")
         } else {
             // Active → button that opens an NSMenu for pause duration choices.
             Button {
@@ -38,6 +48,20 @@ struct PauseControlView: View {
             .modifier(NoToolbarGlassModifier())
             .accessibilityLabel("Pause monitoring")
             .accessibilityHint("Opens menu to choose pause duration")
+        }
+    }
+
+    private func pauseLabel(for state: PauseState) -> String {
+        guard let remaining = state.timeRemaining, remaining > 0 else {
+            return "Paused"
+        }
+        let totalSeconds = Int(remaining)
+        let mins = totalSeconds / 60
+        let secs = totalSeconds % 60
+        if mins > 0 {
+            return "\(mins)m"
+        } else {
+            return "\(secs)s"
         }
     }
 
