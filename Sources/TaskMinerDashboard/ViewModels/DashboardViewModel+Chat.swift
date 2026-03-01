@@ -5,12 +5,6 @@ import TaskMinerShared
 
 extension DashboardViewModel {
 
-    private static let chatTimeFmt: DateFormatter = {
-        let f = DateFormatter()
-        f.dateFormat = "HH:mm"
-        return f
-    }()
-
     /// The date string for the currently selected date (yyyy-MM-dd).
     private var selectedDateString: String {
         SharedFormatters.dayFormatter.string(from: selectedDate)

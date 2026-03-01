@@ -28,22 +28,18 @@ public final class AuthManager: @unchecked Sendable {
 
     public enum AuthError: LocalizedError, Sendable {
         case invalidURL
-        case cancelled
         case noAuthCode
         case networkError(String)
         case tokenExchangeFailed(String)
         case sessionExpired
-        case notConfigured
 
         public var errorDescription: String? {
             switch self {
             case .invalidURL: return "Invalid authentication URL"
-            case .cancelled: return "Sign-in was cancelled"
             case .noAuthCode: return "No authorization code received"
             case .networkError(let msg): return "Network error: \(msg)"
             case .tokenExchangeFailed(let msg): return "Authentication failed: \(msg)"
             case .sessionExpired: return "Session expired. Please sign in again."
-            case .notConfigured: return "Authentication not configured"
             }
         }
     }
@@ -68,12 +64,20 @@ public final class AuthManager: @unchecked Sendable {
     /// Serial queue for thread-safe session access.
     private let sessionQueue = DispatchQueue(label: "com.stubble.auth.session")
 
+    /// Shared in-flight refresh task to prevent concurrent refresh races.
+    /// Two simultaneous callers that both see token near-expiry will share
+    /// the same refresh Task instead of firing two competing requests.
+    private var refreshTask: Task<Void, Error>?
+
     /// Stores the PKCE code verifier from the most recent `buildGoogleSignInURL()` call
     /// so that `handleCallback(url:)` can complete the exchange when `onOpenURL` fires.
     private var pendingCodeVerifier: String?
 
     /// File path for auth.json.
     private let authFilePath: URL
+
+    /// Shared ISO8601 formatter — avoids allocating a new one on every parse/format call.
+    private static let iso8601Formatter = ISO8601DateFormatter()
 
     // MARK: - Init
 
@@ -172,24 +176,36 @@ public final class AuthManager: @unchecked Sendable {
 
     /// Get a valid access token for proxy requests.
     /// Automatically refreshes the token if it's expired or about to expire.
+    /// Multiple concurrent callers share a single in-flight refresh to prevent races.
     public func validAccessToken() async throws -> String {
-        guard isSignedIn else { throw AuthError.sessionExpired }
+        let signedIn = sessionQueue.sync { self.isSignedIn }
+        guard signedIn else { throw AuthError.sessionExpired }
 
         // Refresh if token expires within 60 seconds
-        if let expiresAt = tokenExpiresAt, expiresAt.timeIntervalSinceNow < 60 {
+        let needsRefresh = sessionQueue.sync { () -> Bool in
+            guard let expiresAt = self.tokenExpiresAt else { return false }
+            return expiresAt.timeIntervalSinceNow < 60
+        }
+        if needsRefresh {
             try await refreshSession()
         }
 
-        guard let token = accessToken else { throw AuthError.sessionExpired }
+        let token = sessionQueue.sync { self.accessToken }
+        guard let token else { throw AuthError.sessionExpired }
         return token
     }
 
     /// Refresh the session token if it's expired or about to expire.
     /// Safe to call even if the token is still valid (no-op).
     public func refreshSessionIfNeeded() async throws {
-        guard isSignedIn else { return }
+        let signedIn = sessionQueue.sync { self.isSignedIn }
+        guard signedIn else { return }
 
-        if let expiresAt = tokenExpiresAt, expiresAt.timeIntervalSinceNow < 60 {
+        let needsRefresh = sessionQueue.sync { () -> Bool in
+            guard let expiresAt = self.tokenExpiresAt else { return false }
+            return expiresAt.timeIntervalSinceNow < 60
+        }
+        if needsRefresh {
             try await refreshSession()
         }
     }
@@ -234,31 +250,59 @@ public final class AuthManager: @unchecked Sendable {
     // MARK: - Token Refresh
 
     private func refreshSession() async throws {
-        guard let currentRefresh = refreshToken else {
-            throw AuthError.sessionExpired
+        // Coalesce concurrent refresh calls into a single in-flight task.
+        // This prevents the race where two callers both see near-expiry,
+        // both call Supabase, and the second invalidates the first's new token.
+        if let existing = refreshTask {
+            return try await existing.value
         }
 
-        let url = URL(string: "\(StubbleAPIConfig.supabaseURL)/auth/v1/token?grant_type=refresh_token")!
+        let task = Task<Void, Error> {
+            defer { refreshTask = nil }
 
-        var request = URLRequest(url: url)
-        request.httpMethod = "POST"
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.setValue(StubbleAPIConfig.supabaseAnonKey, forHTTPHeaderField: "apikey")
-        request.setValue("Bearer \(StubbleAPIConfig.supabaseAnonKey)", forHTTPHeaderField: "Authorization")
+            let currentRefresh = sessionQueue.sync { self.refreshToken }
+            guard let currentRefresh else {
+                throw AuthError.sessionExpired
+            }
 
-        let body: [String: String] = ["refresh_token": currentRefresh]
-        request.httpBody = try JSONSerialization.data(withJSONObject: body)
-        request.timeoutInterval = 30
+            let url = URL(string: "\(StubbleAPIConfig.supabaseURL)/auth/v1/token?grant_type=refresh_token")!
 
-        let (data, response) = try await URLSession.shared.data(for: request)
+            var request = URLRequest(url: url)
+            request.httpMethod = "POST"
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            request.setValue(StubbleAPIConfig.supabaseAnonKey, forHTTPHeaderField: "apikey")
+            request.setValue("Bearer \(StubbleAPIConfig.supabaseAnonKey)", forHTTPHeaderField: "Authorization")
 
-        guard let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 else {
-            // Refresh failed — clear session
-            signOut()
-            throw AuthError.sessionExpired
+            let body: [String: String] = ["refresh_token": currentRefresh]
+            request.httpBody = try JSONSerialization.data(withJSONObject: body)
+            request.timeoutInterval = 30
+
+            do {
+                let (data, response) = try await URLSession.shared.data(for: request)
+
+                guard let httpResponse = response as? HTTPURLResponse else {
+                    throw AuthError.networkError("Invalid response")
+                }
+
+                if httpResponse.statusCode == 200 {
+                    try self.parseAndStoreSession(data: data)
+                } else if httpResponse.statusCode == 400 || httpResponse.statusCode == 401 {
+                    // Auth error (invalid/revoked refresh token) — sign out
+                    self.signOut()
+                    throw AuthError.sessionExpired
+                } else {
+                    // Server error (5xx) — don't sign out, just fail this request
+                    let errorBody = String(data: data, encoding: .utf8) ?? "Unknown error"
+                    throw AuthError.networkError("Refresh failed (\(httpResponse.statusCode)): \(errorBody)")
+                }
+            } catch let error as URLError {
+                // Network error (timeout, offline) — don't sign out
+                throw AuthError.networkError(error.localizedDescription)
+            }
         }
 
-        try parseAndStoreSession(data: data)
+        refreshTask = task
+        try await task.value
     }
 
     // MARK: - Session Parsing
@@ -287,7 +331,7 @@ public final class AuthManager: @unchecked Sendable {
                 self.userEmail = user["email"] as? String
 
                 if let createdAtStr = user["created_at"] as? String {
-                    self.userCreatedAt = ISO8601DateFormatter().date(from: createdAtStr)
+                    self.userCreatedAt = Self.iso8601Formatter.date(from: createdAtStr)
                 }
 
                 if let metadata = user["user_metadata"] as? [String: Any] {
@@ -353,7 +397,7 @@ public final class AuthManager: @unchecked Sendable {
         if let userId { dict["user_id"] = userId }
         if let userEmail { dict["user_email"] = userEmail }
         if let userName { dict["user_name"] = userName }
-        if let userCreatedAt { dict["user_created_at"] = ISO8601DateFormatter().string(from: userCreatedAt) }
+        if let userCreatedAt { dict["user_created_at"] = Self.iso8601Formatter.string(from: userCreatedAt) }
         if let subscriptionTier { dict["subscription_tier"] = subscriptionTier }
         if let userAvatarURL { dict["avatar_url"] = userAvatarURL.absoluteString }
 
@@ -386,7 +430,7 @@ public final class AuthManager: @unchecked Sendable {
         userName = dict["user_name"] as? String
         subscriptionTier = dict["subscription_tier"] as? String
         if let createdAtStr = dict["user_created_at"] as? String {
-            userCreatedAt = ISO8601DateFormatter().date(from: createdAtStr)
+            userCreatedAt = Self.iso8601Formatter.date(from: createdAtStr)
         }
         if let avatarStr = dict["avatar_url"] as? String {
             userAvatarURL = URL(string: avatarStr)

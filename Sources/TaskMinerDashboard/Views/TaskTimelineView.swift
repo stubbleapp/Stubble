@@ -128,7 +128,7 @@ struct TaskTimelineView: View {
                     .opacity(viewModel.tasks.isEmpty ? 0.4 : 1)
                     .help("Export tasks as CSV")
 
-                    if viewModel.isToday {
+                    if viewModel.isViewingToday {
                         Button(action: { viewModel.generateSummary() }) {
                             Image(systemName: "arrow.clockwise")
                                 .font(.system(size: 14, weight: .medium))

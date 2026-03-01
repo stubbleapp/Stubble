@@ -2,7 +2,7 @@
  * Stubble API Proxy — Cloudflare Worker
  *
  * Thin proxy between the Stubble macOS app and Google's Gemini API.
- * - Verifies Supabase JWTs (ES256 via JWKS, with HS256 fallback)
+ * - Verifies Supabase JWTs (ES256 via JWKS)
  * - Enforces tier-based access (trial vs pro)
  * - Per-user rate limiting via KV
  * - Forwards requests to Gemini with the server-side API key
@@ -11,7 +11,6 @@
 
 interface Env {
   GEMINI_API_KEY: string;
-  SUPABASE_JWT_SECRET: string;
   SUPABASE_ANON_KEY: string;
   RATE_LIMITS: KVNamespace;
   ENVIRONMENT: string;
@@ -51,8 +50,7 @@ const GEMINI_BASE = "https://generativelanguage.googleapis.com";
 const SUPABASE_JWKS_URL =
   "https://uyeacjkroneihbtjswnv.supabase.co/auth/v1/.well-known/jwks.json";
 
-// Cache the imported CryptoKey to avoid re-fetching JWKS on every request
-let cachedJWK: CryptoKey | null = null;
+// JWKS cache timestamp (keys cached per-kid in getJWK)
 let jwkFetchedAt = 0;
 const JWK_CACHE_TTL = 3600_000; // 1 hour
 
@@ -74,12 +72,9 @@ export default {
 
       const token = authHeader.slice(7);
 
-      // Try ES256 (JWKS) first, fall back to HS256
-      let payload = await verifyJWT_ES256(token);
-      if (!payload) {
-        payload = await verifyJWT_HS256(token, env.SUPABASE_JWT_SECRET);
-      }
-
+      // Verify JWT using ES256 (JWKS) — Supabase's signing algorithm.
+      // HS256 fallback intentionally removed to prevent algorithm downgrade attacks.
+      const payload = await verifyJWT_ES256(token);
       if (!payload) {
         return errorResponse(401, "invalid_token", "Invalid or expired token");
       }
@@ -105,7 +100,7 @@ export default {
       const today = new Date().toISOString().slice(0, 10); // YYYY-MM-DD
       const kvKey = `rate:${userId}:${today}`;
 
-      const currentCount = parseInt((await env.RATE_LIMITS.get(kvKey)) || "0");
+      const currentCount = parseInt((await env.RATE_LIMITS.get(kvKey)) || "0") || 0;
       const limit = tier === "pro" ? RATE_LIMITS.pro : RATE_LIMITS.trial;
 
       if (currentCount >= limit) {
@@ -118,13 +113,11 @@ export default {
         );
       }
 
-      // Increment rate counter (expires at end of day + 1h buffer)
-      await env.RATE_LIMITS.put(kvKey, String(currentCount + 1), {
-        expirationTtl: 90000, // 25 hours
-      });
-
-      // 5. Forward to Gemini
+      // 5. Forward to Gemini (only allowed Gemini API paths)
       const url = new URL(request.url);
+      if (!url.pathname.startsWith("/v1beta/models/") && !url.pathname.startsWith("/v1/models/")) {
+        return errorResponse(400, "invalid_path", "Only Gemini model endpoints are allowed");
+      }
       const geminiUrl = `${GEMINI_BASE}${url.pathname}${url.search}`;
 
       const geminiHeaders = new Headers();
@@ -140,7 +133,15 @@ export default {
         body: request.body,
       });
 
-      // 6. Stream response back
+      // 6. Increment rate counter only on successful Gemini responses.
+      // This prevents failed requests (5xx, 4xx) from consuming the user's quota.
+      if (geminiResponse.ok) {
+        await env.RATE_LIMITS.put(kvKey, String(currentCount + 1), {
+          expirationTtl: 90000, // 25 hours
+        });
+      }
+
+      // 7. Stream response back
       const responseHeaders = new Headers(corsHeaders());
       responseHeaders.set(
         "Content-Type",
@@ -168,30 +169,40 @@ export default {
 
 // --- JWT Verification (ES256 via JWKS) ---
 
-async function getJWK(): Promise<CryptoKey | null> {
-  // Return cached key if fresh
-  if (cachedJWK && Date.now() - jwkFetchedAt < JWK_CACHE_TTL) {
-    return cachedJWK;
+// Cache keyed by kid to handle key rotation
+const cachedJWKs = new Map<string, CryptoKey>();
+
+async function getJWK(kid?: string): Promise<CryptoKey | null> {
+  // Return cached key if fresh and kid matches
+  if (kid && cachedJWKs.has(kid) && Date.now() - jwkFetchedAt < JWK_CACHE_TTL) {
+    return cachedJWKs.get(kid)!;
   }
 
   try {
     const response = await fetch(SUPABASE_JWKS_URL);
     if (!response.ok) return null;
 
-    const jwks = (await response.json()) as { keys: JsonWebKey[] };
+    const jwks = (await response.json()) as { keys: (JsonWebKey & { kid?: string })[] };
     if (!jwks.keys?.length) return null;
 
-    // Import the first ES256 key
-    const jwk = jwks.keys[0];
-    cachedJWK = await crypto.subtle.importKey(
-      "jwk",
-      jwk,
-      { name: "ECDSA", namedCurve: "P-256" },
-      false,
-      ["verify"]
-    );
+    // Import all keys, indexed by kid
+    cachedJWKs.clear();
+    for (const jwk of jwks.keys) {
+      const imported = await crypto.subtle.importKey(
+        "jwk",
+        jwk,
+        { name: "ECDSA", namedCurve: "P-256" },
+        false,
+        ["verify"]
+      );
+      const keyId = jwk.kid || "default";
+      cachedJWKs.set(keyId, imported);
+    }
     jwkFetchedAt = Date.now();
-    return cachedJWK;
+
+    // Return the key matching the requested kid, or the first key
+    if (kid && cachedJWKs.has(kid)) return cachedJWKs.get(kid)!;
+    return cachedJWKs.values().next().value ?? null;
   } catch {
     return null;
   }
@@ -204,12 +215,12 @@ async function verifyJWT_ES256(token: string): Promise<JWTPayload | null> {
 
     const [headerB64, payloadB64, signatureB64] = parts;
 
-    // Check algorithm
+    // Check algorithm and extract kid for key matching
     const headerJson = new TextDecoder().decode(base64UrlDecode(headerB64));
-    const header = JSON.parse(headerJson);
+    const header = JSON.parse(headerJson) as { alg?: string; kid?: string };
     if (header.alg !== "ES256") return null;
 
-    const key = await getJWK();
+    const key = await getJWK(header.kid);
     if (!key) return null;
 
     const data = new TextEncoder().encode(`${headerB64}.${payloadB64}`);
@@ -226,44 +237,6 @@ async function verifyJWT_ES256(token: string): Promise<JWTPayload | null> {
     if (!valid) return null;
 
     // Decode payload
-    const payloadJson = new TextDecoder().decode(base64UrlDecode(payloadB64));
-    return JSON.parse(payloadJson) as JWTPayload;
-  } catch {
-    return null;
-  }
-}
-
-// --- JWT Verification (HS256 fallback) ---
-
-async function verifyJWT_HS256(
-  token: string,
-  secret: string
-): Promise<JWTPayload | null> {
-  try {
-    const parts = token.split(".");
-    if (parts.length !== 3) return null;
-
-    const [headerB64, payloadB64, signatureB64] = parts;
-
-    // Check algorithm
-    const headerJson = new TextDecoder().decode(base64UrlDecode(headerB64));
-    const header = JSON.parse(headerJson);
-    if (header.alg !== "HS256") return null;
-
-    const key = await crypto.subtle.importKey(
-      "raw",
-      new TextEncoder().encode(secret),
-      { name: "HMAC", hash: "SHA-256" },
-      false,
-      ["verify"]
-    );
-
-    const data = new TextEncoder().encode(`${headerB64}.${payloadB64}`);
-    const signature = base64UrlDecode(signatureB64);
-
-    const valid = await crypto.subtle.verify("HMAC", key, signature, data);
-    if (!valid) return null;
-
     const payloadJson = new TextDecoder().decode(base64UrlDecode(payloadB64));
     return JSON.parse(payloadJson) as JWTPayload;
   } catch {

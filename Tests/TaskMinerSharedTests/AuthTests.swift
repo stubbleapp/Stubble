@@ -53,12 +53,10 @@ final class AuthManagerTests: XCTestCase {
 
     func testAuthErrorDescriptions() {
         XCTAssertNotNil(AuthManager.AuthError.invalidURL.errorDescription)
-        XCTAssertNotNil(AuthManager.AuthError.cancelled.errorDescription)
         XCTAssertNotNil(AuthManager.AuthError.noAuthCode.errorDescription)
         XCTAssertNotNil(AuthManager.AuthError.networkError("test").errorDescription)
         XCTAssertNotNil(AuthManager.AuthError.tokenExchangeFailed("msg").errorDescription)
         XCTAssertNotNil(AuthManager.AuthError.sessionExpired.errorDescription)
-        XCTAssertNotNil(AuthManager.AuthError.notConfigured.errorDescription)
     }
 
     func testSessionExpiredErrorContainsSignInHint() {

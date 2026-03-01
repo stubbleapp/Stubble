@@ -58,6 +58,7 @@ struct SettingsView: View {
     // Account
     @State private var isSigningIn = false
     @State private var signInError: String?
+    @State private var authSession: ASWebAuthenticationSession?
 
     // General
     @State private var apiKey: String = ""
@@ -79,6 +80,10 @@ struct SettingsView: View {
 
     // Data
     @State private var showClearConfirmation = false
+
+    // Auth state reactivity — AuthManager is not @Observable, so we use a
+    // counter that increments on .authStateChanged to trigger SwiftUI re-render.
+    @State private var authStateVersion: Int = 0
 
     // Save
     @State private var saved = false
@@ -165,6 +170,11 @@ struct SettingsView: View {
         .background(Theme.primaryBackground)
         .frame(width: 620, height: 480)
         .onAppear { loadAll() }
+        .onReceive(NotificationCenter.default.publisher(for: .authStateChanged)) { _ in
+            // Bump version to force SwiftUI to re-evaluate accountPane
+            // (AuthManager is not @Observable, so direct reads are stale).
+            authStateVersion += 1
+        }
         .alert("Clear All Data?", isPresented: $showClearConfirmation) {
             Button("Cancel", role: .cancel) {}
             Button("Clear Everything", role: .destructive) {
@@ -394,7 +404,10 @@ struct SettingsView: View {
     // MARK: - Account Pane
 
     private var accountPane: some View {
-        VStack(alignment: .leading, spacing: 24) {
+        // Read authStateVersion to establish a SwiftUI dependency —
+        // when .authStateChanged fires, this view rebuilds with fresh AuthManager state.
+        let _ = authStateVersion
+        return VStack(alignment: .leading, spacing: 24) {
             if AuthManager.shared.isSignedIn {
                 signedInAccountView
             } else {
@@ -622,19 +635,22 @@ struct SettingsView: View {
         isSigningIn = true
         signInError = nil
 
-        let session = ASWebAuthenticationSession(
+        authSession = ASWebAuthenticationSession(
             url: url,
             callbackURLScheme: StubbleAPIConfig.callbackScheme
         ) { callbackURL, error in
             Task { @MainActor in
-                defer { isSigningIn = false }
+                defer {
+                    isSigningIn = false
+                    authSession = nil
+                }
 
                 if let error = error {
                     if (error as NSError).code == ASWebAuthenticationSessionError.canceledLogin.rawValue {
                         // User cancelled — no error to show
                         return
                     }
-                    signInError = Self.friendlyAuthError(error)
+                    signInError = AuthHelpers.friendlyAuthError(error)
                     return
                 }
 
@@ -649,35 +665,21 @@ struct SettingsView: View {
                     try await AuthManager.shared.exchangeCode(code, codeVerifier: codeVerifier)
                     viewModel.refreshForAuthChange()
                 } catch {
-                    signInError = Self.friendlyAuthError(error)
+                    signInError = AuthHelpers.friendlyAuthError(error)
                 }
             }
         }
 
-        session.presentationContextProvider = SettingsAuthContextProvider.shared
-        session.prefersEphemeralWebBrowserSession = false
+        authSession!.presentationContextProvider = AuthContextProvider.shared
+        authSession!.prefersEphemeralWebBrowserSession = false
 
-        if !session.start() {
+        if !authSession!.start() {
             isSigningIn = false
+            authSession = nil
             signInError = "Could not start authentication session."
         }
     }
 
-    /// Convert raw OAuth/network errors into user-friendly messages.
-    private static func friendlyAuthError(_ error: Error) -> String {
-        let desc = error.localizedDescription.lowercased()
-        if desc.contains("network") || desc.contains("offline") || desc.contains("not connected") {
-            return "No internet connection. Please check your network and try again."
-        } else if desc.contains("timeout") || desc.contains("timed out") {
-            return "The request timed out. Please try again."
-        } else if desc.contains("unsupported_grant_type") || desc.contains("invalid_grant") {
-            return "Authentication configuration error. Please try again or use an API key."
-        } else if desc.contains("server") || desc.contains("500") || desc.contains("503") {
-            return "The authentication server is temporarily unavailable. Please try again later."
-        } else {
-            return "Sign-in failed. Please try again."
-        }
-    }
 
     // MARK: - Exclusions Pane
 
@@ -975,13 +977,3 @@ struct SettingsView: View {
     }
 }
 
-// MARK: - ASWebAuthenticationSession Presentation Context
-
-@MainActor
-private class SettingsAuthContextProvider: NSObject, ASWebAuthenticationPresentationContextProviding {
-    static let shared = SettingsAuthContextProvider()
-
-    func presentationAnchor(for session: ASWebAuthenticationSession) -> ASPresentationAnchor {
-        NSApplication.shared.keyWindow ?? NSApplication.shared.windows.first ?? NSWindow()
-    }
-}

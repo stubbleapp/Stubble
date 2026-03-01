@@ -11,8 +11,7 @@ id = "63d5ec7d30d44bb79de6ae526dab6321"
 
 # Environment secrets (set via `wrangler secret put`):
 # - GEMINI_API_KEY: Your Google Gemini API key
-# - SUPABASE_JWT_SECRET: Supabase JWT secret (for HS256 verification)
-# - SUPABASE_URL: Your Supabase project URL (for JWKS fallback)
+# - SUPABASE_ANON_KEY: Supabase anon/public key (for user lookup fallback)
 
 [vars]
 ENVIRONMENT = "production"

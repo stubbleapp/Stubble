@@ -15,10 +15,8 @@ class AppDelegate {
     private let fileActivityMonitor: FileActivityMonitor
     private let calendarMonitor: CalendarMonitor
     private let granolaMeetingMonitor: GranolaMeetingMonitor
-    /// Lazy-initialized so the daemon doesn't hit the Keychain on startup.
-    /// The Dashboard prompts for Keychain access first; by the time the daemon
-    /// needs it (15 min later for the first summarization), the user has already
-    /// approved once and macOS remembers the decision.
+    /// Lazy-initialized so the daemon defers AI setup until first summarization.
+    /// Resolves proxy mode (signed-in user) → BYOK key (settings.json) → env var.
     private lazy var taskSummarizer: TaskSummarizer? = {
         if let geminiClient = GeminiClient.resolvedClient() {
             Logger.info("Gemini AI summarization enabled")
@@ -42,6 +40,7 @@ class AppDelegate {
     private var lastSummaryDate: String = ""
     private var lastSummarizationTime: Date = .distantPast
     private var lastMemoryReviewDate: String = ""
+    private var lastPruneDate: String = ""
     private var isShuttingDown = false
 
     init(config: Configuration, db: DatabaseManager) throws {
@@ -125,9 +124,7 @@ class AppDelegate {
         lastSummaryDate = todayString()
 
         // Start the summarization check timer unconditionally.
-        // The actual Gemini client (and Keychain access) is deferred until
-        // the first summarization runs (~15 min), avoiding a Keychain prompt
-        // at launch that would duplicate the Dashboard's prompt.
+        // The actual Gemini client is lazy-initialized on first summarization (~15 min).
         lastSummarizationTime = Date()
         summarizationTimer = Timer.scheduledTimer(
             withTimeInterval: 60, // Check every 60s, run every 15 min
@@ -338,16 +335,19 @@ class AppDelegate {
             Logger.debug("Daily memory review: decay pass completed")
         }
 
-        // 7. Tiered screenshot pruning:
+        // 6. Tiered screenshot pruning (once per day):
         //    - Tier 1: delete image files beyond the latest 100 (keep OCR text in DB)
         //    - Tier 2: delete entire DB rows older than 30 days
-        let prunedPaths = db.pruneScreenshotImages(keepLatest: 100)
-        if !prunedPaths.isEmpty {
-            screenshotStorage.cleanupFiles(relativePaths: prunedPaths)
+        if lastPruneDate != today {
+            lastPruneDate = today
+            let prunedPaths = db.pruneScreenshotImages(keepLatest: 100)
+            if !prunedPaths.isEmpty {
+                screenshotStorage.cleanupFiles(relativePaths: prunedPaths)
+            }
+            db.deleteScreenshotsOlderThan(days: 30)
+            db.deleteFileEventsOlderThan(days: 30)
+            db.deleteGranolaMeetingsOlderThan(days: 90)
         }
-        db.deleteScreenshotsOlderThan(days: 30)
-        db.deleteFileEventsOlderThan(days: 30)
-        db.deleteGranolaMeetingsOlderThan(days: 90)
 
         // Poll Granola meetings (checks file mod-date first, no-op if unchanged)
         granolaMeetingMonitor.poll()
@@ -518,10 +518,11 @@ class AppDelegate {
 
         // Skip the expensive AI call if there's been minimal new activity since last run.
         // Threshold: at least 5 non-idle activity records since last summarization.
+        // Note: do NOT advance lastSummarizationTime on skip — otherwise a slow trickle
+        // of <5 activities per 15min would never trigger summarization.
         let newActivityCount = db.nonIdleActivityCount(since: lastSummarizationTime)
         guard newActivityCount >= 5 else {
             Logger.debug("Skipping summarization — only \(newActivityCount) new activities since last run")
-            lastSummarizationTime = Date()
             return
         }
 

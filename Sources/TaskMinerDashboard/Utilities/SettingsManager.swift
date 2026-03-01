@@ -17,24 +17,6 @@ final class SettingsManager {
         } else {
             self.store = nil
         }
-        migrateKeychainKeyIfNeeded()
-    }
-
-    /// One-time migration: move the API key from macOS Keychain to settings.json.
-    /// After this, Keychain is never accessed again, eliminating permission prompts.
-    private func migrateKeychainKeyIfNeeded() {
-        // Skip if we already have a key in settings
-        guard geminiApiKey == nil else { return }
-        // Try to read from Keychain (covers both "Stubble" and legacy "TaskMiner" service names)
-        if let keychainKey = GeminiKeychain.get(), !keychainKey.isEmpty {
-            geminiApiKey = keychainKey
-            // Only clean up Keychain after confirming the key was persisted to settings.json
-            if geminiApiKey != nil {
-                GeminiKeychain.set(nil)
-            } else {
-                Logger.warning("SettingsManager: keychain migration — save failed, keeping keychain entry")
-            }
-        }
     }
 
     // MARK: - Convenience Accessors (delegate to SettingsStore)

@@ -227,11 +227,6 @@ class WindowTitleMonitor {
         return url
     }
 
-    /// Legacy: read just the window title (kept for compatibility).
-    private func readFocusedWindowTitle(pid: pid_t) -> String? {
-        readFullContext(pid: pid).windowTitle
-    }
-
     // MARK: - AXObserver
 
     private func setupObserver(pid: pid_t) {

@@ -18,6 +18,9 @@ struct SetupWizardView: View {
     /// Combined permission flag — PermissionsPage writes here, synced to flow controller.
     @State private var permissionsGranted = false
 
+    /// Handle for the auto-advance Task after sign-in, so it can be cancelled if the user taps Back.
+    @State private var autoAdvanceTask: Task<Void, Never>?
+
     var body: some View {
         @Bindable var flow = flow
 
@@ -28,9 +31,12 @@ struct SetupWizardView: View {
                 case 0: WelcomePage()
                     .accessibilityIdentifier("wizard-welcome")
                 case 1: SignInPage(flow: flow) {
-                    // Auto-advance to Permissions after a brief delay
-                    Task { @MainActor in
+                    // Auto-advance to Permissions after a brief delay.
+                    // Store the Task handle so it can be cancelled if the user taps Back.
+                    autoAdvanceTask?.cancel()
+                    autoAdvanceTask = Task { @MainActor in
                         try? await Task.sleep(for: .seconds(1.5))
+                        guard !Task.isCancelled else { return }
                         _ = withAnimation(.easeInOut(duration: 0.25)) {
                             flow.advance()
                         }
@@ -62,6 +68,8 @@ struct SetupWizardView: View {
                 HStack {
                     if flow.canGoBack {
                         Button("Back") {
+                            autoAdvanceTask?.cancel()
+                            autoAdvanceTask = nil
                             withAnimation(.easeInOut(duration: 0.25)) {
                                 _ = flow.goBack()
                             }
@@ -279,6 +287,7 @@ private struct SignInPage: View {
     @State private var isSigningIn = false
     @State private var signInError: String?
     @State private var showKey = false
+    @State private var authSession: ASWebAuthenticationSession?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -469,12 +478,6 @@ private struct SignInPage: View {
         .onAppear {
             flow.apiKey = SettingsManager.shared.geminiApiKey ?? ""
         }
-        .onChange(of: flow.apiKey) { _, newValue in
-            let trimmed = newValue.trimmingCharacters(in: .whitespacesAndNewlines)
-            if !trimmed.isEmpty {
-                SettingsManager.shared.geminiApiKey = trimmed
-            }
-        }
     }
 
     private func startGoogleSignIn() {
@@ -487,18 +490,21 @@ private struct SignInPage: View {
         isSigningIn = true
         signInError = nil
 
-        let session = ASWebAuthenticationSession(
+        authSession = ASWebAuthenticationSession(
             url: url,
             callbackURLScheme: StubbleAPIConfig.callbackScheme
         ) { callbackURL, error in
             Task { @MainActor in
-                defer { isSigningIn = false }
+                defer {
+                    isSigningIn = false
+                    authSession = nil
+                }
 
                 if let error = error {
                     if (error as NSError).code == ASWebAuthenticationSessionError.canceledLogin.rawValue {
                         return
                     }
-                    signInError = Self.friendlyAuthError(error)
+                    signInError = AuthHelpers.friendlyAuthError(error)
                     return
                 }
 
@@ -517,67 +523,21 @@ private struct SignInPage: View {
                     // Auto-advance after a brief pause so the user sees the success state
                     onSignInSuccess?()
                 } catch {
-                    signInError = Self.friendlyAuthError(error)
+                    signInError = AuthHelpers.friendlyAuthError(error)
                 }
             }
         }
 
-        session.presentationContextProvider = WizardAuthContextProvider.shared
-        session.prefersEphemeralWebBrowserSession = false
+        authSession!.presentationContextProvider = AuthContextProvider.shared
+        authSession!.prefersEphemeralWebBrowserSession = false
 
-        if !session.start() {
+        if !authSession!.start() {
             isSigningIn = false
+            authSession = nil
             signInError = "Could not start authentication session."
         }
     }
 
-    /// Convert raw OAuth/network errors into user-friendly messages.
-    private static func friendlyAuthError(_ error: Error) -> String {
-        let desc = error.localizedDescription.lowercased()
-        if desc.contains("network") || desc.contains("offline") || desc.contains("not connected") {
-            return "No internet connection. Please check your network and try again."
-        } else if desc.contains("timeout") || desc.contains("timed out") {
-            return "The request timed out. Please try again."
-        } else if desc.contains("unsupported_grant_type") || desc.contains("invalid_grant") {
-            return "Authentication configuration error. Please try again or use an API key."
-        } else if desc.contains("server") || desc.contains("500") || desc.contains("503") {
-            return "The authentication server is temporarily unavailable. Please try again later."
-        } else {
-            return "Sign-in failed. Please try again."
-        }
-    }
-}
-
-/// ASWebAuthenticationSession presentation context for the setup wizard window.
-@MainActor
-private class WizardAuthContextProvider: NSObject, ASWebAuthenticationPresentationContextProviding {
-    static let shared = WizardAuthContextProvider()
-
-    func presentationAnchor(for session: ASWebAuthenticationSession) -> ASPresentationAnchor {
-        NSApplication.shared.keyWindow ?? NSApplication.shared.windows.first ?? NSWindow()
-    }
-}
-
-/// Numbered step label for setup instructions.
-private struct SetupStep: View {
-    let number: String
-    let text: String
-
-    var body: some View {
-        HStack(alignment: .top, spacing: 10) {
-            Text(number)
-                .font(.system(size: 11, weight: .bold, design: .rounded))
-                .foregroundStyle(.white)
-                .frame(width: 20, height: 20)
-                .background(Theme.accent.opacity(0.8))
-                .clipShape(Circle())
-
-            Text(text)
-                .font(.system(size: 12))
-                .foregroundStyle(Theme.textSecondary)
-                .padding(.top, 2)
-        }
-    }
 }
 
 // MARK: - Page 3: Permissions

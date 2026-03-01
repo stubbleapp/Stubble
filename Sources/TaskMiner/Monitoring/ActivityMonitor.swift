@@ -40,11 +40,6 @@ class ActivityMonitor {
         NSWorkspace.shared.frontmostApplication
     }
 
-    /// Returns the list of app names launched today (useful for summarization context).
-    func launchedAppNames() -> [String] {
-        Array(launchedApps)
-    }
-
     /// Reset tracked launches (call at midnight rollover).
     func resetLaunchedApps() {
         launchedApps.removeAll()

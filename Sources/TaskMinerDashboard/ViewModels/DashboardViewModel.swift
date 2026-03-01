@@ -1,6 +1,5 @@
 import Foundation
 import SwiftUI
-import UniformTypeIdentifiers
 import TaskMinerShared
 
 @Observable
@@ -168,9 +167,8 @@ final class DashboardViewModel {
         }
         self.memoryStore = UserMemoryStore(filePath: config?.memoryPath ?? baseDir.appendingPathComponent("memory.json"))
 
-        // Initialize AI summarization: Keychain first, then env (same as CLI).
-        // Skip Keychain access if setup wizard hasn't completed yet — avoids an
-        // immediate Keychain permission prompt on first launch.
+        // Initialize AI client: proxy mode (signed-in) → BYOK key (settings.json) → env var.
+        // Skip if setup wizard hasn't completed yet.
         if SettingsManager.shared.hasCompletedSetup, let client = GeminiClient.resolvedClient() {
             self.geminiClient = client
             self.taskSummarizer = TaskSummarizer(geminiClient: client)
@@ -228,11 +226,6 @@ final class DashboardViewModel {
             hasAttemptedStubsGeneration = true
             generateRecommendations()
         }
-    }
-
-    /// Whether the selected date is today.
-    var isToday: Bool {
-        Calendar.current.isDateInToday(selectedDate)
     }
 
     // MARK: - AI Summary Generation
