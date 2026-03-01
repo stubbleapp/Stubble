@@ -10,6 +10,7 @@ private enum SettingsCategory: String, CaseIterable, Identifiable {
     case exclusions
     case personalisation
     case data
+    case about
 
     var id: Self { self }
 
@@ -20,6 +21,7 @@ private enum SettingsCategory: String, CaseIterable, Identifiable {
         case .exclusions: return "Exclusions"
         case .personalisation: return "Personalisation"
         case .data: return "Data"
+        case .about: return "About"
         }
     }
 
@@ -30,6 +32,7 @@ private enum SettingsCategory: String, CaseIterable, Identifiable {
         case .exclusions: return "eye.slash"
         case .personalisation: return "person"
         case .data: return "externaldrive"
+        case .about: return "info.circle"
         }
     }
 }
@@ -52,6 +55,7 @@ private enum AwayDuration: Int, CaseIterable, Identifiable {
 
 struct SettingsView: View {
     @Environment(DashboardViewModel.self) var viewModel
+    @EnvironmentObject var updater: SoftwareUpdater
     @Environment(\.dismiss) var dismiss
     @State private var selectedCategory: SettingsCategory? = .account
 
@@ -67,6 +71,7 @@ struct SettingsView: View {
     @State private var granularity: TaskGranularity = .medium
     @State private var minAwayMinutes: Int = 15
     @State private var appearanceMode: AppearanceMode = .system
+    @State private var analyticsEnabled: Bool = true
 
     // Exclusions
     @State private var exclusions: [String] = []
@@ -132,6 +137,8 @@ struct SettingsView: View {
                         personalisationPane
                     case .data:
                         dataPane
+                    case .about:
+                        aboutPane
                     }
                 }
                 .padding(24)
@@ -175,6 +182,9 @@ struct SettingsView: View {
             // (AuthManager is not @Observable, so direct reads are stale).
             authStateVersion += 1
         }
+        .onReceive(NotificationCenter.default.publisher(for: .showAboutInSettings)) { _ in
+            selectedCategory = .about
+        }
         .alert("Clear All Data?", isPresented: $showClearConfirmation) {
             Button("Cancel", role: .cancel) {}
             Button("Clear Everything", role: .destructive) {
@@ -195,6 +205,7 @@ struct SettingsView: View {
         minAwayMinutes = SettingsManager.shared.minAwayMinutes
         appearanceMode = SettingsManager.shared.appearanceMode
         exclusions = SettingsManager.shared.exclusions
+        analyticsEnabled = SettingsManager.shared.analyticsEnabled
         loadMemoryEntries()
     }
 
@@ -206,6 +217,7 @@ struct SettingsView: View {
         SettingsManager.shared.minAwayMinutes = minAwayMinutes
         SettingsManager.shared.appearanceMode = appearanceMode
         SettingsManager.shared.exclusions = exclusions
+        SettingsManager.shared.analyticsEnabled = analyticsEnabled
         NotificationCenter.default.post(name: .appearanceModeChanged, object: nil)
         showSavedIndicator()
     }
@@ -397,6 +409,21 @@ struct SettingsView: View {
                     .font(.caption2)
                     .foregroundStyle(Theme.textMuted)
                     .italic()
+            }
+
+            // Analytics
+            VStack(alignment: .leading, spacing: 8) {
+                Toggle(isOn: $analyticsEnabled) {
+                    Text("Send anonymous usage data")
+                        .font(.subheadline.weight(.medium))
+                        .foregroundStyle(Theme.textPrimary)
+                }
+                .toggleStyle(.switch)
+                .controlSize(.small)
+
+                Text("Helps improve Stubble by sharing anonymous feature usage counts. No personal data, screen content, or activity details are ever sent.")
+                    .font(.caption2)
+                    .foregroundStyle(Theme.textMuted)
             }
         }
     }
@@ -809,6 +836,93 @@ struct SettingsView: View {
                     .foregroundStyle(Theme.textMuted)
             }
         }
+    }
+
+    // MARK: - About Pane
+
+    private var aboutPane: some View {
+        VStack(alignment: .leading, spacing: 24) {
+            // App name + version
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Stubble")
+                    .font(.system(size: 20, weight: .bold))
+                    .foregroundStyle(Theme.textPrimary)
+
+                let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "?"
+                let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "?"
+                Text("Version \(version) (\(build))")
+                    .font(.system(size: 12))
+                    .foregroundStyle(Theme.textSecondary)
+                    .textSelection(.enabled)
+            }
+
+            Divider()
+
+            // Check for Updates
+            if updater.isAvailable {
+                Button {
+                    updater.checkForUpdates()
+                } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: "arrow.triangle.2.circlepath")
+                            .font(.system(size: 12))
+                        Text("Check for Updates")
+                            .font(.system(size: 13, weight: .medium))
+                    }
+                    .foregroundStyle(updater.canCheckForUpdates ? Theme.textPrimary : Theme.textMuted)
+                }
+                .buttonStyle(.plain)
+                .disabled(!updater.canCheckForUpdates)
+            }
+
+            Divider()
+
+            // Links
+            VStack(alignment: .leading, spacing: 12) {
+                aboutLink("Website", url: "https://stubble.ai", icon: "globe")
+                aboutLink("Privacy Policy", url: "https://stubble.ai/privacy", icon: "lock.shield")
+                aboutLink("Terms of Service", url: "https://stubble.ai/terms", icon: "doc.text")
+            }
+
+            Divider()
+
+            // Open Logs Folder
+            Button {
+                if let config = try? SharedConfiguration() {
+                    NSWorkspace.shared.open(config.dataDirectory)
+                }
+            } label: {
+                HStack(spacing: 6) {
+                    Image(systemName: "folder")
+                        .font(.system(size: 12))
+                    Text("Open Data Folder")
+                        .font(.system(size: 13, weight: .medium))
+                }
+                .foregroundStyle(Theme.textSecondary)
+            }
+            .buttonStyle(.plain)
+        }
+    }
+
+    private func aboutLink(_ title: String, url: String, icon: String) -> some View {
+        Button {
+            if let linkURL = URL(string: url) {
+                NSWorkspace.shared.open(linkURL)
+            }
+        } label: {
+            HStack(spacing: 6) {
+                Image(systemName: icon)
+                    .font(.system(size: 11))
+                    .frame(width: 16)
+                Text(title)
+                    .font(.system(size: 13, weight: .medium))
+                Spacer()
+                Image(systemName: "arrow.up.right")
+                    .font(.system(size: 9))
+            }
+            .foregroundStyle(Theme.textSecondary)
+        }
+        .buttonStyle(.plain)
     }
 
     // MARK: - Memory Management

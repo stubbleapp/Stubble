@@ -531,11 +531,11 @@ public final class TaskSummarizer: Sendable {
 
             // Append browser URL inline if available
             if let url = block.browserURLs.first {
-                line += " [URL: \(url)]"
+                line += " [URL: \(DataSanitizer.sanitize(url))]"
             }
             // Append document path inline if available
             if let doc = block.documentPaths.first {
-                line += " [Doc: \(doc)]"
+                line += " [Doc: \(DataSanitizer.sanitize(doc))]"
             }
 
             lines.append(line)
@@ -582,7 +582,7 @@ public final class TaskSummarizer: Sendable {
             lines.append("")
             lines.append("## Browser URLs Visited")
             for url in allBrowserURLs.prefix(30) {
-                lines.append("- \(url)")
+                lines.append("- \(DataSanitizer.sanitize(url))")
             }
         }
 
@@ -591,7 +591,7 @@ public final class TaskSummarizer: Sendable {
             lines.append("")
             lines.append("## Documents Opened")
             for doc in allDocumentPaths.prefix(20) {
-                lines.append("- \(doc)")
+                lines.append("- \(DataSanitizer.sanitize(doc))")
             }
         }
 
@@ -611,7 +611,7 @@ public final class TaskSummarizer: Sendable {
             lines.append(cal)
         }
 
-        // Granola meeting notes and transcripts
+        // Granola meeting notes and transcripts (sanitized — untrusted external data)
         if !granolaMeetings.isEmpty {
             lines.append("")
             lines.append("## Meeting Notes (from Granola)")
@@ -623,19 +623,20 @@ public final class TaskSummarizer: Sendable {
                 let end = timeFormatter.string(from: meeting.endTime)
                 let durMins = Int(meeting.duration / 60)
                 lines.append("")
-                lines.append("### \(meeting.title) [\(start)-\(end)] (\(durMins)m)")
+                lines.append("### \(DataSanitizer.sanitize(meeting.title)) [\(start)-\(end)] (\(durMins)m)")
                 if meeting.attendeeCount > 0 {
-                    lines.append("Attendees: \(meeting.attendeeNames.joined(separator: ", "))")
+                    let names = meeting.attendeeNames.map { DataSanitizer.sanitize($0) }
+                    lines.append("Attendees: \(names.joined(separator: ", "))")
                 }
                 if let summary = meeting.summary, !summary.isEmpty {
-                    lines.append("Summary: \(summary)")
+                    lines.append("Summary: \(DataSanitizer.sanitize(summary))")
                 }
                 if let notes = meeting.notesForPrompt(maxChars: 2000) {
-                    lines.append("Notes: \(notes)")
+                    lines.append("Notes: \(DataSanitizer.sanitize(notes))")
                 }
                 if let transcript = meeting.transcriptForPrompt(maxChars: 2000) {
                     lines.append("Transcript excerpt:")
-                    lines.append(transcript)
+                    lines.append(DataSanitizer.sanitize(transcript))
                 }
             }
         }

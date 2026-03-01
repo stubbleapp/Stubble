@@ -118,6 +118,12 @@ export default {
       if (!url.pathname.startsWith("/v1beta/models/") && !url.pathname.startsWith("/v1/models/")) {
         return errorResponse(400, "invalid_path", "Only Gemini model endpoints are allowed");
       }
+      // Reject oversized payloads before forwarding to Gemini (10MB limit)
+      const contentLength = request.headers.get("Content-Length");
+      if (contentLength && parseInt(contentLength) > 10 * 1024 * 1024) {
+        return errorResponse(413, "payload_too_large", "Request body exceeds 10MB limit");
+      }
+
       const geminiUrl = `${GEMINI_BASE}${url.pathname}${url.search}`;
 
       const geminiHeaders = new Headers();
@@ -328,7 +334,7 @@ async function getTier(
 
 function corsHeaders(): Record<string, string> {
   return {
-    "Access-Control-Allow-Origin": "*",
+    "Access-Control-Allow-Origin": "https://stubble.ai",
     "Access-Control-Allow-Methods": "POST, OPTIONS",
     "Access-Control-Allow-Headers": "Content-Type, Authorization",
     "Access-Control-Max-Age": "86400",

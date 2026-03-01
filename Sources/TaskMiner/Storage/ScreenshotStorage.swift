@@ -25,6 +25,15 @@ class ScreenshotStorage {
         self.directory = directory
         self.maxAgeDays = maxAgeDays
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        // Validate the directory is not a symlink (prevents exfiltration via symlink replacement)
+        let resolved = directory.resolvingSymlinksInPath()
+        let standardized = directory.standardizedFileURL
+        guard resolved.path == standardized.path else {
+            Logger.error("ScreenshotStorage: symlink detected at \(directory.path) → \(resolved.path)")
+            throw NSError(domain: "ScreenshotStorage", code: 1, userInfo: [
+                NSLocalizedDescriptionKey: "Screenshot directory is a symlink — refusing to write"
+            ])
+        }
         // Restrict screenshots directory to owner-only access (0700) — contains captured screen content.
         try? FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: directory.path)
     }
@@ -32,6 +41,11 @@ class ScreenshotStorage {
     func generatePath(for date: Date) -> URL {
         let dayDir = directory.appendingPathComponent(Self.dayDirFmt.string(from: date))
         try? FileManager.default.createDirectory(at: dayDir, withIntermediateDirectories: true)
+        // Validate subdirectory hasn't been replaced with a symlink
+        if dayDir.resolvingSymlinksInPath().path != dayDir.standardizedFileURL.path {
+            Logger.error("ScreenshotStorage: symlink detected at subdirectory \(dayDir.path)")
+            return directory.appendingPathComponent("__symlink_rejected__")
+        }
         // Restrict subdirectories to owner-only access
         try? FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: dayDir.path)
 
@@ -66,6 +80,11 @@ class ScreenshotStorage {
         var emptyDirCandidates: Set<URL> = []
 
         for relPath in relativePaths {
+            // Guard against path traversal from DB-sourced relative paths
+            guard !relPath.contains("..") else {
+                Logger.warning("ScreenshotStorage: skipping suspicious path containing '..': \(relPath)")
+                continue
+            }
             let fullPath = directory.appendingPathComponent(relPath)
             do {
                 try fm.removeItem(at: fullPath)

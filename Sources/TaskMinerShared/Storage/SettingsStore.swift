@@ -114,6 +114,11 @@ public final class SettingsStore {
         set { update { $0.appearanceMode = newValue } }
     }
 
+    public var analyticsEnabled: Bool {
+        get { load().analyticsEnabled ?? true }
+        set { update { $0.analyticsEnabled = newValue } }
+    }
+
     // MARK: - Helpers
 
     private func update(_ mutate: (inout AppSettings) -> Void) {
@@ -139,6 +144,7 @@ public struct AppSettings: Codable, Equatable {
     /// When nil, defaults are applied by SettingsManager.
     public var exclusions: [String]?
     public var appearanceMode: AppearanceMode?
+    public var analyticsEnabled: Bool?
 
     public init(
         geminiApiKey: String? = nil,
@@ -149,7 +155,8 @@ public struct AppSettings: Codable, Equatable {
         launchAtLogin: Bool? = nil,
         minAwayMinutes: Int? = nil,
         exclusions: [String]? = nil,
-        appearanceMode: AppearanceMode? = nil
+        appearanceMode: AppearanceMode? = nil,
+        analyticsEnabled: Bool? = nil
     ) {
         self.geminiApiKey = geminiApiKey
         self.customPrompt = customPrompt
@@ -160,5 +167,6 @@ public struct AppSettings: Codable, Equatable {
         self.minAwayMinutes = minAwayMinutes
         self.exclusions = exclusions
         self.appearanceMode = appearanceMode
+        self.analyticsEnabled = analyticsEnabled
     }
 }

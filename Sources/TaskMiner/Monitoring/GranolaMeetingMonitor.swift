@@ -91,6 +91,11 @@ final class GranolaMeetingMonitor {
 
     private func parseMeeting(docId: String, doc: [String: Any], transcripts: [String: [[String: Any]]]) -> GranolaMeetingRecord? {
         guard let title = doc["title"] as? String, !title.isEmpty else { return nil }
+        // Field size guards to prevent memory issues from crafted Granola data
+        guard title.count < 500 else {
+            Logger.warning("GranolaMeetingMonitor: skipping meeting with oversized title (\(title.count) chars)")
+            return nil
+        }
         guard let updatedAt = doc["updated_at"] as? String else { return nil }
 
         // Extract times from google_calendar_event, or fall back to created_at/updated_at
@@ -144,14 +149,14 @@ final class GranolaMeetingMonitor {
         // Extract attendees as JSON array of {name, email}
         let attendeesJson = buildAttendeesJson(from: doc)
 
-        // Extract notes (plain text preferred)
-        let notesPlain = doc["notes_plain"] as? String
+        // Extract notes (plain text preferred), capped to prevent memory issues
+        let notesPlain = (doc["notes_plain"] as? String).map { String($0.prefix(100_000)) }
 
         // Extract and format transcript
         let transcriptText = buildTranscriptText(docId: docId, transcripts: transcripts)
 
-        // Extract summary
-        let summary = doc["summary"] as? String
+        // Extract summary, capped to prevent memory issues
+        let summary = (doc["summary"] as? String).map { String($0.prefix(10_000)) }
 
         return GranolaMeetingRecord(
             granolaId: docId,
@@ -176,7 +181,7 @@ final class GranolaMeetingMonitor {
         // Try people.attendees (richer data with names)
         if let people = doc["people"] as? [String: Any],
            let atts = people["attendees"] as? [[String: Any]] {
-            for att in atts {
+            for att in atts.prefix(100) {
                 var entry: [String: String] = [:]
                 if let email = att["email"] as? String { entry["email"] = email }
                 if let details = att["details"] as? [String: Any],

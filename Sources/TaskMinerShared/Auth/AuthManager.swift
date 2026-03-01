@@ -73,6 +73,9 @@ public final class AuthManager: @unchecked Sendable {
     /// so that `handleCallback(url:)` can complete the exchange when `onOpenURL` fires.
     private var pendingCodeVerifier: String?
 
+    /// OAuth state parameter for CSRF protection (validated in handleCallback).
+    private var pendingState: String?
+
     /// File path for auth.json.
     private let authFilePath: URL
 
@@ -99,16 +102,20 @@ public final class AuthManager: @unchecked Sendable {
         let codeVerifier = Self.generateCodeVerifier()
         let codeChallenge = Self.generateCodeChallenge(from: codeVerifier)
 
+        let state = UUID().uuidString
+
         var components = URLComponents(string: "\(StubbleAPIConfig.supabaseURL)/auth/v1/authorize")
         components?.queryItems = [
             URLQueryItem(name: "provider", value: "google"),
             URLQueryItem(name: "redirect_to", value: StubbleAPIConfig.callbackURL),
             URLQueryItem(name: "code_challenge", value: codeChallenge),
             URLQueryItem(name: "code_challenge_method", value: "S256"),
+            URLQueryItem(name: "state", value: state),
         ]
 
         guard let url = components?.url else { return nil }
         pendingCodeVerifier = codeVerifier
+        pendingState = state
         return (url, codeVerifier)
     }
 
@@ -132,7 +139,20 @@ public final class AuthManager: @unchecked Sendable {
               let verifier = pendingCodeVerifier
         else { return false }
 
+        // Validate OAuth state parameter (CSRF protection)
+        if let expectedState = pendingState {
+            let components = URLComponents(url: url, resolvingAgainstBaseURL: false)
+            let returnedState = components?.queryItems?.first(where: { $0.name == "state" })?.value
+            guard returnedState == expectedState else {
+                Logger.warning("AuthManager: OAuth state mismatch — possible CSRF attack")
+                pendingCodeVerifier = nil
+                pendingState = nil
+                return false
+            }
+        }
+
         pendingCodeVerifier = nil
+        pendingState = nil
         do {
             try await exchangeCode(code, codeVerifier: verifier)
             return true
@@ -225,8 +245,21 @@ public final class AuthManager: @unchecked Sendable {
         return remaining <= 0 && subscriptionTier != "pro"
     }
 
-    /// Sign out — clears session and deletes auth.json.
+    /// Sign out — revokes server session (best-effort) then clears local state.
     public func signOut() {
+        // Revoke the session on the server before clearing local tokens
+        let tokenToRevoke = sessionQueue.sync { self.accessToken }
+        if let token = tokenToRevoke, StubbleAPIConfig.isConfigured {
+            Task.detached(priority: .utility) {
+                var request = URLRequest(url: URL(string: "\(StubbleAPIConfig.supabaseURL)/auth/v1/logout")!)
+                request.httpMethod = "POST"
+                request.setValue(StubbleAPIConfig.supabaseAnonKey, forHTTPHeaderField: "apikey")
+                request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+                request.timeoutInterval = 5
+                _ = try? await URLSession.shared.data(for: request)
+            }
+        }
+
         sessionQueue.sync {
             accessToken = nil
             refreshToken = nil
@@ -336,7 +369,8 @@ public final class AuthManager: @unchecked Sendable {
 
                 if let metadata = user["user_metadata"] as? [String: Any] {
                     self.subscriptionTier = metadata["subscription_tier"] as? String
-                    if let avatarStr = metadata["avatar_url"] as? String {
+                    if let avatarStr = metadata["avatar_url"] as? String,
+                       avatarStr.hasPrefix("https://") {
                         self.userAvatarURL = URL(string: avatarStr)
                     }
                     if let name = metadata["full_name"] as? String ?? metadata["name"] as? String {

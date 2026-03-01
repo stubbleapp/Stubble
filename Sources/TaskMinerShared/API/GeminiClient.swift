@@ -50,12 +50,17 @@ public final class GeminiClient: Sendable {
     }
 
     /// Create from GEMINI_API_KEY environment variable. Returns nil if not set.
+    /// Only available in debug builds — env vars are visible to system monitors in production.
     public static func fromEnvironment() -> GeminiClient? {
+        #if DEBUG
         guard let key = ProcessInfo.processInfo.environment["GEMINI_API_KEY"],
               !key.isEmpty else {
             return nil
         }
         return GeminiClient(apiKey: key)
+        #else
+        return nil
+        #endif
     }
 
     /// Create from an explicit API key string. Returns nil if the key is empty.

@@ -439,4 +439,6 @@ extension Notification.Name {
     static let setupWizardCompleted = Notification.Name("setupWizardCompleted")
     /// Posted by SettingsView when the appearance mode changes.
     static let appearanceModeChanged = Notification.Name("appearanceModeChanged")
+    /// Posted by the About menu item to switch Settings to the About tab.
+    static let showAboutInSettings = Notification.Name("showAboutInSettings")
 }

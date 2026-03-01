@@ -17,45 +17,60 @@ enum Analytics {
         TelemetryDeck.initialize(config: config)
     }
 
+    /// Whether the user has opted in to anonymous usage data.
+    /// Reads from SettingsStore directly to avoid @MainActor constraint on SettingsManager.
+    private static var isEnabled: Bool {
+        guard let config = try? SharedConfiguration() else { return true }
+        return SettingsStore(filePath: config.settingsPath).analyticsEnabled
+    }
+
     // MARK: - App Lifecycle
 
     static func appLaunched() {
+        guard isEnabled else { return }
         TelemetryDeck.signal("app.launched")
     }
 
     static func setupCompleted() {
+        guard isEnabled else { return }
         TelemetryDeck.signal("setup.completed")
     }
 
     // MARK: - Core Features
 
     static func summaryGenerated(taskCount: Int) {
+        guard isEnabled else { return }
         TelemetryDeck.signal("summary.generated", parameters: [
             "taskCount": "\(taskCount)"
         ])
     }
 
     static func summaryFailed() {
+        guard isEnabled else { return }
         TelemetryDeck.signal("summary.failed")
     }
 
     static func activitiesGenerated(projectCount: Int) {
+        guard isEnabled else { return }
         TelemetryDeck.signal("activities.generated", parameters: [
             "projectCount": "\(projectCount)"
         ])
     }
 
     static func chatMessageSent() {
+        guard isEnabled else { return }
         TelemetryDeck.signal("chat.messageSent")
     }
 
     static func recommendationsGenerated(count: Int) {
+        guard isEnabled else { return }
         TelemetryDeck.signal("recommendations.generated", parameters: [
             "count": "\(count)"
         ])
     }
 
     static func csvExported(taskCount: Int) {
+        guard isEnabled else { return }
         TelemetryDeck.signal("csv.exported", parameters: [
             "taskCount": "\(taskCount)"
         ])
@@ -64,6 +79,7 @@ enum Analytics {
     // MARK: - Settings
 
     static func settingChanged(_ setting: String, value: String) {
+        guard isEnabled else { return }
         TelemetryDeck.signal("setting.changed", parameters: [
             "setting": setting,
             "value": value
@@ -73,18 +89,21 @@ enum Analytics {
     // MARK: - Monitoring
 
     static func monitoringPaused(duration: String) {
+        guard isEnabled else { return }
         TelemetryDeck.signal("monitoring.paused", parameters: [
             "duration": duration
         ])
     }
 
     static func monitoringResumed() {
+        guard isEnabled else { return }
         TelemetryDeck.signal("monitoring.resumed")
     }
 
     // MARK: - Data Management
 
     static func dataClearedByUser() {
+        guard isEnabled else { return }
         TelemetryDeck.signal("data.cleared")
     }
 }

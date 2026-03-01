@@ -92,9 +92,7 @@ struct DashboardApp: App {
         .commands {
             CommandGroup(replacing: .newItem) { }
             CommandGroup(replacing: .appInfo) {
-                Button("About Stubble") {
-                    showAboutPanel()
-                }
+                AboutSettingsButton()
                 Divider()
                 if updater.isAvailable {
                     Button("Check for Updates…") {
@@ -111,6 +109,7 @@ struct DashboardApp: App {
         Window("Settings", id: "settings") {
             SettingsView()
                 .environment(viewModel)
+                .environmentObject(updater)
                 .tint(Theme.accent)
                 .preferredColorScheme(colorScheme)
                 .onReceive(NotificationCenter.default.publisher(for: .appearanceModeChanged)) { _ in
@@ -123,22 +122,6 @@ struct DashboardApp: App {
         .windowResizability(.contentSize)
     }
 
-    private func showAboutPanel() {
-        let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "?"
-        let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "?"
-        NSApplication.shared.orderFrontStandardAboutPanel(options: [
-            .applicationName: "Stubble",
-            .applicationVersion: version,
-            .version: build,
-            .credits: NSAttributedString(
-                string: "A quiet desktop activity tracker.\nhttps://github.com/samattias",
-                attributes: [
-                    .font: NSFont.systemFont(ofSize: 11),
-                    .foregroundColor: NSColor.secondaryLabelColor
-                ]
-            )
-        ])
-    }
 }
 
 /// Menu button that opens the Settings window via `openWindow`.
@@ -151,5 +134,20 @@ private struct OpenSettingsButton: View {
             openWindow(id: "settings")
         }
         .keyboardShortcut(",", modifiers: .command)
+    }
+}
+
+/// "About Stubble" menu item — opens Settings on the About tab.
+private struct AboutSettingsButton: View {
+    @Environment(\.openWindow) var openWindow
+
+    var body: some View {
+        Button("About Stubble") {
+            openWindow(id: "settings")
+            // Give the window a moment to appear, then switch to About tab
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                NotificationCenter.default.post(name: .showAboutInSettings, object: nil)
+            }
+        }
     }
 }

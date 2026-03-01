@@ -31,6 +31,16 @@ public enum DataSanitizer {
     private static let patterns: [(NSRegularExpression, String)] = {
         // (pattern, replacement)  — case-insensitive unless noted
         let defs: [(String, String, NSRegularExpression.Options)] = [
+            // --- JWT tokens ---
+            // JSON Web Tokens (eyJ... header.payload.signature)
+            (#"\beyJ[A-Za-z0-9_-]+\.eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+"#, "[REDACTED_JWT]", []),
+
+            // --- AWS access keys ---
+            (#"\bAKIA[A-Z0-9]{16}\b"#, "[REDACTED_AWS_KEY]", []),
+
+            // --- Private keys ---
+            (#"-----BEGIN[A-Z ]*PRIVATE KEY-----[\s\S]*?-----END[A-Z ]*PRIVATE KEY-----"#, "[REDACTED_PRIVATE_KEY]", []),
+
             // --- API keys & tokens ---
             // Generic long hex/base64 tokens (32+ chars of alnum/+/=/_/-)
             (#"(?<=[=:\s"'])[A-Za-z0-9+/=_\-]{32,}"#, "[REDACTED_TOKEN]", []),

@@ -67,4 +67,9 @@ final class SettingsManager {
         get { store?.appearanceMode ?? .system }
         set { store?.appearanceMode = newValue }
     }
+
+    var analyticsEnabled: Bool {
+        get { store?.analyticsEnabled ?? true }
+        set { store?.analyticsEnabled = newValue }
+    }
 }
