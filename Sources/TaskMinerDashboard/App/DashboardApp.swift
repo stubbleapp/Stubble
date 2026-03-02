@@ -33,7 +33,9 @@ struct DashboardApp: App {
 
     /// Registers the login item if launch-at-login is enabled (default: true).
     /// Runs once per launch so existing users who never toggled the setting get it enabled.
+    /// Only runs after setup is complete to avoid registering before user opts in.
     private static func ensureLaunchAtLogin() {
+        guard SettingsManager.shared.hasCompletedSetup else { return }
         guard SettingsManager.shared.launchAtLogin else { return }
         if #available(macOS 13.0, *) {
             try? SMAppService.mainApp.register()
@@ -54,6 +56,8 @@ struct DashboardApp: App {
                         } else if let key = SettingsManager.shared.geminiApiKey {
                             viewModel.updateGeminiKey(key)
                         }
+                        // Create onboarding task so timeline isn't empty
+                        viewModel.createOnboardingTask()
                         viewModel.loadDataForSelectedDate()
                         Analytics.setupCompleted()
                         // Notify MenuBarController to start daemon + check permissions

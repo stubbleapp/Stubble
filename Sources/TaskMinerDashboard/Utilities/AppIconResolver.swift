@@ -6,6 +6,7 @@ final class AppIconResolver {
     static let shared = AppIconResolver()
 
     private var cache: [String: NSImage] = [:]
+    private var nameCache: [String: NSImage] = [:]
 
     private init() {}
 
@@ -26,6 +27,31 @@ final class AppIconResolver {
         let sizedResult = sized(icon, size)
         cache[bundleId] = sizedResult
         return sizedResult
+    }
+
+    /// Returns the app icon by searching for the app by name in /Applications.
+    /// Fallback when bundle ID isn't available.
+    func icon(forAppName name: String, size: CGFloat = 32) -> NSImage? {
+        if let cached = nameCache[name] { return cached }
+
+        // Try common app locations
+        let paths = [
+            "/Applications/\(name).app",
+            "/System/Applications/\(name).app",
+            "/Applications/Utilities/\(name).app",
+            NSHomeDirectory() + "/Applications/\(name).app"
+        ]
+
+        for path in paths {
+            if FileManager.default.fileExists(atPath: path) {
+                let icon = NSWorkspace.shared.icon(forFile: path)
+                let sizedResult = sized(icon, size)
+                nameCache[name] = sizedResult
+                return sizedResult
+            }
+        }
+
+        return nil
     }
 
     private func sized(_ image: NSImage, _ size: CGFloat) -> NSImage {

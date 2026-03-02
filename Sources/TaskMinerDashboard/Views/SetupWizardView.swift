@@ -13,7 +13,7 @@ struct SetupWizardView: View {
     var onComplete: () -> Void
 
     /// Central flow controller — business logic is testable via SetupFlowControllerTests.
-    @State private var flow = SetupFlowController()
+    @State private var flow: SetupFlowController
 
     /// Combined permission flag — PermissionsPage writes here, synced to flow controller.
     @State private var permissionsGranted = false
@@ -21,18 +21,64 @@ struct SetupWizardView: View {
     /// Handle for the auto-advance Task after sign-in, so it can be cancelled if the user taps Back.
     @State private var autoAdvanceTask: Task<Void, Never>?
 
+    init(onComplete: @escaping () -> Void) {
+        self.onComplete = onComplete
+        // Restore wizard state from settings
+        let savedPage = SettingsManager.shared.wizardPage
+        let isSignedIn = AuthManager.shared.isSignedIn
+        let flow = SetupFlowController()
+        // If user was already signed in, restore that state
+        if isSignedIn {
+            flow.isSignedInViaGoogle = true
+        }
+        // Restore to saved page, but not beyond what makes sense
+        // (e.g., don't restore to page 2 if not signed in yet)
+        if savedPage > 0 {
+            if savedPage == 1 && isSignedIn {
+                // Already signed in, skip to permissions
+                flow.setPage(2)
+            } else if savedPage >= 2 && isSignedIn {
+                // Restore to saved page
+                flow.setPage(savedPage)
+            } else if savedPage == 1 {
+                // On sign-in page but not signed in yet
+                flow.setPage(1)
+            }
+        }
+        self._flow = State(initialValue: flow)
+    }
+
     var body: some View {
         @Bindable var flow = flow
 
         VStack(spacing: 0) {
+            // Step indicator at top (only shown after welcome page)
+            if flow.currentPage > 0 {
+                HStack(spacing: 12) {
+                    ForEach(1...3, id: \.self) { step in
+                        let isActive = (flow.currentPage >= step)
+                        HStack(spacing: 6) {
+                            Text("\(step)")
+                                .font(.system(size: 11, weight: .semibold))
+                                .foregroundStyle(isActive ? .white : Theme.textMuted)
+                                .frame(width: 20, height: 20)
+                                .background(isActive ? Theme.accent : Theme.textQuaternary.opacity(0.3))
+                                .clipShape(Circle())
+                        }
+                        .accessibilityIdentifier("wizard-step-\(step)")
+                    }
+                }
+                .padding(.top, 20)
+                .padding(.bottom, 8)
+            }
+
             // Page content
             Group {
                 switch flow.currentPage {
                 case 0: WelcomePage()
                     .accessibilityIdentifier("wizard-welcome")
                 case 1: SignInPage(flow: flow) {
-                    // Auto-advance to Permissions after a brief delay.
-                    // Store the Task handle so it can be cancelled if the user taps Back.
+                    // Auto-advance to Permissions after a brief delay
                     autoAdvanceTask?.cancel()
                     autoAdvanceTask = Task { @MainActor in
                         try? await Task.sleep(for: .seconds(1.5))
@@ -52,74 +98,52 @@ struct SetupWizardView: View {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
 
-            // Bottom bar: progress dots + navigation
-            VStack(spacing: 16) {
-                // Progress dots
-                HStack(spacing: 8) {
-                    ForEach(0..<flow.totalPages, id: \.self) { index in
-                        Circle()
-                            .fill(index == flow.currentPage ? Theme.accent : Theme.textQuaternary.opacity(0.5))
-                            .frame(width: 7, height: 7)
-                            .accessibilityIdentifier("wizard-progress-dot-\(index)")
-                    }
-                }
-
-                // Navigation buttons
-                HStack {
-                    if flow.canGoBack {
-                        Button("Back") {
-                            autoAdvanceTask?.cancel()
-                            autoAdvanceTask = nil
-                            withAnimation(.easeInOut(duration: 0.25)) {
-                                _ = flow.goBack()
-                            }
+            // Bottom navigation - show Continue on pages 0, 2, or page 1 when signed in
+            if flow.currentPage == 0 || flow.currentPage == 2 || (flow.currentPage == 1 && flow.isSignedInViaGoogle) {
+                VStack(spacing: 16) {
+                    Button {
+                        handleContinue()
+                    } label: {
+                        HStack(spacing: 4) {
+                            Text(flow.continueButtonLabel)
+                            Image(systemName: "arrow.right")
+                                .font(.system(size: 11, weight: .semibold))
                         }
-                        .buttonStyle(.plain)
-                        .font(.system(size: 13, weight: .medium))
-                        .foregroundStyle(Theme.textSecondary)
-                        .accessibilityIdentifier("wizard-back")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 20)
+                        .padding(.vertical, 8)
+                        .background(flow.canContinue ? Theme.accent : Theme.accent.opacity(0.35))
+                        .clipShape(Capsule())
                     }
-
-                    Spacer()
-
-                    if !flow.isOnLastPage {
-                        Button {
-                            handleContinue()
-                        } label: {
-                            HStack(spacing: 4) {
-                                if flow.isValidating {
-                                    ProgressView()
-                                        .controlSize(.small)
-                                        .tint(.white)
-                                    Text("Verifying…")
-                                } else {
-                                    Text(flow.continueButtonLabel)
-                                    Image(systemName: "arrow.right")
-                                        .font(.system(size: 11, weight: .semibold))
-                                }
-                            }
-                            .font(.system(size: 13, weight: .semibold))
-                            .foregroundStyle(.white)
-                            .padding(.horizontal, 20)
-                            .padding(.vertical, 8)
-                            .background(flow.canContinue ? Theme.accent : Theme.accent.opacity(0.35))
-                            .clipShape(Capsule())
-                        }
-                        .buttonStyle(.plain)
-                        .disabled(!flow.canContinue)
-                        .accessibilityIdentifier("wizard-continue")
-                    }
+                    .buttonStyle(.plain)
+                    .disabled(!flow.canContinue)
+                    .accessibilityIdentifier("wizard-continue")
                 }
+                .padding(.horizontal, 32)
+                .padding(.bottom, 24)
             }
-            .padding(.horizontal, 32)
-            .padding(.bottom, 24)
         }
         .frame(width: 560, height: 480)
-        .background(Theme.primaryBackground)
+        .background {
+            if #available(macOS 26.0, *) {
+                Theme.primaryBackground.opacity(0.55)
+                    .ignoresSafeArea()
+            } else {
+                Theme.primaryBackground
+                    .ignoresSafeArea()
+            }
+        }
+        .compositingGroup()
+        .modifier(WizardGlassModifier())
         .onChange(of: permissionsGranted) { _, granted in
             // Sync combined permission flag to the flow controller
             flow.accessibilityGranted = granted
             flow.screenRecordingGranted = granted
+        }
+        .onChange(of: flow.currentPage) { _, newPage in
+            // Persist wizard page so we can resume after Quit & Reopen
+            SettingsManager.shared.wizardPage = newPage
         }
     }
 
@@ -168,6 +192,8 @@ struct SetupWizardView: View {
         if !key.isEmpty {
             SettingsManager.shared.geminiApiKey = key
         }
+        // Clear wizard page state since setup is complete
+        SettingsManager.shared.wizardPage = 0
         SettingsManager.shared.hasCompletedSetup = true
         onComplete()
     }
@@ -194,7 +220,7 @@ private struct WelcomePage: View {
                 .foregroundStyle(Theme.textPrimary)
                 .padding(.bottom, 6)
 
-            Text("An AI time tracker for macOS that watches what you do\nand turns it into clear tasks, project breakdowns, and tips.")
+            Text("AI that understands how you work — with personalised\ninsights, focus patterns, and recommendations.")
                 .font(.system(size: 13))
                 .foregroundStyle(Theme.textSecondary)
                 .multilineTextAlignment(.center)
@@ -212,25 +238,25 @@ private struct WelcomePage: View {
                         .foregroundStyle(Theme.accent)
                         .gridColumnAlignment(.center)
                     VStack(alignment: .leading, spacing: 2) {
-                        Text("Processed Locally")
+                        Text("Privacy-First")
                             .font(.system(size: 13, weight: .semibold))
                             .foregroundStyle(Theme.textPrimary)
-                        Text("Screenshots are captured and stored on your Mac. They never leave your computer.")
+                        Text("All data is processed and stored locally on your Mac. Screenshots never leave your computer.")
                             .font(.system(size: 12))
                             .foregroundStyle(Theme.textSecondary)
                             .fixedSize(horizontal: false, vertical: true)
                     }
                 }
                 GridRow {
-                    Image(systemName: "brain")
+                    Image(systemName: "sparkles")
                         .font(.system(size: 16))
                         .symbolRenderingMode(.monochrome)
                         .foregroundStyle(Theme.accent)
                     VStack(alignment: .leading, spacing: 2) {
-                        Text("AI-Powered Insights")
+                        Text("Learns How You Work")
                             .font(.system(size: 13, weight: .semibold))
                             .foregroundStyle(Theme.textPrimary)
-                        Text("Text extracted from screenshots and window titles is sent to AI to generate your tasks and insights. No images or files are ever transmitted.")
+                        Text("Understands your workflow and organises everything into tasks, projects, and actionable insights.")
                             .font(.system(size: 12))
                             .foregroundStyle(Theme.textSecondary)
                             .fixedSize(horizontal: false, vertical: true)
@@ -245,7 +271,7 @@ private struct WelcomePage: View {
                         Text("You're in Control")
                             .font(.system(size: 13, weight: .semibold))
                             .foregroundStyle(Theme.textPrimary)
-                        Text("Sign in for a free trial, or bring your own API key. Delete anything at any time.")
+                        Text("Start with a free 10-day trial. Pause monitoring or delete your data at any time.")
                             .font(.system(size: 12))
                             .foregroundStyle(Theme.textSecondary)
                             .fixedSize(horizontal: false, vertical: true)
@@ -286,7 +312,6 @@ private struct SignInPage: View {
 
     @State private var isSigningIn = false
     @State private var signInError: String?
-    @State private var showKey = false
     @State private var authSession: ASWebAuthenticationSession?
 
     var body: some View {
@@ -307,7 +332,7 @@ private struct SignInPage: View {
                     .foregroundStyle(Theme.textPrimary)
                     .padding(.bottom, 6)
 
-                Text("Sign in to get a 30-day free trial with full AI features.\nNo credit card required.")
+                Text("Sign in to get a 10-day free trial with full AI features.\nNo credit card required.")
                     .font(.system(size: 13))
                     .foregroundStyle(Theme.textSecondary)
                     .multilineTextAlignment(.center)
@@ -351,41 +376,6 @@ private struct SignInPage: View {
                         }
                         .foregroundStyle(Theme.statusError)
                     }
-
-                    // BYOK toggle
-                    Button {
-                        withAnimation(.easeInOut(duration: 0.2)) {
-                            flow.showBYOKInput.toggle()
-                        }
-                    } label: {
-                        HStack(spacing: 4) {
-                            Image(systemName: "key")
-                                .font(.system(size: 10))
-                            Text("I have my own API key")
-                                .font(.system(size: 12))
-                        }
-                        .foregroundStyle(Theme.textSecondary)
-                    }
-                    .buttonStyle(.plain)
-                    .padding(.top, 4)
-
-                    // BYOK input (conditionally shown)
-                    if flow.showBYOKInput {
-                        byokInputView
-                    }
-
-                    // Skip
-                    Button {
-                        flow.skipSignIn()
-                    } label: {
-                        Text("Skip for now")
-                            .font(.system(size: 11))
-                            .foregroundStyle(Theme.textMuted)
-                            .underline()
-                    }
-                    .buttonStyle(.plain)
-                    .padding(.top, 4)
-                    .accessibilityIdentifier("wizard-skip-signin")
                 }
                 .padding(.horizontal, 60)
             }
@@ -419,70 +409,9 @@ private struct SignInPage: View {
         }
     }
 
-    private var byokInputView: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 8) {
-                Group {
-                    if showKey {
-                        TextField("Paste your Gemini API key", text: $flow.apiKey)
-                    } else {
-                        SecureField("Paste your Gemini API key", text: $flow.apiKey)
-                    }
-                }
-                .textFieldStyle(.plain)
-                .font(.system(size: 13, design: .monospaced))
-                .padding(10)
-                .background(.ultraThinMaterial)
-                .cornerRadius(8)
-                .accessibilityIdentifier("wizard-api-key-input")
-
-                Button {
-                    showKey.toggle()
-                } label: {
-                    Image(systemName: showKey ? "eye.slash" : "eye")
-                        .font(.system(size: 12))
-                        .foregroundStyle(Theme.textMuted)
-                        .frame(width: 30, height: 30)
-                        .background(.ultraThinMaterial)
-                        .clipShape(Circle())
-                }
-                .buttonStyle(.plain)
-            }
-
-            if let error = flow.apiKeyError {
-                HStack(spacing: 6) {
-                    Image(systemName: "exclamationmark.circle.fill")
-                        .font(.system(size: 12))
-                    Text(error)
-                        .font(.system(size: 12))
-                }
-                .foregroundStyle(Theme.statusError)
-            }
-
-            Button {
-                if let url = URL(string: "https://aistudio.google.com/apikey") {
-                    NSWorkspace.shared.open(url)
-                }
-            } label: {
-                HStack(spacing: 4) {
-                    Image(systemName: "arrow.up.right.square")
-                        .font(.system(size: 10))
-                    Text("Get a free key from Google AI Studio")
-                        .font(.system(size: 11))
-                }
-                .foregroundStyle(Theme.accent)
-            }
-            .buttonStyle(.plain)
-        }
-        .onAppear {
-            flow.apiKey = SettingsManager.shared.geminiApiKey ?? ""
-        }
-    }
-
     private func startGoogleSignIn() {
         guard let (url, codeVerifier) = AuthManager.shared.buildGoogleSignInURL() else {
-            signInError = "Backend not configured. Use an API key instead."
-            flow.showBYOKInput = true
+            signInError = "Unable to connect to authentication service. Please try again later."
             return
         }
 
@@ -699,6 +628,7 @@ private struct PreferencesPage: View {
             }
 
             Spacer()
+                .frame(maxHeight: 40)
 
             Button {
                 onComplete()
@@ -712,8 +642,14 @@ private struct PreferencesPage: View {
                     .clipShape(Capsule())
             }
             .buttonStyle(.plain)
-            .padding(.bottom, 8)
             .accessibilityIdentifier("wizard-finish")
+
+            Spacer()
+        }
+        .onAppear {
+            // Register login item immediately since default is ON.
+            // onChange only fires on changes, so we need this for the default case.
+            updateLoginItem(enabled: launchAtLogin)
         }
     }
 
@@ -790,3 +726,18 @@ private struct PermissionRow: View {
         )
     }
 }
+
+// MARK: - Liquid Glass Modifier
+
+private struct WizardGlassModifier: ViewModifier {
+    func body(content: Content) -> some View {
+        if #available(macOS 26.0, *) {
+            content
+                .glassEffect(.regular.interactive(), in: .rect(cornerRadius: 20))
+        } else {
+            content
+        }
+    }
+}
+
+

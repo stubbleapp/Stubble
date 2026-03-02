@@ -472,7 +472,7 @@ struct AppIconStackView: View {
 
         HStack(spacing: -4) {
             ForEach(Array(appSlice.enumerated()), id: \.offset) { index, name in
-                AppIconView(bundleId: bundleIdResolver(name), size: 20)
+                AppIconView(bundleId: bundleIdResolver(name), appName: name, size: 20)
                     .background(
                         Circle()
                             .fill(Theme.secondaryBackground)

@@ -119,6 +119,11 @@ public final class SettingsStore {
         set { update { $0.analyticsEnabled = newValue } }
     }
 
+    public var wizardPage: Int {
+        get { load().wizardPage ?? 0 }
+        set { update { $0.wizardPage = newValue } }
+    }
+
     // MARK: - Helpers
 
     private func update(_ mutate: (inout AppSettings) -> Void) {
@@ -145,6 +150,8 @@ public struct AppSettings: Codable, Equatable {
     public var exclusions: [String]?
     public var appearanceMode: AppearanceMode?
     public var analyticsEnabled: Bool?
+    /// Current wizard page (0-3) for resuming setup after quit/reopen.
+    public var wizardPage: Int?
 
     public init(
         geminiApiKey: String? = nil,
@@ -156,7 +163,8 @@ public struct AppSettings: Codable, Equatable {
         minAwayMinutes: Int? = nil,
         exclusions: [String]? = nil,
         appearanceMode: AppearanceMode? = nil,
-        analyticsEnabled: Bool? = nil
+        analyticsEnabled: Bool? = nil,
+        wizardPage: Int? = nil
     ) {
         self.geminiApiKey = geminiApiKey
         self.customPrompt = customPrompt
@@ -168,5 +176,6 @@ public struct AppSettings: Codable, Equatable {
         self.exclusions = exclusions
         self.appearanceMode = appearanceMode
         self.analyticsEnabled = analyticsEnabled
+        self.wizardPage = wizardPage
     }
 }

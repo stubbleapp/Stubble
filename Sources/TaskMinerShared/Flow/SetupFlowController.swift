@@ -20,8 +20,6 @@ public final class SetupFlowController {
 
     /// Whether the user completed Google OAuth sign-in during setup.
     public var isSignedInViaGoogle: Bool = false
-    /// Whether the user is showing the BYOK API key input on the sign-in page.
-    public var showBYOKInput: Bool = false
 
     /// Permission flags — the view layer polls and updates these.
     public var accessibilityGranted: Bool = false
@@ -39,9 +37,8 @@ public final class SetupFlowController {
         case 0:
             return true
         case 1:
-            // Allow continue if: signed in via Google, or BYOK key entered
+            // Require Google sign-in to continue
             return isSignedInViaGoogle
-                || (!apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !isValidating)
         case 2:
             return allPermissionsGranted
         default:
@@ -72,6 +69,12 @@ public final class SetupFlowController {
 
     // MARK: - Navigation
 
+    /// Set the current page directly (for restoring state).
+    public func setPage(_ page: Int) {
+        guard page >= 0 && page < totalPages else { return }
+        currentPage = page
+    }
+
     /// Advance to the next page. Returns true if the page changed.
     @discardableResult
     public func advance() -> Bool {
@@ -93,23 +96,8 @@ public final class SetupFlowController {
     /// or `.blocked` if the button shouldn't have been enabled.
     public func handleContinue() -> ContinueAction {
         guard canContinue else { return .blocked }
-        if currentPage == 1 {
-            // If signed in via Google, just advance — no key validation needed
-            if isSignedInViaGoogle {
-                advance()
-                return .advance
-            }
-            // BYOK path — validate the API key
-            return .validate
-        }
         advance()
         return .advance
-    }
-
-    /// Skip the sign-in step entirely (user can configure later in Settings).
-    public func skipSignIn() {
-        guard currentPage == 1 else { return }
-        advance()
     }
 
     // MARK: - API Key Validation

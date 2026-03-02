@@ -580,7 +580,7 @@ struct SettingsView: View {
                 .font(.subheadline.weight(.medium))
                 .foregroundStyle(Theme.textPrimary)
 
-            Text("Sign in with Google to get a 30-day free trial with full AI features. No API key needed.")
+            Text("Sign in with Google to get a 10-day free trial with full AI features. No API key needed.")
                 .font(.caption)
                 .foregroundStyle(Theme.textSecondary)
 

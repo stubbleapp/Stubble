@@ -2,15 +2,28 @@ import SwiftUI
 
 struct AppIconView: View {
     let bundleId: String?
+    var appName: String? = nil
     let size: CGFloat
 
     /// macOS app icons have built-in canvas padding (~15%).
     /// Scale up so the visible icon art fills the frame tightly.
     private let iconScale: CGFloat = 1.25
 
+    private var resolvedIcon: NSImage? {
+        // Try bundle ID first
+        if let icon = AppIconResolver.shared.icon(for: bundleId, size: size * iconScale) {
+            return icon
+        }
+        // Fall back to app name lookup
+        if let name = appName, let icon = AppIconResolver.shared.icon(forAppName: name, size: size * iconScale) {
+            return icon
+        }
+        return nil
+    }
+
     var body: some View {
         Group {
-            if let nsImage = AppIconResolver.shared.icon(for: bundleId, size: size * iconScale) {
+            if let nsImage = resolvedIcon {
                 Image(nsImage: nsImage)
                     .resizable()
                     .aspectRatio(contentMode: .fill)
@@ -39,7 +52,7 @@ struct HoverableAppIconView: View {
     @State private var isHovered = false
 
     var body: some View {
-        AppIconView(bundleId: bundleId, size: size)
+        AppIconView(bundleId: bundleId, appName: appName, size: size)
             .popover(isPresented: $isHovered, arrowEdge: .bottom) {
                 Text(appName)
                     .font(.system(size: 11, weight: .medium))

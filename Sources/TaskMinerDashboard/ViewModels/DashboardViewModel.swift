@@ -450,6 +450,35 @@ final class DashboardViewModel {
         }
     }
 
+    /// Create an initial "Getting Started with Stubble" task so the timeline isn't empty on first launch.
+    func createOnboardingTask() {
+        guard let writer = taskWriter else { return }
+
+        let now = Date()
+        let startTime = now.addingTimeInterval(-120) // 2 minutes ago
+        let dateStr = SharedFormatters.dayFormatter.string(from: now)
+
+        let task = TaskRecord(
+            date: dateStr,
+            startTime: startTime,
+            endTime: now,
+            title: "Getting started with Stubble",
+            description: "Completed the Stubble setup wizard. Stubble is now monitoring your activity and will generate personalised insights throughout the day.",
+            appNames: "[\"Stubble\"]",
+            confidence: 1.0,
+            relevantLinks: "[]",
+            activeDuration: 120,
+            websites: "[]"
+        )
+
+        do {
+            try writer.insertTask(task)
+            Logger.info("Created onboarding task for first launch")
+        } catch {
+            Logger.error("Failed to create onboarding task: \(error.localizedDescription)")
+        }
+    }
+
     // MARK: - Screenshot Deletion
 
     /// Delete screenshots: remove files from disk, then delete DB rows, then refresh.

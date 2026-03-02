@@ -9,7 +9,7 @@ struct ActivityGroupView: View {
         VStack(spacing: 0) {
             // Group header
             HStack(spacing: 10) {
-                AppIconView(bundleId: group.bundleId, size: 28)
+                AppIconView(bundleId: group.bundleId, appName: group.appName, size: 28)
 
                 VStack(alignment: .leading, spacing: 1) {
                     Text(group.appName)

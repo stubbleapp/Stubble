@@ -17,7 +17,7 @@ struct ChatTabView: View {
     // MARK: - Body
 
     var body: some View {
-        Group {
+        VStack(spacing: 0) {
             if viewModel.isGeneratingRecommendations && !hasRecommendations {
                 Spacer()
                 VStack(spacing: 16) {

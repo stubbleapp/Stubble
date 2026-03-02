@@ -20,11 +20,16 @@ public struct SharedConfiguration: Sendable {
         self.settingsPath = base.appendingPathComponent("settings.json")
         self.memoryPath = base.appendingPathComponent("memory.json")
 
+        // Ensure data directory exists before any file operations
+        let fm = FileManager.default
+        if !fm.fileExists(atPath: base.path) {
+            try fm.createDirectory(at: base, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
+        }
+
         // One-time migration: rename legacy database file.
         // Uses an exclusive file lock to prevent a race if Dashboard and Daemon
         // both initialize at the same instant.
         let legacyDb = base.appendingPathComponent("taskminer.db")
-        let fm = FileManager.default
         if fm.fileExists(atPath: legacyDb.path) && !fm.fileExists(atPath: databasePath.path) {
             let lockPath = base.appendingPathComponent(".migration.lock")
             fm.createFile(atPath: lockPath.path, contents: nil)

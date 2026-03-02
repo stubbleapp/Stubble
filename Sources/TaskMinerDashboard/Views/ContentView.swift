@@ -11,7 +11,7 @@ private enum ToolbarLayout {
 
 struct ContentView: View {
     @Environment(DashboardViewModel.self) var viewModel
-    @State private var selectedTab = 1
+    @State private var selectedTab = 0
 
     /// Tracks whether the Option (⌥) key is currently held down.
     @State private var optionKeyHeld = false
@@ -197,3 +197,4 @@ private struct SegmentedPickerGlassModifier: ViewModifier {
         }
     }
 }
+

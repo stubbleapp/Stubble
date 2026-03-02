@@ -72,4 +72,9 @@ final class SettingsManager {
         get { store?.analyticsEnabled ?? true }
         set { store?.analyticsEnabled = newValue }
     }
+
+    var wizardPage: Int {
+        get { store?.wizardPage ?? 0 }
+        set { store?.wizardPage = newValue }
+    }
 }
