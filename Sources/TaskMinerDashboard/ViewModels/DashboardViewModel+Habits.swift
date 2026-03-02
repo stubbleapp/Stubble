@@ -5,6 +5,20 @@ import TaskMinerShared
 
 extension DashboardViewModel {
 
+    /// Check if the database has any activity data (async to avoid blocking main thread during view layout).
+    func checkHasSufficientData() {
+        guard habitsHasSufficientData == nil else { return }
+        guard let db = dbReader else {
+            habitsHasSufficientData = false
+            return
+        }
+        // Defer the DB query to next run loop iteration so it doesn't block the tab switch animation
+        Task { @MainActor in
+            let dates = db.datesWithData()
+            self.habitsHasSufficientData = !dates.isEmpty
+        }
+    }
+
     /// Generate cross-day habits analysis.
     /// Phase 1: local aggregation (immediate quick stats).
     /// Phase 2: AI analysis (cached, refreshes when new day of data appears).

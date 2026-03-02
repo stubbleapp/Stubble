@@ -3,24 +3,32 @@ import TaskMinerShared
 
 struct HabitsView: View {
     @Environment(DashboardViewModel.self) var viewModel
+    @State private var showAllPatterns = false
+    @State private var showAllSuggestions = false
+    @State private var showDetailedStats = false
 
     private var hasContent: Bool {
         viewModel.habitsAnalysis != nil || viewModel.habitsSnapshot != nil
     }
 
+    /// Cached check for sufficient data (loaded async by ViewModel).
     private var hasSufficientData: Bool {
-        guard let db = viewModel.dbReader else { return false }
-        return !db.datesWithData().isEmpty
+        viewModel.habitsHasSufficientData ?? false
+    }
+
+    /// Still loading the data check.
+    private var isCheckingData: Bool {
+        viewModel.habitsHasSufficientData == nil
     }
 
     var body: some View {
         VStack(spacing: 0) {
-            if viewModel.isGeneratingHabits && !hasContent {
+            if isCheckingData || (viewModel.isGeneratingHabits && !hasContent) {
                 Spacer()
                 VStack(spacing: 16) {
                     ProgressView()
                         .scaleEffect(0.8)
-                    Text("Analyzing your work patterns\u{2026}")
+                    Text(isCheckingData ? "Loading\u{2026}" : "Analyzing your work patterns\u{2026}")
                         .font(.system(size: 13, weight: .regular))
                         .foregroundStyle(Theme.textMuted)
                 }
@@ -97,7 +105,7 @@ struct HabitsView: View {
 
                         // 3. Quick stats grid
                         if let snapshot = viewModel.habitsSnapshot {
-                            quickStatsGrid(snapshot)
+                            statsSection(snapshot)
                                 .padding(.horizontal, 24)
                                 .padding(.bottom, 16)
                         }
@@ -121,11 +129,16 @@ struct HabitsView: View {
             }
         }
         .onAppear {
-            if !hasContent
+            // Kick off async data check if not yet done
+            viewModel.checkHasSufficientData()
+        }
+        .onChange(of: viewModel.habitsHasSufficientData) { _, hasSufficient in
+            // Auto-generate once data check completes and conditions are met
+            if hasSufficient == true
+                && !hasContent
                 && !viewModel.isGeneratingHabits
                 && !viewModel.hasAttemptedHabitsGeneration
-                && viewModel.hasGeminiKey
-                && hasSufficientData {
+                && viewModel.hasGeminiKey {
                 viewModel.hasAttemptedHabitsGeneration = true
                 viewModel.generateHabits()
             }
@@ -212,6 +225,73 @@ struct HabitsView: View {
 
     // MARK: - Quick Stats Grid
 
+    private func statsSection(_ snapshot: HabitsDataSnapshot) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Button {
+                withAnimation(.easeInOut(duration: 0.2)) {
+                    showDetailedStats.toggle()
+                }
+            } label: {
+                HStack(spacing: 8) {
+                    Text("Key Metrics")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(Theme.textPrimary)
+                    Spacer()
+                    Text(showDetailedStats ? "Hide details" : "Show details")
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(Theme.accent)
+                    Image(systemName: showDetailedStats ? "chevron.up" : "chevron.down")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(Theme.accent)
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+
+            HStack(spacing: 10) {
+                compactStatPill(
+                    title: "Deep Work",
+                    value: "\(Int(snapshot.deepWorkRatio * 100))%"
+                )
+                compactStatPill(
+                    title: "Avg Focus",
+                    value: "\(Int(snapshot.avgFocusDurationMinutes))m"
+                )
+                compactStatPill(
+                    title: "Daily Active",
+                    value: String(format: "%.1fh", snapshot.avgDailyActiveHours)
+                )
+            }
+
+            if showDetailedStats {
+                quickStatsGrid(snapshot)
+                    .transition(.opacity.combined(with: .move(edge: .top)))
+            }
+        }
+    }
+
+    private func compactStatPill(title: String, value: String) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(title)
+                .font(.system(size: 10, weight: .medium))
+                .foregroundStyle(Theme.textMuted)
+            Text(value)
+                .font(.system(size: 15, weight: .semibold, design: .rounded))
+                .foregroundStyle(Theme.textPrimary)
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 8)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .fill(Theme.selectedSurface)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .strokeBorder(Theme.cardBorder, lineWidth: 0.5)
+        )
+    }
+
     private func quickStatsGrid(_ snapshot: HabitsDataSnapshot) -> some View {
         let columns = [
             GridItem(.flexible(), spacing: 12),
@@ -253,37 +333,64 @@ struct HabitsView: View {
     // MARK: - Habits Section
 
     private func habitsSection(_ habits: [HabitInsight]) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text("Patterns")
-                .font(.system(size: 13, weight: .semibold))
-                .foregroundStyle(Theme.textPrimary)
+        let visibleHabits = showAllPatterns ? habits : Array(habits.prefix(3))
+
+        return VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Text("Patterns")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(Theme.textPrimary)
+                Spacer()
+                if habits.count > 3 {
+                    Button(showAllPatterns ? "Show less" : "Show all (\(habits.count))") {
+                        withAnimation(.easeInOut(duration: 0.2)) {
+                            showAllPatterns.toggle()
+                        }
+                    }
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(Theme.accent)
+                    .buttonStyle(.plain)
+                }
+            }
 
             VStack(spacing: 10) {
-                ForEach(habits) { habit in
+                ForEach(visibleHabits) { habit in
                     HabitInsightCard(habit: habit)
                 }
             }
         }
     }
 
-    // MARK: - Improvements Section (horizontal scroll)
+    // MARK: - Improvements Section
 
     private func improvementsSection(_ improvements: [ImprovementSuggestion]) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text("Suggestions")
-                .font(.system(size: 13, weight: .semibold))
-                .foregroundStyle(Theme.textPrimary)
-                .padding(.horizontal, 24)
+        let visibleSuggestions = showAllSuggestions ? improvements : Array(improvements.prefix(3))
 
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 12) {
-                    ForEach(improvements) { suggestion in
-                        ImprovementCard(suggestion: suggestion)
+        return VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Text("Suggestions")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(Theme.textPrimary)
+                Spacer()
+                if improvements.count > 3 {
+                    Button(showAllSuggestions ? "Show less" : "Show all (\(improvements.count))") {
+                        withAnimation(.easeInOut(duration: 0.2)) {
+                            showAllSuggestions.toggle()
+                        }
                     }
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(Theme.accent)
+                    .buttonStyle(.plain)
                 }
-                .padding(.horizontal, 24)
             }
-            .scrollClipDisabled(true)
+            .padding(.horizontal, 24)
+
+            VStack(spacing: 10) {
+                ForEach(visibleSuggestions) { suggestion in
+                    ImprovementCard(suggestion: suggestion)
+                        .padding(.horizontal, 24)
+                }
+            }
         }
     }
 }
@@ -302,7 +409,7 @@ private struct QuickStatCard: View {
             HStack(spacing: 5) {
                 Image(systemName: icon)
                     .font(.system(size: 10, weight: .medium))
-                    .foregroundStyle(color)
+                    .foregroundStyle(Theme.accent)
 
                 Text(title.uppercased())
                     .font(.system(size: 10, weight: .semibold))
@@ -448,7 +555,7 @@ private struct ImprovementCard: View {
             }
         }
         .padding(14)
-        .frame(width: 220, height: 185, alignment: .topLeading)
+        .frame(maxWidth: .infinity, alignment: .topLeading)
         .modifier(LiquidGlassCardModifier())
     }
 }

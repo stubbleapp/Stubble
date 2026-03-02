@@ -10,23 +10,189 @@ extension DashboardViewModel {
         SharedFormatters.dayFormatter.string(from: selectedDate)
     }
 
-    /// Load persisted chat messages for the selected date.
-    func loadChatHistory() {
+    /// Load persisted chat threads and hydrate the active thread.
+    func loadChatThreads() {
         guard let db = dbReader else { return }
-        let records = db.chatMessages(for: selectedDate)
+        let records = db.chatThreads(limit: 200)
+        chatThreads = records.map { ChatThread(from: $0) }
+
+        // Seed summary baseline from persisted thread metadata.
+        threadSummaryMessageCounts = Dictionary(uniqueKeysWithValues: chatThreads.map { ($0.id, $0.messageCount) })
+
+        if let activeThreadId,
+           chatThreads.contains(where: { $0.id == activeThreadId }) {
+            loadChatHistory()
+        } else if let first = chatThreads.first {
+            self.activeThreadId = first.id
+            loadChatHistory()
+        } else {
+            self.activeThreadId = nil
+            chatMessages = []
+        }
+    }
+
+    /// Load persisted chat messages for the active thread.
+    func loadChatHistory() {
+        guard let db = dbReader, let activeThreadId else {
+            chatMessages = []
+            return
+        }
+        let records = db.chatMessages(threadId: activeThreadId)
         chatMessages = records.map { ChatMessage(from: $0) }
+    }
+
+    /// Create a new chat thread and switch to it.
+    func createNewChatThread() {
+        guard let writer = taskWriter else { return }
+        isCreatingThread = true
+        do {
+            let rowId = try writer.createChatThread(
+                title: "New Chat",
+                contextDate: selectedDateString
+            )
+            isCreatingThread = false
+            loadChatThreads()
+            activeThreadId = rowId
+            chatMessages = []
+            chatError = nil
+            isChatLoading = false
+        } catch {
+            isCreatingThread = false
+            chatError = "Failed to create chat: \(error.localizedDescription)"
+        }
+    }
+
+    /// Switch to another thread, summarizing the previous one if needed.
+    func switchToThread(_ threadId: Int64) {
+        guard threadId != activeThreadId else { return }
+        let previous = activeThreadId
+        Task {
+            if let previous {
+                await summarizeThreadIfNeeded(threadId: previous)
+            }
+            self.activeThreadId = threadId
+            self.loadChatHistory()
+            self.chatError = nil
+            self.isChatLoading = false
+        }
+    }
+
+    /// Delete a thread and choose a sensible next active thread.
+    func deleteThread(_ threadId: Int64) {
+        guard let writer = taskWriter else { return }
+        do {
+            try writer.deleteChatThread(threadId: threadId)
+            if activeThreadId == threadId {
+                activeThreadId = nil
+                chatMessages = []
+                chatError = nil
+                isChatLoading = false
+            }
+            threadSummaryMessageCounts.removeValue(forKey: threadId)
+            loadChatThreads()
+        } catch {
+            chatError = "Failed to delete chat: \(error.localizedDescription)"
+        }
     }
 
     /// Persist a single message to the database and store its row ID.
     private func persistMessage(_ message: ChatMessage) {
-        guard let writer = taskWriter else { return }
-        let record = message.toRecord(date: selectedDateString)
+        guard let writer = taskWriter, let activeThreadId else { return }
+        let record = message.toRecord(threadId: activeThreadId, date: selectedDateString)
         do {
             let rowId = try writer.insertChatMessage(record)
             message.dbId = rowId
         } catch {
             Logger.error("Failed to persist chat message: \(error.localizedDescription)")
         }
+    }
+
+    private func refreshActiveThreadMeta() {
+        guard let writer = taskWriter, let activeThreadId else { return }
+        do {
+            try writer.touchChatThread(
+                threadId: activeThreadId,
+                lastMessageAt: Date(),
+                messageCount: chatMessages.count
+            )
+        } catch {
+            Logger.error("Failed to touch chat thread \(activeThreadId): \(error.localizedDescription)")
+        }
+        if let thread = chatThreads.first(where: { $0.id == activeThreadId }) {
+            thread.messageCount = chatMessages.count
+            thread.lastMessageAt = Date()
+            thread.updatedAt = Date()
+        }
+    }
+
+    /// Ask the model for a short factual thread summary and persist it.
+    private func summarizeMessages(_ messages: [ChatMessage], threadTitle: String, contextDate: String?) async -> String? {
+        guard let client = geminiClient else { return nil }
+        guard !messages.isEmpty else { return nil }
+
+        let compact = messages.suffix(20).map { msg in
+            let role = msg.role == .user ? "User" : "Assistant"
+            return "\(role): \(DataSanitizer.sanitize(msg.content))"
+        }.joined(separator: "\n")
+
+        let systemInstruction = """
+        Summarize this chat thread in one short factual sentence.
+        Keep it concise (max 140 characters), plain text, no markdown.
+        Focus on what the user asked or accomplished.
+        """
+
+        let prompt = """
+        Thread title: \(threadTitle)
+        Context date: \(contextDate ?? "none")
+        Conversation:
+        \(compact)
+        """
+
+        do {
+            let text = try await client.generateText(
+                prompt: prompt,
+                systemInstruction: systemInstruction
+            )
+            let cleaned = text.trimmingCharacters(in: .whitespacesAndNewlines)
+            return cleaned.isEmpty ? nil : String(cleaned.prefix(180))
+        } catch {
+            Logger.warning("Failed to summarize chat thread: \(error.localizedDescription)")
+            return nil
+        }
+    }
+
+    func summarizeThreadIfNeeded(threadId: Int64) async {
+        guard let writer = taskWriter else { return }
+        guard let thread = chatThreads.first(where: { $0.id == threadId }) else { return }
+        guard thread.messageCount > 1 else { return }
+
+        let baseline = threadSummaryMessageCounts[threadId] ?? 0
+        guard baseline != thread.messageCount else { return }
+
+        isSummarizingThread = true
+        let messages = (threadId == activeThreadId)
+            ? chatMessages
+            : (dbReader?.chatMessages(threadId: threadId).map { ChatMessage(from: $0) } ?? [])
+        if let summary = await summarizeMessages(messages, threadTitle: thread.title, contextDate: thread.contextDate) {
+            do {
+                try writer.updateChatThreadSummary(threadId: threadId, summary: summary)
+                // Keep thread title aligned with the latest AI summary for quick scanability in list UI.
+                try writer.renameChatThread(threadId: threadId, title: summary)
+                thread.summary = summary
+                thread.title = summary
+                thread.updatedAt = Date()
+                threadSummaryMessageCounts[threadId] = thread.messageCount
+            } catch {
+                Logger.warning("Failed to save chat thread summary: \(error.localizedDescription)")
+            }
+        }
+        isSummarizingThread = false
+    }
+
+    /// Called by the chat UI when the panel is collapsed/closed.
+    func notifyChatPanelCollapsed() {
+        guard let activeThreadId else { return }
+        Task { await summarizeThreadIfNeeded(threadId: activeThreadId) }
     }
 
     func sendChatMessage(_ text: String) {
@@ -37,9 +203,29 @@ extension DashboardViewModel {
             return
         }
 
+        if activeThreadId == nil {
+            createNewChatThread()
+        }
+        guard activeThreadId != nil else { return }
+
         let userMessage = ChatMessage(role: .user, content: trimmed)
         chatMessages.append(userMessage)
         persistMessage(userMessage)
+        refreshActiveThreadMeta()
+
+        // Rename "New Chat" to first user prompt snippet.
+        if let activeThreadId,
+           let writer = taskWriter,
+           let thread = chatThreads.first(where: { $0.id == activeThreadId }),
+           thread.title == "New Chat" {
+            let firstLine = trimmed.replacingOccurrences(of: "\n", with: " ").trimmingCharacters(in: .whitespaces)
+            let title = String(firstLine.prefix(40))
+            if !title.isEmpty {
+                try? writer.renameChatThread(threadId: activeThreadId, title: title)
+                thread.title = title
+                thread.updatedAt = Date()
+            }
+        }
 
         isChatLoading = true
         chatError = nil
@@ -107,6 +293,7 @@ extension DashboardViewModel {
 
                 // Persist the complete assistant message
                 self.persistMessage(assistantMessage)
+                self.refreshActiveThreadMeta()
 
                 // Extract any user-revealed facts from this exchange (fire-and-forget)
                 if !assistantMessage.content.isEmpty {
@@ -131,6 +318,7 @@ extension DashboardViewModel {
                 if self.chatMessages.count > 50 {
                     self.chatMessages.removeFirst(self.chatMessages.count - 50)
                 }
+                self.loadChatThreads()
             } catch {
                 // Remove the empty assistant message on error
                 if assistantMessage.content.isEmpty {
@@ -139,6 +327,7 @@ extension DashboardViewModel {
                     // Keep partial content but mark streaming as done
                     assistantMessage.isStreaming = false
                     self.persistMessage(assistantMessage)
+                    self.refreshActiveThreadMeta()
                 }
                 self.chatError = Self.friendlyChatError(error)
                 self.isChatLoading = false
@@ -151,9 +340,15 @@ extension DashboardViewModel {
         chatError = nil
         isChatLoading = false
 
-        // Also clear from database
-        if let writer = taskWriter {
-            try? writer.deleteChatMessages(for: selectedDateString)
+        // Clear only the active thread's messages.
+        if let writer = taskWriter, let activeThreadId {
+            try? writer.deleteChatMessages(threadId: activeThreadId)
+            try? writer.touchChatThread(threadId: activeThreadId, lastMessageAt: Date(), messageCount: 0)
+            if let thread = chatThreads.first(where: { $0.id == activeThreadId }) {
+                thread.messageCount = 0
+                thread.lastMessageAt = nil
+            }
+            threadSummaryMessageCounts[activeThreadId] = 0
         }
     }
 

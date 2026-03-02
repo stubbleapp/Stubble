@@ -90,14 +90,21 @@ final class DashboardViewModel {
     var expandedActivityGroupId: String?
 
     // Chat
+    var chatThreads: [ChatThread] = []
+    var activeThreadId: Int64?
     var chatMessages: [ChatMessage] = []
     var isChatLoading = false
     var chatError: String?
+    var isCreatingThread = false
+    var isSummarizingThread = false
+    var threadSummaryMessageCounts: [Int64: Int] = [:]
     /// The name of the currently active screen/tab (e.g. "Day", "Chat", "Habits").
     /// Used to give the chat assistant context about what the user is looking at.
     var currentScreen: String = "Chat"
     /// Set by ChatTabView or ChatOverlayView to trigger a chat question.
     var pendingChatQuestion: String?
+    /// Set to true to expand the chat overlay panel (e.g., when clicking a recent chat).
+    var shouldExpandChatPanel = false
 
     // Habits (cross-day analysis)
     var habitsAnalysis: HabitsAnalysis?
@@ -106,6 +113,9 @@ final class DashboardViewModel {
     var habitsError: String?
     var habitsGenerator: HabitsGenerator?
     var hasAttemptedHabitsGeneration = false
+    /// Cached result of whether the database has any activity data.
+    /// Checked asynchronously on Habits tab appearance to avoid blocking the main thread.
+    var habitsHasSufficientData: Bool?
 
     // App name → bundle ID mapping (for icon resolution)
     var appNameBundleMap: [String: String] = [:]
@@ -186,7 +196,7 @@ final class DashboardViewModel {
 
         loadAvailableDates()
         loadDataForSelectedDate()
-        loadChatHistory()
+        loadChatThreads()
         loadAppNameMap()
         startPausePolling()
         startPeriodicRefresh()
@@ -199,9 +209,6 @@ final class DashboardViewModel {
     func selectDate(_ date: Date) {
         selectedDate = date
         daySummaryText = nil
-        chatMessages = []
-        chatError = nil
-        isChatLoading = false
         // Reset stubs state for the new date
         recommendations = []
         greetingContext = nil
@@ -212,7 +219,6 @@ final class DashboardViewModel {
         lastStubsGenerationTime = .distantPast
         recommendationsError = nil
         loadDataForSelectedDate()
-        loadChatHistory()
 
         // Auto-generate stubs if no persisted content was loaded and we have data.
         // This handles the case where the user changes dates while already on the Stubs tab
@@ -714,6 +720,8 @@ final class DashboardViewModel {
         greetingContext = nil
         daySummaryContent = nil
         suggestedQuestions = []
+        chatThreads = []
+        activeThreadId = nil
         chatMessages = []
         chatError = nil
         activeSeconds = 0
@@ -725,6 +733,7 @@ final class DashboardViewModel {
         habitsSnapshot = nil
         habitsError = nil
         hasAttemptedHabitsGeneration = false
+        habitsHasSufficientData = nil
 
         Logger.info("All data cleared by user")
         Analytics.dataClearedByUser()

@@ -28,9 +28,10 @@ final class ChatMessage: Identifiable {
     }
 
     /// Convert to a persistence record for a given date string.
-    func toRecord(date: String) -> ChatMessageRecord {
+    func toRecord(threadId: Int64, date: String) -> ChatMessageRecord {
         ChatMessageRecord(
             id: dbId,
+            threadId: threadId,
             date: date,
             role: role.dbString,
             content: content,

@@ -83,13 +83,19 @@ struct ChatTabView: View {
                                 .padding(.bottom, 16)
                         }
 
+                        // Past chats
+                        if !viewModel.chatThreads.isEmpty {
+                            pastChatsSection
+                                .padding(.bottom, 16)
+                        }
+
                         Spacer().frame(height: 100)
                     }
                 }
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Color.white)
+        .background(Theme.secondaryBackground)
         .onAppear {
             // Auto-generate stubs on first visit (same logic as RecommendationsView)
             if !hasRecommendations
@@ -159,6 +165,82 @@ struct ChatTabView: View {
             }
             .scrollClipDisabled(true)
         }
+    }
+
+    // MARK: - Past Chats
+
+    private var pastChatsSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Recent Chats")
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(Theme.textPrimary)
+                .padding(.horizontal, 24)
+
+            VStack(spacing: 8) {
+                ForEach(viewModel.chatThreads.prefix(5)) { thread in
+                    Button {
+                        viewModel.switchToThread(thread.id)
+                        viewModel.shouldExpandChatPanel = true
+                    } label: {
+                        HStack(spacing: 12) {
+                            Image(systemName: "bubble.left.fill")
+                                .font(.system(size: 12))
+                                .foregroundStyle(Theme.accent.opacity(0.7))
+
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(threadTitle(thread))
+                                    .font(.system(size: 13, weight: .medium))
+                                    .foregroundStyle(Theme.textPrimary)
+                                    .lineLimit(1)
+
+                                Text(threadDate(thread))
+                                    .font(.system(size: 11))
+                                    .foregroundStyle(Theme.textMuted)
+                            }
+
+                            Spacer()
+
+                            if thread.id == viewModel.activeThreadId {
+                                Image(systemName: "checkmark")
+                                    .font(.system(size: 10, weight: .semibold))
+                                    .foregroundStyle(Theme.accent)
+                            }
+                        }
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 10)
+                        .background(
+                            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                .fill(thread.id == viewModel.activeThreadId
+                                      ? Theme.selectedSurface
+                                      : Theme.cardBackground)
+                        )
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                .strokeBorder(Theme.cardBorder, lineWidth: 0.5)
+                        )
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .padding(.horizontal, 24)
+        }
+    }
+
+    private func threadTitle(_ thread: ChatThread) -> String {
+        let summary = thread.summary.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !summary.isEmpty { return summary }
+
+        let title = thread.title.trimmingCharacters(in: .whitespacesAndNewlines)
+        if title.hasPrefix("Chat ") || title == "New Chat" || title.isEmpty {
+            return "Untitled Chat"
+        }
+        return title
+    }
+
+    private func threadDate(_ thread: ChatThread) -> String {
+        let formatter = RelativeDateTimeFormatter()
+        formatter.unitsStyle = .short
+        return formatter.localizedString(for: thread.updatedAt, relativeTo: Date())
     }
 
     // MARK: - Error Banner

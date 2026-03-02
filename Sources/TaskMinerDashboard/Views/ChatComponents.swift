@@ -1,18 +1,6 @@
 import SwiftUI
 import AppKit
-
-// MARK: - Content Block Model
-
-struct ContentBlock: Identifiable {
-    let id = UUID()
-    let kind: Kind
-
-    enum Kind {
-        case paragraph(String)
-        case bullet(String, level: Int)
-        case heading(String)
-    }
-}
+import MarkdownUI
 
 // MARK: - AppKit TextField (auto-focuses on creation)
 
@@ -146,148 +134,13 @@ struct MessageBubble: View {
             .shadow(color: Theme.accent.opacity(0.15), radius: 6, y: 2)
     }
 
-    // MARK: - Assistant Content (block-based rendering, no container)
+    // MARK: - Assistant Content (streaming markdown)
 
     private var assistantContent: some View {
-        Group {
-            if message.isStreaming && message.content.isEmpty {
-                streamingDotsView
-            } else if message.isStreaming {
-                // Plain text while streaming for performance
-                Text(message.content + "\u{258E}")
-            } else {
-                // Block-based markdown after completion
-                let blocks = Self.parseBlocks(message.content)
-                VStack(alignment: .leading, spacing: 6) {
-                    ForEach(blocks) { block in
-                        blockView(block)
-                    }
-                }
-            }
-        }
-        .font(.system(size: 12))
-        .foregroundStyle(Theme.textSecondary)
-        .textSelection(.enabled)
-        .lineSpacing(3)
+        StreamingMarkdownView(
+            content: message.content,
+            isStreaming: message.isStreaming
+        )
         .padding(.vertical, 6)
-    }
-
-    @ViewBuilder
-    private func blockView(_ block: ContentBlock) -> some View {
-        switch block.kind {
-        case .paragraph(let text):
-            Text(Self.inlineMarkdown(text))
-
-        case .heading(let text):
-            Text(Self.inlineMarkdown(text))
-                .foregroundStyle(Theme.textPrimary)
-                .fontWeight(.semibold)
-                .padding(.top, 2)
-
-        case .bullet(let text, let level):
-            HStack(alignment: .firstTextBaseline, spacing: 6) {
-                Text(level == 0 ? "\u{2022}" : "\u{25E6}")
-                    .foregroundStyle(Theme.accent)
-                Text(Self.inlineMarkdown(text))
-            }
-            .padding(.leading, CGFloat(level) * 16)
-        }
-    }
-
-    /// Animated dots shown while waiting for the first streaming chunk.
-    private var streamingDotsView: some View {
-        HStack(spacing: 4) {
-            ForEach(0..<3) { index in
-                Circle()
-                    .fill(Theme.textMuted.opacity(0.5))
-                    .frame(width: 5, height: 5)
-                    .animation(
-                        .easeInOut(duration: 0.6)
-                            .repeatForever(autoreverses: true)
-                            .delay(Double(index) * 0.2),
-                        value: true
-                    )
-                    .onAppear {}
-            }
-        }
-        .frame(height: 14)
-    }
-
-    // MARK: - Block-Based Markdown Parsing
-
-    /// Parse markdown source into structured blocks (paragraphs, bullets, headings).
-    static func parseBlocks(_ source: String) -> [ContentBlock] {
-        guard !source.isEmpty else { return [] }
-
-        var blocks: [ContentBlock] = []
-        let lines = source.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
-        var paragraphLines: [String] = []
-
-        func flushParagraph() {
-            let text = paragraphLines.joined(separator: " ").trimmingCharacters(in: .whitespacesAndNewlines)
-            if !text.isEmpty {
-                blocks.append(ContentBlock(kind: .paragraph(text)))
-            }
-            paragraphLines = []
-        }
-
-        for line in lines {
-            let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
-
-            // Blank line → paragraph break
-            if trimmed.isEmpty {
-                flushParagraph()
-                continue
-            }
-
-            // Heading (# / ## / ###)
-            if let range = line.range(of: #"^#{1,3}\s+"#, options: .regularExpression) {
-                flushParagraph()
-                blocks.append(ContentBlock(kind: .heading(String(line[range.upperBound...]))))
-                continue
-            }
-
-            // Nested bullet (indented - or *)
-            if let match = line.range(of: #"^(\s{2,}|\t)[\-\*]\s"#, options: .regularExpression) {
-                flushParagraph()
-                blocks.append(ContentBlock(kind: .bullet(String(line[match.upperBound...]), level: 1)))
-                continue
-            }
-
-            // Top-level bullet (- or *)
-            if let match = line.range(of: #"^[\-\*]\s"#, options: .regularExpression) {
-                flushParagraph()
-                blocks.append(ContentBlock(kind: .bullet(String(line[match.upperBound...]), level: 0)))
-                continue
-            }
-
-            // Numbered list (1. 2. etc.)
-            if let match = line.range(of: #"^\d+\.\s"#, options: .regularExpression) {
-                flushParagraph()
-                blocks.append(ContentBlock(kind: .bullet(String(line[match.upperBound...]), level: 0)))
-                continue
-            }
-
-            // Regular text → accumulate into paragraph
-            paragraphLines.append(line)
-        }
-
-        flushParagraph()
-        return blocks
-    }
-
-    /// Parse inline markdown (bold, italic, code) into an AttributedString.
-    static func inlineMarkdown(_ text: String) -> AttributedString {
-        var options = AttributedString.MarkdownParsingOptions()
-        options.interpretedSyntax = .inlineOnlyPreservingWhitespace
-        guard var attributed = try? AttributedString(markdown: text, options: options) else {
-            return AttributedString(text)
-        }
-        for run in attributed.runs {
-            if run.inlinePresentationIntent?.contains(.code) == true {
-                attributed[run.range].font = .system(size: 12, design: .monospaced)
-            }
-        }
-        return attributed
     }
 }

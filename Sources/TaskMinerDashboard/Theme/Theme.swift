@@ -167,9 +167,9 @@ enum Theme {
 
     // MARK: - Chat overlay
 
-    /// Chat panel background — solid, no translucency.
+    /// Chat panel background — solid white for the floating chat pill/overlay.
     static let chatSurface = adaptive(
-        light: NSColor(red: 0.995, green: 0.993, blue: 0.988, alpha: 1.0),
+        light: NSColor(red: 0.995, green: 0.993, blue: 0.988, alpha: 1.0),   // near-white
         dark: NSColor(red: 0.16, green: 0.16, blue: 0.17, alpha: 1.0)
     )
 

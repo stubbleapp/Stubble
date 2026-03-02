@@ -7,6 +7,7 @@ let package = Package(
     dependencies: [
         .package(url: "https://github.com/sparkle-project/Sparkle", exact: "2.9.0"),
         .package(url: "https://github.com/TelemetryDeck/SwiftSDK", exact: "2.11.0"),
+        .package(url: "https://github.com/gonzalezreal/swift-markdown-ui", exact: "2.4.1"),
     ],
     targets: [
         .target(
@@ -42,6 +43,7 @@ let package = Package(
                 "TaskMinerDaemon",
                 "Sparkle",
                 .product(name: "TelemetryDeck", package: "SwiftSDK"),
+                .product(name: "MarkdownUI", package: "swift-markdown-ui"),
             ],
             path: "Sources/TaskMinerDashboard",
             linkerSettings: [

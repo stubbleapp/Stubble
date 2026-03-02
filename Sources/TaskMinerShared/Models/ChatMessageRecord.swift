@@ -4,6 +4,7 @@ import Foundation
 /// Follows the same pattern as `TaskRecord` and `ProjectActivityRecord`.
 public struct ChatMessageRecord: Identifiable, Hashable, Sendable {
     public let id: Int64?
+    public let threadId: Int64
     /// Date string in "yyyy-MM-dd" format — scopes the conversation to a day.
     public let date: String
     /// "user" or "assistant"
@@ -13,12 +14,14 @@ public struct ChatMessageRecord: Identifiable, Hashable, Sendable {
 
     public init(
         id: Int64? = nil,
+        threadId: Int64 = 0,
         date: String,
         role: String,
         content: String,
         timestamp: Date = Date()
     ) {
         self.id = id
+        self.threadId = threadId
         self.date = date
         self.role = role
         self.content = content

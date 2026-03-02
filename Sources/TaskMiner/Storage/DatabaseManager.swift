@@ -86,7 +86,7 @@ class DatabaseManager {
     }
 
     /// Current schema version — kept in sync with DatabaseReader's migrations.
-    private static let schemaVersion = 12
+    private static let schemaVersion = 13
 
     private func runMigrations() {
         let currentVersion = getUserVersion()
@@ -274,6 +274,87 @@ class DatabaseManager {
             }
             sqlite3_exec(db, "CREATE INDEX IF NOT EXISTS idx_granola_meetings_date ON granola_meetings(meeting_date)", nil, nil, nil)
             sqlite3_exec(db, "CREATE INDEX IF NOT EXISTS idx_granola_meetings_granola_id ON granola_meetings(granola_id)", nil, nil, nil)
+        }
+
+        if currentVersion < 13 {
+            let threadsSql = """
+            CREATE TABLE IF NOT EXISTS chat_threads (
+                id                INTEGER PRIMARY KEY AUTOINCREMENT,
+                title             TEXT NOT NULL DEFAULT '',
+                summary           TEXT NOT NULL DEFAULT '',
+                context_date      TEXT,
+                created_at        TEXT NOT NULL,
+                updated_at        TEXT NOT NULL,
+                last_message_at   TEXT,
+                message_count     INTEGER NOT NULL DEFAULT 0,
+                is_archived       INTEGER NOT NULL DEFAULT 0
+            )
+            """
+            if !execMigration(threadsSql, label: "13a: create chat_threads table") {
+                migrationFailed = true
+            }
+
+            if sqlite3_exec(db, "CREATE INDEX IF NOT EXISTS idx_chat_threads_last_message_at ON chat_threads(last_message_at)", nil, nil, nil) != SQLITE_OK {
+                Logger.warning("Failed to create idx_chat_threads_last_message_at index")
+            }
+            if sqlite3_exec(db, "CREATE INDEX IF NOT EXISTS idx_chat_threads_updated_at ON chat_threads(updated_at)", nil, nil, nil) != SQLITE_OK {
+                Logger.warning("Failed to create idx_chat_threads_updated_at index")
+            }
+
+            if !execMigration("ALTER TABLE chat_messages ADD COLUMN thread_id INTEGER NOT NULL DEFAULT 0",
+                              label: "13b: add thread_id to chat_messages", ignoreDuplicate: true) {
+                migrationFailed = true
+            }
+
+            // Backfill legacy date-scoped messages into one thread per day.
+            let backfillThreadsSql = """
+            INSERT INTO chat_threads (title, summary, context_date, created_at, updated_at, last_message_at, message_count, is_archived)
+            SELECT 'Chat ' || date, '', date, MIN(timestamp), MAX(timestamp), MAX(timestamp), COUNT(*), 0
+            FROM chat_messages
+            WHERE thread_id = 0
+            GROUP BY date
+            """
+            if !execMigration(backfillThreadsSql, label: "13c: backfill chat_threads from legacy chat_messages") {
+                migrationFailed = true
+            }
+
+            let backfillThreadIdsSql = """
+            UPDATE chat_messages
+            SET thread_id = (
+                SELECT t.id
+                FROM chat_threads t
+                WHERE t.context_date = chat_messages.date
+                ORDER BY t.id DESC
+                LIMIT 1
+            )
+            WHERE thread_id = 0
+            """
+            if !execMigration(backfillThreadIdsSql, label: "13d: backfill thread_id on chat_messages") {
+                migrationFailed = true
+            }
+
+            // Safety fallback for any rows that still don't resolve.
+            let fallbackThreadSql = """
+            INSERT INTO chat_threads (title, summary, context_date, created_at, updated_at, last_message_at, message_count, is_archived)
+            SELECT 'Legacy Chat', '', NULL, datetime('now'), datetime('now'), datetime('now'), 0, 0
+            WHERE NOT EXISTS (SELECT 1 FROM chat_threads WHERE title = 'Legacy Chat')
+            """
+            if !execMigration(fallbackThreadSql, label: "13e: ensure fallback legacy chat thread") {
+                migrationFailed = true
+            }
+
+            let fallbackAssignSql = """
+            UPDATE chat_messages
+            SET thread_id = (SELECT id FROM chat_threads WHERE title = 'Legacy Chat' ORDER BY id DESC LIMIT 1)
+            WHERE thread_id = 0
+            """
+            if !execMigration(fallbackAssignSql, label: "13f: assign fallback thread_id") {
+                migrationFailed = true
+            }
+
+            if sqlite3_exec(db, "CREATE INDEX IF NOT EXISTS idx_chat_messages_thread_id ON chat_messages(thread_id)", nil, nil, nil) != SQLITE_OK {
+                Logger.warning("Failed to create idx_chat_messages_thread_id index")
+            }
         }
 
         // Only bump the version if all migrations succeeded — failed migrations

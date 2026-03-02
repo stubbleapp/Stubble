@@ -549,6 +549,103 @@ final class DatabaseRoundTripTests: XCTestCase {
         XCTAssertEqual(day2[0].content, "Day 2 message")
     }
 
+    @MainActor
+    func testChatThreadWriteAndRead() throws {
+        let reader = try createSchema()
+        let writer = try TaskWriter(path: dbPath)
+
+        let threadId = try writer.createChatThread(
+            title: "Planning Thread",
+            contextDate: "2025-06-15"
+        )
+        XCTAssertGreaterThan(threadId, 0)
+
+        let message = ChatMessageRecord(
+            threadId: threadId,
+            date: "2025-06-15",
+            role: "user",
+            content: "Let's plan the release notes."
+        )
+        _ = try writer.insertChatMessage(message)
+        try writer.touchChatThread(threadId: threadId, lastMessageAt: Date(), messageCount: 1)
+
+        let thread = reader.chatThread(id: threadId)
+        XCTAssertNotNil(thread)
+        XCTAssertEqual(thread?.title, "Planning Thread")
+        XCTAssertEqual(thread?.contextDate, "2025-06-15")
+        XCTAssertEqual(thread?.messageCount, 1)
+
+        let messages = reader.chatMessages(threadId: threadId)
+        XCTAssertEqual(messages.count, 1)
+        XCTAssertEqual(messages[0].threadId, threadId)
+        XCTAssertEqual(messages[0].content, "Let's plan the release notes.")
+    }
+
+    @MainActor
+    func testDeleteChatThreadCascadesMessages() throws {
+        let reader = try createSchema()
+        let writer = try TaskWriter(path: dbPath)
+
+        let threadId = try writer.createChatThread(title: "To Delete", contextDate: "2025-06-15")
+        _ = try writer.insertChatMessage(ChatMessageRecord(threadId: threadId, date: "2025-06-15", role: "user", content: "hello"))
+        _ = try writer.insertChatMessage(ChatMessageRecord(threadId: threadId, date: "2025-06-15", role: "assistant", content: "hi"))
+        try writer.touchChatThread(threadId: threadId, lastMessageAt: Date(), messageCount: 2)
+
+        XCTAssertEqual(reader.chatMessages(threadId: threadId).count, 2)
+
+        try writer.deleteChatThread(threadId: threadId)
+
+        XCTAssertTrue(reader.chatMessages(threadId: threadId).isEmpty)
+        XCTAssertNil(reader.chatThread(id: threadId))
+    }
+
+    @MainActor
+    func testChatMigrationBackfillsLegacyDateScopedRows() throws {
+        // Build a DB at schema version 12 with legacy chat_messages rows (no thread_id),
+        // then let DatabaseReader run migration 13.
+        var db: OpaquePointer?
+        XCTAssertEqual(sqlite3_open(dbPath.path, &db), SQLITE_OK)
+        defer { sqlite3_close(db) }
+
+        sqlite3_exec(db, """
+        CREATE TABLE chat_messages (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            date TEXT NOT NULL,
+            role TEXT NOT NULL,
+            content TEXT NOT NULL,
+            timestamp TEXT NOT NULL
+        );
+        """, nil, nil, nil)
+
+        sqlite3_exec(db, """
+        INSERT INTO chat_messages (date, role, content, timestamp) VALUES
+        ('2025-06-15', 'user', 'day1 msg', '2025-06-15T09:00:00Z'),
+        ('2025-06-15', 'assistant', 'day1 reply', '2025-06-15T09:01:00Z'),
+        ('2025-06-16', 'user', 'day2 msg', '2025-06-16T09:00:00Z');
+        """, nil, nil, nil)
+
+        sqlite3_exec(db, "PRAGMA user_version = 12", nil, nil, nil)
+
+        // Close direct handle before opening DatabaseReader.
+        sqlite3_close(db)
+        db = nil
+
+        let reader = try DatabaseReader(path: dbPath)
+        let threads = reader.chatThreads(limit: 10)
+        XCTAssertGreaterThanOrEqual(threads.count, 2, "Should backfill one thread per legacy date")
+
+        // Ensure migrated messages are addressable by thread_id and no row remains at thread_id=0.
+        var dbCheck: OpaquePointer?
+        XCTAssertEqual(sqlite3_open(dbPath.path, &dbCheck), SQLITE_OK)
+        defer { sqlite3_close(dbCheck) }
+
+        var stmt: OpaquePointer?
+        XCTAssertEqual(sqlite3_prepare_v2(dbCheck, "SELECT COUNT(*) FROM chat_messages WHERE thread_id = 0", -1, &stmt, nil), SQLITE_OK)
+        defer { sqlite3_finalize(stmt) }
+        XCTAssertEqual(sqlite3_step(stmt), SQLITE_ROW)
+        XCTAssertEqual(sqlite3_column_int(stmt, 0), 0)
+    }
+
     // MARK: - Transaction Rollback
 
     @MainActor

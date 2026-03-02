@@ -39,7 +39,7 @@ public class DatabaseReader {
     }
 
     /// Current schema version. Bump this when adding new migrations.
-    private static let schemaVersion = 12
+    private static let schemaVersion = 13
 
     /// Apply schema migrations so the dashboard works even if the CLI hasn't run yet.
     /// Uses PRAGMA user_version to track which migrations have already run.
@@ -231,6 +231,78 @@ public class DatabaseReader {
             }
             sqlite3_exec(db, "CREATE INDEX IF NOT EXISTS idx_granola_meetings_date ON granola_meetings(meeting_date)", nil, nil, nil)
             sqlite3_exec(db, "CREATE INDEX IF NOT EXISTS idx_granola_meetings_granola_id ON granola_meetings(granola_id)", nil, nil, nil)
+        }
+
+        if currentVersion < 13 {
+            let threadsSql = """
+            CREATE TABLE IF NOT EXISTS chat_threads (
+                id                INTEGER PRIMARY KEY AUTOINCREMENT,
+                title             TEXT NOT NULL DEFAULT '',
+                summary           TEXT NOT NULL DEFAULT '',
+                context_date      TEXT,
+                created_at        TEXT NOT NULL,
+                updated_at        TEXT NOT NULL,
+                last_message_at   TEXT,
+                message_count     INTEGER NOT NULL DEFAULT 0,
+                is_archived       INTEGER NOT NULL DEFAULT 0
+            )
+            """
+            if !execMigration(threadsSql, label: "13a: create chat_threads table") {
+                migrationFailed = true
+            }
+            sqlite3_exec(db, "CREATE INDEX IF NOT EXISTS idx_chat_threads_last_message_at ON chat_threads(last_message_at)", nil, nil, nil)
+            sqlite3_exec(db, "CREATE INDEX IF NOT EXISTS idx_chat_threads_updated_at ON chat_threads(updated_at)", nil, nil, nil)
+
+            if !execMigration("ALTER TABLE chat_messages ADD COLUMN thread_id INTEGER NOT NULL DEFAULT 0",
+                              label: "13b: add thread_id to chat_messages", ignoreDuplicate: true) {
+                migrationFailed = true
+            }
+
+            let backfillThreadsSql = """
+            INSERT INTO chat_threads (title, summary, context_date, created_at, updated_at, last_message_at, message_count, is_archived)
+            SELECT 'Chat ' || date, '', date, MIN(timestamp), MAX(timestamp), MAX(timestamp), COUNT(*), 0
+            FROM chat_messages
+            WHERE thread_id = 0
+            GROUP BY date
+            """
+            if !execMigration(backfillThreadsSql, label: "13c: backfill chat_threads from legacy chat_messages") {
+                migrationFailed = true
+            }
+
+            let backfillThreadIdsSql = """
+            UPDATE chat_messages
+            SET thread_id = (
+                SELECT t.id
+                FROM chat_threads t
+                WHERE t.context_date = chat_messages.date
+                ORDER BY t.id DESC
+                LIMIT 1
+            )
+            WHERE thread_id = 0
+            """
+            if !execMigration(backfillThreadIdsSql, label: "13d: backfill thread_id on chat_messages") {
+                migrationFailed = true
+            }
+
+            let fallbackThreadSql = """
+            INSERT INTO chat_threads (title, summary, context_date, created_at, updated_at, last_message_at, message_count, is_archived)
+            SELECT 'Legacy Chat', '', NULL, datetime('now'), datetime('now'), datetime('now'), 0, 0
+            WHERE NOT EXISTS (SELECT 1 FROM chat_threads WHERE title = 'Legacy Chat')
+            """
+            if !execMigration(fallbackThreadSql, label: "13e: ensure fallback legacy chat thread") {
+                migrationFailed = true
+            }
+
+            let fallbackAssignSql = """
+            UPDATE chat_messages
+            SET thread_id = (SELECT id FROM chat_threads WHERE title = 'Legacy Chat' ORDER BY id DESC LIMIT 1)
+            WHERE thread_id = 0
+            """
+            if !execMigration(fallbackAssignSql, label: "13f: assign fallback thread_id") {
+                migrationFailed = true
+            }
+
+            sqlite3_exec(db, "CREATE INDEX IF NOT EXISTS idx_chat_messages_thread_id ON chat_messages(thread_id)", nil, nil, nil)
         }
 
         // Only bump the version if all migrations succeeded — failed migrations
@@ -623,11 +695,94 @@ public class DatabaseReader {
 
     // MARK: - Chat Messages
 
+    public func chatThreads(limit: Int = 100) -> [ChatThreadRecord] {
+        let sql = """
+        SELECT id, title, summary, context_date, created_at, updated_at, last_message_at, message_count, is_archived
+        FROM chat_threads
+        ORDER BY COALESCE(last_message_at, updated_at) DESC
+        LIMIT ?
+        """
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return [] }
+        defer { sqlite3_finalize(stmt) }
+        sqlite3_bind_int(stmt, 1, Int32(limit))
+
+        var results: [ChatThreadRecord] = []
+        while sqlite3_step(stmt) == SQLITE_ROW {
+            let record = ChatThreadRecord(
+                id: sqlite3_column_int64(stmt, 0),
+                title: sqlite3_column_text(stmt, 1).map({ String(cString: $0) }) ?? "",
+                summary: sqlite3_column_text(stmt, 2).map({ String(cString: $0) }) ?? "",
+                contextDate: sqlite3_column_text(stmt, 3).map({ String(cString: $0) }),
+                createdAt: sqlite3_column_text(stmt, 4).flatMap({ SharedFormatters.iso8601.date(from: String(cString: $0)) }) ?? Date(),
+                updatedAt: sqlite3_column_text(stmt, 5).flatMap({ SharedFormatters.iso8601.date(from: String(cString: $0)) }) ?? Date(),
+                lastMessageAt: sqlite3_column_text(stmt, 6).flatMap({ SharedFormatters.iso8601.date(from: String(cString: $0)) }),
+                messageCount: Int(sqlite3_column_int(stmt, 7)),
+                isArchived: sqlite3_column_int(stmt, 8) != 0
+            )
+            results.append(record)
+        }
+        return results
+    }
+
+    public func chatThread(id: Int64) -> ChatThreadRecord? {
+        let sql = """
+        SELECT id, title, summary, context_date, created_at, updated_at, last_message_at, message_count, is_archived
+        FROM chat_threads
+        WHERE id = ?
+        LIMIT 1
+        """
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return nil }
+        defer { sqlite3_finalize(stmt) }
+        sqlite3_bind_int64(stmt, 1, id)
+
+        guard sqlite3_step(stmt) == SQLITE_ROW else { return nil }
+        return ChatThreadRecord(
+            id: sqlite3_column_int64(stmt, 0),
+            title: sqlite3_column_text(stmt, 1).map({ String(cString: $0) }) ?? "",
+            summary: sqlite3_column_text(stmt, 2).map({ String(cString: $0) }) ?? "",
+            contextDate: sqlite3_column_text(stmt, 3).map({ String(cString: $0) }),
+            createdAt: sqlite3_column_text(stmt, 4).flatMap({ SharedFormatters.iso8601.date(from: String(cString: $0)) }) ?? Date(),
+            updatedAt: sqlite3_column_text(stmt, 5).flatMap({ SharedFormatters.iso8601.date(from: String(cString: $0)) }) ?? Date(),
+            lastMessageAt: sqlite3_column_text(stmt, 6).flatMap({ SharedFormatters.iso8601.date(from: String(cString: $0)) }),
+            messageCount: Int(sqlite3_column_int(stmt, 7)),
+            isArchived: sqlite3_column_int(stmt, 8) != 0
+        )
+    }
+
+    public func chatMessages(threadId: Int64) -> [ChatMessageRecord] {
+        let sql = """
+        SELECT id, thread_id, date, role, content, timestamp
+        FROM chat_messages
+        WHERE thread_id = ?
+        ORDER BY timestamp ASC
+        """
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return [] }
+        defer { sqlite3_finalize(stmt) }
+        sqlite3_bind_int64(stmt, 1, threadId)
+
+        var results: [ChatMessageRecord] = []
+        while sqlite3_step(stmt) == SQLITE_ROW {
+            let record = ChatMessageRecord(
+                id: sqlite3_column_int64(stmt, 0),
+                threadId: sqlite3_column_int64(stmt, 1),
+                date: sqlite3_column_text(stmt, 2).map({ String(cString: $0) }) ?? "",
+                role: sqlite3_column_text(stmt, 3).map({ String(cString: $0) }) ?? "user",
+                content: sqlite3_column_text(stmt, 4).map({ String(cString: $0) }) ?? "",
+                timestamp: sqlite3_column_text(stmt, 5).flatMap({ SharedFormatters.iso8601.date(from: String(cString: $0)) }) ?? Date()
+            )
+            results.append(record)
+        }
+        return results
+    }
+
     public func chatMessages(for date: Date) -> [ChatMessageRecord] {
         let dateStr = SharedFormatters.dayFormatter.string(from: date)
 
         let sql = """
-        SELECT id, date, role, content, timestamp
+        SELECT id, thread_id, date, role, content, timestamp
         FROM chat_messages
         WHERE date = ?
         ORDER BY timestamp ASC
@@ -642,10 +797,11 @@ public class DatabaseReader {
         while sqlite3_step(stmt) == SQLITE_ROW {
             let record = ChatMessageRecord(
                 id: sqlite3_column_int64(stmt, 0),
-                date: sqlite3_column_text(stmt, 1).map({ String(cString: $0) }) ?? dateStr,
-                role: sqlite3_column_text(stmt, 2).map({ String(cString: $0) }) ?? "user",
-                content: sqlite3_column_text(stmt, 3).map({ String(cString: $0) }) ?? "",
-                timestamp: sqlite3_column_text(stmt, 4).flatMap({ SharedFormatters.iso8601.date(from: String(cString: $0)) }) ?? Date()
+                threadId: sqlite3_column_int64(stmt, 1),
+                date: sqlite3_column_text(stmt, 2).map({ String(cString: $0) }) ?? dateStr,
+                role: sqlite3_column_text(stmt, 3).map({ String(cString: $0) }) ?? "user",
+                content: sqlite3_column_text(stmt, 4).map({ String(cString: $0) }) ?? "",
+                timestamp: sqlite3_column_text(stmt, 5).flatMap({ SharedFormatters.iso8601.date(from: String(cString: $0)) }) ?? Date()
             )
             results.append(record)
         }
@@ -803,13 +959,14 @@ public class DatabaseReader {
         sqlite3_exec(db, "DELETE FROM activities", nil, nil, nil)
         sqlite3_exec(db, "DELETE FROM daily_summaries", nil, nil, nil)
         sqlite3_exec(db, "DELETE FROM chat_messages", nil, nil, nil)
+        sqlite3_exec(db, "DELETE FROM chat_threads", nil, nil, nil)
         sqlite3_exec(db, "DELETE FROM stubs_content", nil, nil, nil)
         sqlite3_exec(db, "DELETE FROM ocr_digests", nil, nil, nil)
         sqlite3_exec(db, "DELETE FROM file_events", nil, nil, nil)
         sqlite3_exec(db, "DELETE FROM habits_analysis", nil, nil, nil)
         sqlite3_exec(db, "DELETE FROM granola_meetings", nil, nil, nil)
 
-        Logger.info("Cleared all data from 11 tables (\(paths.count) screenshot files)")
+        Logger.info("Cleared all data from 12 tables (\(paths.count) screenshot files)")
         return paths
     }
 

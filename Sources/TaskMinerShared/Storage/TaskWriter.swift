@@ -211,12 +211,16 @@ public class TaskWriter {
 
     // MARK: - Chat Messages
 
-    /// Insert a single chat message record into the database.
+    /// Create a chat thread and return its row ID.
     @discardableResult
-    public func insertChatMessage(_ message: ChatMessageRecord) throws -> Int64 {
+    public func createChatThread(
+        title: String,
+        summary: String = "",
+        contextDate: String? = nil
+    ) throws -> Int64 {
         let sql = """
-        INSERT INTO chat_messages (date, role, content, timestamp)
-        VALUES (?, ?, ?, ?)
+        INSERT INTO chat_threads (title, summary, context_date, created_at, updated_at, last_message_at, message_count, is_archived)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         """
         var stmt: OpaquePointer?
         guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
@@ -224,10 +228,104 @@ public class TaskWriter {
         }
         defer { sqlite3_finalize(stmt) }
 
-        sqliteBindText(stmt, 1, message.date)
-        sqliteBindText(stmt, 2, message.role)
-        sqliteBindText(stmt, 3, message.content)
-        sqliteBindText(stmt, 4, SharedFormatters.iso8601.string(from: message.timestamp))
+        let now = SharedFormatters.iso8601.string(from: Date())
+        sqliteBindText(stmt, 1, title)
+        sqliteBindText(stmt, 2, summary)
+        if let contextDate {
+            sqliteBindText(stmt, 3, contextDate)
+        } else {
+            sqlite3_bind_null(stmt, 3)
+        }
+        sqliteBindText(stmt, 4, now)
+        sqliteBindText(stmt, 5, now)
+        sqlite3_bind_null(stmt, 6)
+        sqlite3_bind_int(stmt, 7, 0)
+        sqlite3_bind_int(stmt, 8, 0)
+
+        guard sqlite3_step(stmt) == SQLITE_DONE else {
+            throw DatabaseError.executionFailed(lastError)
+        }
+        return sqlite3_last_insert_rowid(db)
+    }
+
+    /// Update chat thread summary.
+    public func updateChatThreadSummary(threadId: Int64, summary: String) throws {
+        let sql = "UPDATE chat_threads SET summary = ?, updated_at = ? WHERE id = ?"
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
+            throw DatabaseError.executionFailed(lastError)
+        }
+        defer { sqlite3_finalize(stmt) }
+
+        sqliteBindText(stmt, 1, summary)
+        sqliteBindText(stmt, 2, SharedFormatters.iso8601.string(from: Date()))
+        sqlite3_bind_int64(stmt, 3, threadId)
+
+        guard sqlite3_step(stmt) == SQLITE_DONE else {
+            throw DatabaseError.executionFailed(lastError)
+        }
+    }
+
+    /// Rename chat thread title.
+    public func renameChatThread(threadId: Int64, title: String) throws {
+        let sql = "UPDATE chat_threads SET title = ?, updated_at = ? WHERE id = ?"
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
+            throw DatabaseError.executionFailed(lastError)
+        }
+        defer { sqlite3_finalize(stmt) }
+
+        sqliteBindText(stmt, 1, title)
+        sqliteBindText(stmt, 2, SharedFormatters.iso8601.string(from: Date()))
+        sqlite3_bind_int64(stmt, 3, threadId)
+
+        guard sqlite3_step(stmt) == SQLITE_DONE else {
+            throw DatabaseError.executionFailed(lastError)
+        }
+    }
+
+    /// Update activity metadata for a chat thread.
+    public func touchChatThread(threadId: Int64, lastMessageAt: Date, messageCount: Int) throws {
+        let sql = """
+        UPDATE chat_threads
+        SET last_message_at = ?, message_count = ?, updated_at = ?
+        WHERE id = ?
+        """
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
+            throw DatabaseError.executionFailed(lastError)
+        }
+        defer { sqlite3_finalize(stmt) }
+
+        let now = SharedFormatters.iso8601.string(from: Date())
+        sqliteBindText(stmt, 1, SharedFormatters.iso8601.string(from: lastMessageAt))
+        sqlite3_bind_int(stmt, 2, Int32(messageCount))
+        sqliteBindText(stmt, 3, now)
+        sqlite3_bind_int64(stmt, 4, threadId)
+
+        guard sqlite3_step(stmt) == SQLITE_DONE else {
+            throw DatabaseError.executionFailed(lastError)
+        }
+    }
+
+    /// Insert a single chat message record into the database.
+    @discardableResult
+    public func insertChatMessage(_ message: ChatMessageRecord) throws -> Int64 {
+        let sql = """
+        INSERT INTO chat_messages (thread_id, date, role, content, timestamp)
+        VALUES (?, ?, ?, ?, ?)
+        """
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
+            throw DatabaseError.executionFailed(lastError)
+        }
+        defer { sqlite3_finalize(stmt) }
+
+        sqlite3_bind_int64(stmt, 1, message.threadId)
+        sqliteBindText(stmt, 2, message.date)
+        sqliteBindText(stmt, 3, message.role)
+        sqliteBindText(stmt, 4, message.content)
+        sqliteBindText(stmt, 5, SharedFormatters.iso8601.string(from: message.timestamp))
 
         guard sqlite3_step(stmt) == SQLITE_DONE else {
             throw DatabaseError.executionFailed(lastError)
@@ -248,6 +346,50 @@ public class TaskWriter {
 
         guard sqlite3_step(stmt) == SQLITE_DONE else {
             throw DatabaseError.executionFailed(lastError)
+        }
+    }
+
+    /// Delete all messages in a given thread.
+    public func deleteChatMessages(threadId: Int64) throws {
+        let sql = "DELETE FROM chat_messages WHERE thread_id = ?"
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
+            throw DatabaseError.executionFailed(lastError)
+        }
+        defer { sqlite3_finalize(stmt) }
+
+        sqlite3_bind_int64(stmt, 1, threadId)
+
+        guard sqlite3_step(stmt) == SQLITE_DONE else {
+            throw DatabaseError.executionFailed(lastError)
+        }
+    }
+
+    /// Delete a chat thread and all of its messages.
+    public func deleteChatThread(threadId: Int64) throws {
+        guard sqlite3_exec(db, "BEGIN TRANSACTION", nil, nil, nil) == SQLITE_OK else {
+            throw DatabaseError.executionFailed("BEGIN TRANSACTION failed: \(lastError)")
+        }
+        do {
+            try deleteChatMessages(threadId: threadId)
+
+            let threadSql = "DELETE FROM chat_threads WHERE id = ?"
+            var stmt: OpaquePointer?
+            guard sqlite3_prepare_v2(db, threadSql, -1, &stmt, nil) == SQLITE_OK else {
+                throw DatabaseError.executionFailed(lastError)
+            }
+            defer { sqlite3_finalize(stmt) }
+            sqlite3_bind_int64(stmt, 1, threadId)
+            guard sqlite3_step(stmt) == SQLITE_DONE else {
+                throw DatabaseError.executionFailed(lastError)
+            }
+
+            guard sqlite3_exec(db, "COMMIT", nil, nil, nil) == SQLITE_OK else {
+                throw DatabaseError.executionFailed("COMMIT failed: \(lastError)")
+            }
+        } catch {
+            sqlite3_exec(db, "ROLLBACK", nil, nil, nil)
+            throw error
         }
     }
 

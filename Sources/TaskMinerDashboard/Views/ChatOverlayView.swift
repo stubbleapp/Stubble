@@ -22,19 +22,35 @@ struct ChatOverlayView: View {
         ]
     }
 
-    /// Derive a conversation title from the first user message.
-    private var conversationTitle: String? {
-        guard let firstUserMessage = viewModel.chatMessages.first(where: { $0.role == .user }) else {
-            return nil
+    private var activeThread: ChatThread? {
+        guard let activeId = viewModel.activeThreadId else { return nil }
+        return viewModel.chatThreads.first(where: { $0.id == activeId })
+    }
+
+    private var conversationTitle: String {
+        if let thread = activeThread {
+            let summary = thread.summary.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !summary.isEmpty { return summary }
+
+            let title = thread.title.trimmingCharacters(in: .whitespacesAndNewlines)
+            // Hide legacy migration titles like "Chat 2026-..." in favor of neutral label.
+            if title.hasPrefix("Chat ") || title == "New Chat" || title.isEmpty {
+                return "Untitled Chat"
+            }
+            return title
         }
-        let text = firstUserMessage.content.trimmingCharacters(in: .whitespacesAndNewlines)
-        if text.count <= 40 { return text }
-        let truncated = text.prefix(37)
-        // Avoid cutting mid-word — find the last space
-        if let lastSpace = truncated.lastIndex(of: " ") {
-            return String(truncated[truncated.startIndex..<lastSpace]) + "…"
+        return "New Chat"
+    }
+
+    private func threadChipTitle(_ thread: ChatThread) -> String {
+        let summary = thread.summary.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !summary.isEmpty { return summary }
+
+        let title = thread.title.trimmingCharacters(in: .whitespacesAndNewlines)
+        if title.hasPrefix("Chat ") || title == "New Chat" || title.isEmpty {
+            return "Untitled Chat"
         }
-        return String(truncated) + "…"
+        return title
     }
 
     var body: some View {
@@ -48,6 +64,7 @@ struct ChatOverlayView: View {
                         withAnimation(.spring(response: 0.3, dampingFraction: 0.85)) {
                             isExpanded = false
                         }
+                        viewModel.notifyChatPanelCollapsed()
                     }
                     .transition(.opacity)
             }
@@ -87,11 +104,23 @@ struct ChatOverlayView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
         .animation(.spring(response: 0.35, dampingFraction: 0.85), value: isExpanded)
+        .onAppear {
+            if viewModel.chatThreads.isEmpty {
+                viewModel.loadChatThreads()
+            }
+        }
         .onChange(of: viewModel.pendingChatQuestion) { _, question in
             guard let question, !question.isEmpty else { return }
             inputText = question
             viewModel.pendingChatQuestion = nil
             sendMessage()
+        }
+        .onChange(of: viewModel.shouldExpandChatPanel) { _, shouldExpand in
+            guard shouldExpand else { return }
+            viewModel.shouldExpandChatPanel = false
+            withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
+                isExpanded = true
+            }
         }
     }
 
@@ -136,6 +165,7 @@ struct ChatOverlayView: View {
                 withAnimation(.spring(response: 0.3, dampingFraction: 0.85)) {
                     isExpanded = false
                 }
+                viewModel.notifyChatPanelCollapsed()
             } label: {
                 Image(systemName: "chevron.down")
                     .font(.system(size: 11, weight: .semibold))
@@ -171,22 +201,65 @@ struct ChatOverlayView: View {
 
     private var messagePanelContent: some View {
         VStack(spacing: 0) {
-            // Header
+            // Header: title dropdown + action buttons
             HStack(spacing: 8) {
                 ActivityHaloDot(color: Theme.accent, size: 14)
 
-                if let title = conversationTitle {
-                    Text(title)
+                // Title as dropdown (thread switcher)
+                if viewModel.chatThreads.isEmpty {
+                    Text(conversationTitle)
                         .font(.system(size: 12, weight: .medium))
                         .foregroundStyle(Theme.textSecondary)
                         .lineLimit(1)
+                } else {
+                    Menu {
+                        ForEach(viewModel.chatThreads) { thread in
+                            Button {
+                                viewModel.switchToThread(thread.id)
+                            } label: {
+                                HStack {
+                                    Text(threadChipTitle(thread))
+                                        .lineLimit(1)
+                                    if thread.id == viewModel.activeThreadId {
+                                        Image(systemName: "checkmark")
+                                            .font(.system(size: 10, weight: .semibold))
+                                    }
+                                }
+                            }
+                        }
+                    } label: {
+                        Text(conversationTitle)
+                            .font(.system(size: 12, weight: .medium))
+                            .foregroundStyle(Theme.textSecondary)
+                            .lineLimit(1)
+                    }
+                    .menuStyle(.borderlessButton)
+                    .fixedSize(horizontal: true, vertical: false)
                 }
 
                 Spacer()
 
-                if !viewModel.chatMessages.isEmpty {
+                // New Chat
+                Button {
+                    viewModel.createNewChatThread()
+                } label: {
+                    Image(systemName: "plus")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(Theme.textMuted.opacity(0.6))
+                        .frame(width: 22, height: 22)
+                        .background(Theme.chatSeparator)
+                        .clipShape(Circle())
+                }
+                .buttonStyle(.plain)
+                .disabled(viewModel.isCreatingThread)
+                .help("New chat")
+
+                // Delete
+                if activeThread != nil {
                     Button {
-                        viewModel.clearChat()
+                        if let threadId = viewModel.activeThreadId {
+                            viewModel.deleteThread(threadId)
+                        }
                     } label: {
                         Image(systemName: "trash")
                             .font(.system(size: 10))
@@ -196,13 +269,15 @@ struct ChatOverlayView: View {
                             .clipShape(Circle())
                     }
                     .buttonStyle(.plain)
-                    .help("Clear chat")
+                    .help("Delete chat")
                 }
 
+                // Close
                 Button {
                     withAnimation(.spring(response: 0.3, dampingFraction: 0.85)) {
                         isExpanded = false
                     }
+                    viewModel.notifyChatPanelCollapsed()
                 } label: {
                     Image(systemName: "xmark")
                         .font(.system(size: 10, weight: .semibold))
@@ -311,21 +386,36 @@ struct ChatOverlayView: View {
                         errorRow(error)
                             .id("error")
                     }
+
+                    // Scroll anchor at the bottom
+                    Color.clear
+                        .frame(height: 1)
+                        .id("bottom")
                 }
                 .padding(.horizontal, 14)
                 .padding(.vertical, 10)
+            }
+            .onAppear {
+                scrollToBottom(proxy: proxy)
             }
             .onChange(of: viewModel.chatMessages.count) { _, _ in
                 scrollToBottom(proxy: proxy)
             }
             .onChange(of: viewModel.chatMessages.last?.content) { _, _ in
-                if let last = viewModel.chatMessages.last {
-                    proxy.scrollTo(last.id, anchor: .bottom)
-                }
+                // Scroll as streaming content arrives
+                scrollToBottom(proxy: proxy)
             }
             .onChange(of: viewModel.isChatLoading) { _, loading in
                 if loading {
                     scrollToBottom(proxy: proxy)
+                }
+            }
+            .onChange(of: isExpanded) { _, expanded in
+                if expanded {
+                    // Scroll to bottom when chat panel expands
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                        scrollToBottom(proxy: proxy)
+                    }
                 }
             }
         }
@@ -398,10 +488,8 @@ struct ChatOverlayView: View {
     }
 
     private func scrollToBottom(proxy: ScrollViewProxy) {
-        withAnimation(.easeOut(duration: 0.2)) {
-            if let last = viewModel.chatMessages.last {
-                proxy.scrollTo(last.id, anchor: .bottom)
-            }
+        withAnimation(.easeOut(duration: 0.15)) {
+            proxy.scrollTo("bottom", anchor: .bottom)
         }
     }
 }
