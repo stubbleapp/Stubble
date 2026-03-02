@@ -93,11 +93,10 @@ final class DashboardViewModel {
     var chatMessages: [ChatMessage] = []
     var isChatLoading = false
     var chatError: String?
-    /// The name of the currently active screen/tab (e.g. "Timeline", "Stubs", "Activities").
+    /// The name of the currently active screen/tab (e.g. "Day", "Chat", "Habits").
     /// Used to give the chat assistant context about what the user is looking at.
-    var currentScreen: String = "Stubs"
-    /// Set by the Stubs page to trigger a chat question. ChatOverlayView observes this,
-    /// expands, sends the message, and clears it.
+    var currentScreen: String = "Chat"
+    /// Set by ChatTabView or ChatOverlayView to trigger a chat question.
     var pendingChatQuestion: String?
 
     // Habits (cross-day analysis)

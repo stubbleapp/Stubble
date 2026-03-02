@@ -20,12 +20,12 @@ struct ContentView: View {
     /// NSEvent monitor reference so we can remove it on disappear.
     @State private var flagsMonitor: Any?
 
-    private let stubsTabIndex = 1
+    private let chatTabIndex = 1
     private let habitsTabIndex = 2
     private let logTabIndex = 3
 
     private var tabItems: [String] {
-        var items = ["Day", "Stubs", "Habits"]
+        var items = ["Day", "Chat", "Habits"]
         if showDebugTabs {
             items.append("Log")
         }
@@ -47,8 +47,8 @@ struct ContentView: View {
                 .background(Theme.statusError.opacity(0.12))
             }
 
-            // Hide date selector on Stubs (day-agnostic) and Habits (cross-day analysis)
-            if selectedTab != stubsTabIndex && selectedTab != habitsTabIndex {
+            // Hide date selector on Chat (day-agnostic) and Habits (cross-day analysis)
+            if selectedTab != chatTabIndex && selectedTab != habitsTabIndex {
                 DaySelectorView()
                     .background(Theme.secondaryBackground)
 
@@ -62,14 +62,14 @@ struct ContentView: View {
                 case 0:
                     TaskTimelineView()
                 case 1:
-                    RecommendationsView()
+                    ChatTabView()
                 case 2:
                     HabitsView()
                 default:
                     ActivityLogView()
                 }
 
-                // Single chat overlay shared across all tabs (except Log)
+                // Chat overlay shared across all tabs (except Log)
                 if selectedTab < logTabIndex {
                     ChatOverlayView()
                 }
@@ -125,13 +125,13 @@ struct ContentView: View {
                     showDebugTabs = false
                 }
             }
-            // Stubs is day-agnostic — always show today's recommendations
-            if newTab == stubsTabIndex && !viewModel.isViewingToday {
+            // Chat is day-agnostic — always show today's recommendations
+            if newTab == chatTabIndex && !viewModel.isViewingToday {
                 viewModel.selectDate(Date())
             }
             // Keep ViewModel's currentScreen in sync so chat context knows which tab is active
-            let screenNames = ["Day", "Stubs", "Habits", "Log"]
-            viewModel.currentScreen = newTab < screenNames.count ? screenNames[newTab] : "Stubs"
+            let screenNames = ["Day", "Chat", "Habits", "Log"]
+            viewModel.currentScreen = newTab < screenNames.count ? screenNames[newTab] : "Chat"
         }
     }
 }

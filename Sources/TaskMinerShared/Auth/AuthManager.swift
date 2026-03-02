@@ -102,32 +102,70 @@ public final class AuthManager: @unchecked Sendable {
         let codeVerifier = Self.generateCodeVerifier()
         let codeChallenge = Self.generateCodeChallenge(from: codeVerifier)
 
-        let state = UUID().uuidString
-
+        // Do NOT pass a client `state` parameter — Supabase GoTrue encodes its own
+        // flow_state_id into the state sent to the OAuth provider. A client-provided
+        // state can override it, causing "OAuth state not found or expired" on callback.
+        // CSRF protection is provided by the PKCE code verifier binding.
         var components = URLComponents(string: "\(StubbleAPIConfig.supabaseURL)/auth/v1/authorize")
         components?.queryItems = [
             URLQueryItem(name: "provider", value: "google"),
             URLQueryItem(name: "redirect_to", value: StubbleAPIConfig.callbackURL),
             URLQueryItem(name: "code_challenge", value: codeChallenge),
             URLQueryItem(name: "code_challenge_method", value: "S256"),
-            URLQueryItem(name: "state", value: state),
         ]
 
         guard let url = components?.url else { return nil }
         pendingCodeVerifier = codeVerifier
-        pendingState = state
+        pendingState = nil
         return (url, codeVerifier)
     }
 
     /// Extract the auth code from an OAuth callback URL.
-    /// Returns nil if the URL is not an auth callback.
+    /// Returns nil if the URL is not an auth callback or if the code is missing.
+    /// Checks both query parameters and fragment (Supabase may use either depending on flow type).
     public static func extractAuthCode(from url: URL) -> String? {
         guard url.scheme == StubbleAPIConfig.callbackScheme,
               url.host == "auth-callback",
-              let components = URLComponents(url: url, resolvingAgainstBaseURL: false),
-              let code = components.queryItems?.first(where: { $0.name == "code" })?.value
+              let components = URLComponents(url: url, resolvingAgainstBaseURL: false)
         else { return nil }
-        return code
+
+        // Check query parameters first (standard PKCE flow)
+        if let code = components.queryItems?.first(where: { $0.name == "code" })?.value {
+            return code
+        }
+
+        // Fall back to fragment parameters (some Supabase configurations return code in fragment)
+        if let fragment = components.fragment {
+            let fragmentComponents = URLComponents(string: "?\(fragment)")
+            if let code = fragmentComponents?.queryItems?.first(where: { $0.name == "code" })?.value {
+                return code
+            }
+        }
+
+        return nil
+    }
+
+    /// Extract an error description from an OAuth callback URL (Supabase returns these on failure).
+    public static func extractAuthError(from url: URL) -> String? {
+        guard let components = URLComponents(url: url, resolvingAgainstBaseURL: false) else { return nil }
+
+        // Check both query params and fragment params — Supabase may use either
+        var items = components.queryItems ?? []
+        if let fragment = components.fragment {
+            // Parse fragment as query items (e.g., #error=...&error_description=...)
+            let fragmentComponents = URLComponents(string: "?\(fragment)")
+            items.append(contentsOf: fragmentComponents?.queryItems ?? [])
+        }
+
+        let errorDesc = items.first(where: { $0.name == "error_description" })?.value
+        let error = items.first(where: { $0.name == "error" })?.value
+
+        if let errorDesc {
+            return errorDesc.replacingOccurrences(of: "+", with: " ")
+        } else if let error {
+            return error.replacingOccurrences(of: "+", with: " ")
+        }
+        return nil
     }
 
     /// Convenience method for `onOpenURL` — extracts the auth code and exchanges it

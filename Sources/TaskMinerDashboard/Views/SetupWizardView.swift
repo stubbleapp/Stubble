@@ -326,8 +326,7 @@ private struct SignInPage: View {
                                     .controlSize(.small)
                                     .tint(.white)
                             } else {
-                                Image(systemName: "g.circle.fill")
-                                    .font(.system(size: 18))
+                                GoogleLogo(size: 18)
                             }
                             Text(isSigningIn ? "Signing in..." : "Sign in with Google")
                                 .font(.system(size: 14, weight: .semibold))
@@ -508,10 +507,20 @@ private struct SignInPage: View {
                     return
                 }
 
-                guard let callbackURL = callbackURL,
-                      let code = AuthManager.extractAuthCode(from: callbackURL)
-                else {
-                    signInError = "No authorization code received."
+                guard let callbackURL = callbackURL else {
+                    signInError = "No callback received from authentication."
+                    return
+                }
+
+                // Check if Supabase returned an error in the callback
+                if let authError = AuthManager.extractAuthError(from: callbackURL) {
+                    signInError = authError
+                    return
+                }
+
+                guard let code = AuthManager.extractAuthCode(from: callbackURL) else {
+                    Logger.error("OAuth callback URL missing code: \(callbackURL.absoluteString)")
+                    signInError = "Authentication completed but no authorization code was returned. Please try again."
                     return
                 }
 
@@ -529,7 +538,7 @@ private struct SignInPage: View {
         }
 
         authSession!.presentationContextProvider = AuthContextProvider.shared
-        authSession!.prefersEphemeralWebBrowserSession = false
+        authSession!.prefersEphemeralWebBrowserSession = true
 
         if !authSession!.start() {
             isSigningIn = false

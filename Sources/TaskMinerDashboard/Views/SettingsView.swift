@@ -90,8 +90,8 @@ struct SettingsView: View {
     // counter that increments on .authStateChanged to trigger SwiftUI re-render.
     @State private var authStateVersion: Int = 0
 
-    // Save
-    @State private var saved = false
+    /// Suppresses `.onChange` persistence during initial `loadSettings()`.
+    @State private var isLoading = true
 
     var body: some View {
         HStack(spacing: 0) {
@@ -145,38 +145,36 @@ struct SettingsView: View {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
-        .toolbar {
-            ToolbarItem(placement: .confirmationAction) {
-                HStack(spacing: 8) {
-                    if saved {
-                        HStack(spacing: 3) {
-                            Image(systemName: "checkmark")
-                                .font(.system(size: 9, weight: .bold))
-                            Text("Saved")
-                                .font(.system(size: 11, weight: .medium))
-                        }
-                        .foregroundStyle(Theme.statusActive)
-                        .transition(.opacity.combined(with: .scale(scale: 0.9)))
-                    }
-
-                    Button {
-                        saveAll()
-                    } label: {
-                        Text("Save")
-                            .font(.system(size: 12, weight: .medium))
-                            .foregroundStyle(Theme.textPrimary)
-                            .padding(.horizontal, 14)
-                            .padding(.vertical, 5)
-                    }
-                    .buttonStyle(.plain)
-                    .modifier(LiquidGlassPillModifier())
-                }
-                .animation(.easeInOut(duration: 0.2), value: saved)
-            }
-        }
+        .navigationTitle("Settings")
         .background(Theme.primaryBackground)
         .frame(width: 620, height: 480)
-        .onAppear { loadAll() }
+        .onAppear { loadSettings() }
+        .onChange(of: appearanceMode) {
+            guard !isLoading else { return }
+            SettingsManager.shared.appearanceMode = appearanceMode
+            NotificationCenter.default.post(name: .appearanceModeChanged, object: nil)
+        }
+        .onChange(of: granularity) {
+            guard !isLoading else { return }
+            SettingsManager.shared.granularity = granularity
+        }
+        .onChange(of: minAwayMinutes) {
+            guard !isLoading else { return }
+            SettingsManager.shared.minAwayMinutes = minAwayMinutes
+        }
+        .onChange(of: analyticsEnabled) {
+            guard !isLoading else { return }
+            SettingsManager.shared.analyticsEnabled = analyticsEnabled
+        }
+        .onChange(of: apiKey) {
+            guard !isLoading else { return }
+            viewModel.updateGeminiKey(apiKey)
+        }
+        .onChange(of: customPrompt) {
+            guard !isLoading else { return }
+            let trimmed = customPrompt.trimmingCharacters(in: .whitespacesAndNewlines)
+            SettingsManager.shared.customPrompt = trimmed.isEmpty ? nil : trimmed
+        }
         .onReceive(NotificationCenter.default.publisher(for: .authStateChanged)) { _ in
             // Bump version to force SwiftUI to re-evaluate accountPane
             // (AuthManager is not @Observable, so direct reads are stale).
@@ -196,9 +194,10 @@ struct SettingsView: View {
         }
     }
 
-    // MARK: - Load & Save
+    // MARK: - Load Settings
 
-    private func loadAll() {
+    private func loadSettings() {
+        isLoading = true
         apiKey = SettingsManager.shared.geminiApiKey ?? ""
         customPrompt = SettingsManager.shared.customPrompt ?? ""
         granularity = SettingsManager.shared.granularity
@@ -207,26 +206,7 @@ struct SettingsView: View {
         exclusions = SettingsManager.shared.exclusions
         analyticsEnabled = SettingsManager.shared.analyticsEnabled
         loadMemoryEntries()
-    }
-
-    private func saveAll() {
-        viewModel.updateGeminiKey(apiKey)
-        let trimmedPrompt = customPrompt.trimmingCharacters(in: .whitespacesAndNewlines)
-        SettingsManager.shared.customPrompt = trimmedPrompt.isEmpty ? nil : trimmedPrompt
-        SettingsManager.shared.granularity = granularity
-        SettingsManager.shared.minAwayMinutes = minAwayMinutes
-        SettingsManager.shared.appearanceMode = appearanceMode
-        SettingsManager.shared.exclusions = exclusions
-        SettingsManager.shared.analyticsEnabled = analyticsEnabled
-        NotificationCenter.default.post(name: .appearanceModeChanged, object: nil)
-        showSavedIndicator()
-    }
-
-    private func showSavedIndicator() {
-        saved = true
-        DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
-            saved = false
-        }
+        isLoading = false
     }
 
     // MARK: - General Pane
@@ -613,8 +593,7 @@ struct SettingsView: View {
                         ProgressView()
                             .controlSize(.small)
                     } else {
-                        Image(systemName: "g.circle.fill")
-                            .font(.system(size: 16))
+                        GoogleLogo(size: 16)
                     }
                     Text(isSigningIn ? "Signing in..." : "Sign in with Google")
                         .font(.system(size: 13, weight: .semibold))
@@ -681,10 +660,20 @@ struct SettingsView: View {
                     return
                 }
 
-                guard let callbackURL = callbackURL,
-                      let code = AuthManager.extractAuthCode(from: callbackURL)
-                else {
-                    signInError = "No authorization code received."
+                guard let callbackURL = callbackURL else {
+                    signInError = "No callback received from authentication."
+                    return
+                }
+
+                // Check if Supabase returned an error in the callback
+                if let authError = AuthManager.extractAuthError(from: callbackURL) {
+                    signInError = authError
+                    return
+                }
+
+                guard let code = AuthManager.extractAuthCode(from: callbackURL) else {
+                    Logger.error("OAuth callback URL missing code: \(callbackURL.absoluteString)")
+                    signInError = "Authentication completed but no authorization code was returned. Please try again."
                     return
                 }
 
@@ -698,7 +687,7 @@ struct SettingsView: View {
         }
 
         authSession!.presentationContextProvider = AuthContextProvider.shared
-        authSession!.prefersEphemeralWebBrowserSession = false
+        authSession!.prefersEphemeralWebBrowserSession = true
 
         if !authSession!.start() {
             isSigningIn = false
@@ -738,6 +727,7 @@ struct SettingsView: View {
                             withAnimation(.easeInOut(duration: 0.15)) {
                                 _ = exclusions.remove(at: index)
                             }
+                            SettingsManager.shared.exclusions = exclusions
                         } label: {
                             Image(systemName: "xmark")
                                 .font(.system(size: 9, weight: .bold))
@@ -788,6 +778,7 @@ struct SettingsView: View {
             exclusions.append(trimmed)
         }
         newExclusion = ""
+        SettingsManager.shared.exclusions = exclusions
     }
 
     // MARK: - Personalisation Pane
@@ -842,11 +833,14 @@ struct SettingsView: View {
 
     private var aboutPane: some View {
         VStack(alignment: .leading, spacing: 24) {
-            // App name + version
-            VStack(alignment: .leading, spacing: 4) {
-                Text("Stubble")
-                    .font(.system(size: 20, weight: .bold))
-                    .foregroundStyle(Theme.textPrimary)
+            // Logo + version
+            VStack(alignment: .leading, spacing: 8) {
+                if let logo = Self.loadLogo() {
+                    Image(nsImage: logo)
+                        .resizable()
+                        .aspectRatio(contentMode: .fit)
+                        .frame(height: 32)
+                }
 
                 let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "?"
                 let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "?"
@@ -923,6 +917,23 @@ struct SettingsView: View {
             .foregroundStyle(Theme.textSecondary)
         }
         .buttonStyle(.plain)
+    }
+
+    /// Load the Stubble logo from the app bundle or development Resources directory.
+    private static func loadLogo() -> NSImage? {
+        if let path = Bundle.main.path(forResource: "logo", ofType: "png") {
+            return NSImage(contentsOfFile: path)
+        }
+        let binaryPath = ProcessInfo.processInfo.arguments[0]
+        let binaryDir = (binaryPath as NSString).deletingLastPathComponent
+        for ancestor in ["../../..", "../../../.."] {
+            let candidate = (binaryDir as NSString).appendingPathComponent("\(ancestor)/Resources/logo.png")
+            let resolved = (candidate as NSString).standardizingPath
+            if FileManager.default.fileExists(atPath: resolved) {
+                return NSImage(contentsOfFile: resolved)
+            }
+        }
+        return nil
     }
 
     // MARK: - Memory Management

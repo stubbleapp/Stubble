@@ -259,7 +259,7 @@ struct ProjectRow: View {
 
 // MARK: - Recommendation Card (horizontal scroll item)
 
-private struct RecommendationCard: View {
+struct RecommendationCard: View {
     let tip: Recommendation
     let onDismiss: () -> Void
     @State private var isHovering = false
