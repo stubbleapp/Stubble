@@ -42,7 +42,7 @@ public class DatabaseReader {
     }
 
     /// Current schema version. Bump this when adding new migrations.
-    private static let schemaVersion = 13
+    private static let schemaVersion = 14
 
     /// Apply schema migrations so the dashboard works even if the CLI hasn't run yet.
     /// Uses PRAGMA user_version to track which migrations have already run.
@@ -306,6 +306,61 @@ public class DatabaseReader {
             }
 
             sqlite3_exec(db, "CREATE INDEX IF NOT EXISTS idx_chat_messages_thread_id ON chat_messages(thread_id)", nil, nil, nil)
+        }
+
+        if currentVersion < 14 {
+            // Notification delivery and engagement tracking
+            let notificationsSql = """
+            CREATE TABLE IF NOT EXISTS notifications (
+                id TEXT PRIMARY KEY,
+                type TEXT NOT NULL,
+                category TEXT NOT NULL,
+                title TEXT NOT NULL,
+                body TEXT NOT NULL,
+                payload TEXT,
+                relevance_score REAL NOT NULL,
+                delivered_at TEXT NOT NULL,
+                idle_at_delivery INTEGER NOT NULL,
+                active_app_at_delivery TEXT,
+                engagement TEXT,
+                engaged_at TEXT,
+                created_at TEXT NOT NULL DEFAULT (datetime('now'))
+            )
+            """
+            if !execMigration(notificationsSql, label: "14a: create notifications table") {
+                migrationFailed = true
+            }
+            sqlite3_exec(db, "CREATE INDEX IF NOT EXISTS idx_notifications_delivered_at ON notifications(delivered_at)", nil, nil, nil)
+            sqlite3_exec(db, "CREATE INDEX IF NOT EXISTS idx_notifications_category ON notifications(category)", nil, nil, nil)
+
+            // Per-category performance stats (for learning)
+            let statsSql = """
+            CREATE TABLE IF NOT EXISTS notification_category_stats (
+                category TEXT PRIMARY KEY,
+                total_sent INTEGER DEFAULT 0,
+                total_clicked INTEGER DEFAULT 0,
+                total_dismissed INTEGER DEFAULT 0,
+                total_ignored INTEGER DEFAULT 0,
+                confidence REAL DEFAULT 1.0,
+                updated_at TEXT NOT NULL
+            )
+            """
+            if !execMigration(statsSql, label: "14b: create notification_category_stats table") {
+                migrationFailed = true
+            }
+
+            // Daily caps tracking
+            let capsSql = """
+            CREATE TABLE IF NOT EXISTS notification_caps (
+                date TEXT NOT NULL,
+                category TEXT NOT NULL,
+                count INTEGER DEFAULT 0,
+                PRIMARY KEY (date, category)
+            )
+            """
+            if !execMigration(capsSql, label: "14c: create notification_caps table") {
+                migrationFailed = true
+            }
         }
 
         // Only bump the version if all migrations succeeded — failed migrations

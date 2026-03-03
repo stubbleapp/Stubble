@@ -1,10 +1,11 @@
 import AppKit
+import UserNotifications
 import TaskMinerShared
 
 /// NSApplicationDelegate that owns the menu bar status item.
 /// Using @NSApplicationDelegateAdaptor ensures this object lives for the entire app lifecycle.
 @MainActor
-final class MenuBarDelegate: NSObject, NSApplicationDelegate {
+final class MenuBarDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDelegate {
     private var statusItem: NSStatusItem?
     private var pauseController: PauseController?
     private var pollTimer: Timer?
@@ -30,6 +31,9 @@ final class MenuBarDelegate: NSObject, NSApplicationDelegate {
         // Set app icon — when running from .app bundle it's in Resources/;
         // when running via `swift run` we look relative to the package root.
         setAppIcon()
+
+        // Set up notification delegate for handling notification responses (e.g., test notifications)
+        UNUserNotificationCenter.current().delegate = self
 
         // Create the pause controller (same data directory as the dashboard)
         if let config = try? SharedConfiguration() {
@@ -412,6 +416,73 @@ final class MenuBarDelegate: NSObject, NSApplicationDelegate {
         self.statusItem?.menu = menu
     }
 
+    // MARK: - Notification Delegate
+
+    /// Handle notification responses (clicks, dismissals) from test notifications and daemon-sent notifications.
+    nonisolated func userNotificationCenter(
+        _ center: UNUserNotificationCenter,
+        didReceive response: UNNotificationResponse,
+        withCompletionHandler completionHandler: @escaping () -> Void
+    ) {
+        let userInfo = response.notification.request.content.userInfo
+
+        Task { @MainActor in
+            // Handle the notification action
+            switch response.actionIdentifier {
+            case UNNotificationDefaultActionIdentifier:
+                // User clicked the notification
+                handleNotificationClick(userInfo: userInfo)
+            case UNNotificationDismissActionIdentifier:
+                // User dismissed the notification (swipe away)
+                break
+            default:
+                break
+            }
+            completionHandler()
+        }
+    }
+
+    /// Show notifications even when app is in foreground.
+    nonisolated func userNotificationCenter(
+        _ center: UNUserNotificationCenter,
+        willPresent notification: UNNotification,
+        withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void
+    ) {
+        // Show banner and play sound even when app is active
+        completionHandler([.banner, .sound])
+    }
+
+    private func handleNotificationClick(userInfo: [AnyHashable: Any]) {
+        guard let type = userInfo["type"] as? String else { return }
+
+        switch type {
+        case "link":
+            // Open URL in browser
+            if let urlString = userInfo["url"] as? String,
+               let url = URL(string: urlString) {
+                NSWorkspace.shared.open(url)
+            }
+
+        case "chatPrompt":
+            // Open app with pre-filled chat prompt
+            if let prompt = userInfo["chatPrompt"] as? String {
+                // Post notification to pre-fill chat
+                NotificationCenter.default.post(
+                    name: .menuBarChatQuestion,
+                    object: nil,
+                    userInfo: ["question": prompt]
+                )
+                // Switch to chat tab
+                NotificationCenter.default.post(name: .switchToChatTab, object: nil)
+            }
+            // Bring app to front
+            openApp()
+
+        default:
+            break
+        }
+    }
+
     // MARK: - Actions
 
     @objc private func openApp() {
@@ -492,4 +563,6 @@ extension Notification.Name {
     static let showAboutInSettings = Notification.Name("showAboutInSettings")
     /// Posted by menu bar when user clicks a suggested chat question.
     static let menuBarChatQuestion = Notification.Name("menuBarChatQuestion")
+    /// Posted when a notification deep link wants to switch to the Chat tab.
+    static let switchToChatTab = Notification.Name("switchToChatTab")
 }

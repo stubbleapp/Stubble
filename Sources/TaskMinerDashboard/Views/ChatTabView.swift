@@ -80,6 +80,8 @@ struct ChatTabView: View {
                         // Recommendation cards
                         if !viewModel.recommendations.isEmpty {
                             recommendationCardsSection
+                                .redacted(reason: viewModel.isGeneratingRecommendations ? .placeholder : [])
+                                .shimmer(active: viewModel.isGeneratingRecommendations)
                                 .padding(.bottom, 16)
                         }
 
@@ -92,6 +94,7 @@ struct ChatTabView: View {
                         Spacer().frame(height: 100)
                     }
                 }
+                .allowsHitTesting(!viewModel.isGeneratingRecommendations)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)

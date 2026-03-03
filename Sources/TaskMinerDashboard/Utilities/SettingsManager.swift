@@ -77,4 +77,56 @@ final class SettingsManager {
         get { store?.wizardPage ?? 0 }
         set { store?.wizardPage = newValue }
     }
+
+    // MARK: - Notification Settings
+
+    var notificationsEnabled: Bool {
+        get { store?.notificationsEnabled ?? true }
+        set { store?.notificationsEnabled = newValue }
+    }
+
+    var notificationsDailyMax: Int {
+        get { store?.notificationsDailyMax ?? 3 }
+        set { store?.notificationsDailyMax = newValue }
+    }
+
+    var notificationsRequireIdle: Bool {
+        get { store?.notificationsRequireIdle ?? true }
+        set { store?.notificationsRequireIdle = newValue }
+    }
+
+    var notificationsQuietHoursEnabled: Bool {
+        get { store?.notificationsQuietHoursEnabled ?? false }
+        set { store?.notificationsQuietHoursEnabled = newValue }
+    }
+
+    var notificationsQuietHoursStart: Int {
+        get { store?.notificationsQuietHoursStart ?? 22 }
+        set { store?.notificationsQuietHoursStart = newValue }
+    }
+
+    var notificationsQuietHoursEnd: Int {
+        get { store?.notificationsQuietHoursEnd ?? 8 }
+        set { store?.notificationsQuietHoursEnd = newValue }
+    }
+
+    var notificationsEnabledCategories: Set<String> {
+        get { store?.notificationsEnabledCategories ?? Set(["article", "tool", "best_practice", "workflow", "learning", "exploration"]) }
+        set { store?.notificationsEnabledCategories = newValue }
+    }
+
+    var notificationsPreferChatPrompts: Bool {
+        get { store?.notificationsPreferChatPrompts ?? false }
+        set { store?.notificationsPreferChatPrompts = newValue }
+    }
+
+    var notificationsMinRelevanceScore: Double {
+        get { store?.notificationsMinRelevanceScore ?? 0.6 }
+        set { store?.notificationsMinRelevanceScore = newValue }
+    }
+
+    var notificationsLearningEnabled: Bool {
+        get { store?.notificationsLearningEnabled ?? true }
+        set { store?.notificationsLearningEnabled = newValue }
+    }
 }

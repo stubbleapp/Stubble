@@ -351,6 +351,17 @@ class AppDelegate {
 
         // Poll Granola meetings (checks file mod-date first, no-op if unchanged)
         granolaMeetingMonitor.poll()
+
+        // 7. Notification evaluation (synchronized with AI refresh cadence)
+        Task {
+            await NotificationEngine.shared.periodicEvaluation(
+                isIdle: idleDetector.isIdle,
+                activeApp: activityMonitor.currentApp()?.bundleIdentifier,
+                currentProject: inferCurrentProject(),
+                db: db,
+                settingsPath: config.shared.settingsPath
+            )
+        }
     }
 
     // MARK: - Idle Transition Handling
@@ -363,6 +374,17 @@ class AppDelegate {
             Logger.info("User became idle (\(Int(idleDetector.idleTime))s)")
             finalizeCurrentActivity()
             startNewActivity(appName: "Idle", bundleId: nil, pid: 0, isIdle: true)
+
+            // Trigger notification evaluation — idle is a good time to notify
+            Task {
+                await NotificationEngine.shared.onIdleTransition(
+                    isIdle: true,
+                    activeApp: activityMonitor.currentApp()?.bundleIdentifier,
+                    currentProject: inferCurrentProject(),
+                    db: db,
+                    settingsPath: config.shared.settingsPath
+                )
+            }
 
         case .becameActive:
             Logger.info("User became active")
@@ -768,5 +790,61 @@ class AppDelegate {
 
     private func todayString() -> String {
         SharedFormatters.dayFormatter.string(from: Date())
+    }
+
+    /// Infer the current project name from recent activity window titles.
+    /// Used for notification context scoring.
+    private func inferCurrentProject() -> String? {
+        guard let activity = currentActivity, !activity.isIdle else { return nil }
+        guard let title = activity.windowTitle, !title.isEmpty else { return nil }
+
+        // Try to extract project name from common patterns:
+        // - "filename.swift - ProjectName" (Xcode, VS Code)
+        // - "ProjectName \u{2014} filename" (JetBrains)
+        // - "filename (ProjectName)" (TextMate)
+
+        // Pattern 1: "file - Project"
+        if let dashRange = title.range(of: " - ") {
+            let projectPart = String(title[dashRange.upperBound...]).trimmingCharacters(in: .whitespaces)
+            // Ignore if it's just an app name
+            if !projectPart.isEmpty && !isAppName(projectPart) {
+                return projectPart.components(separatedBy: " ").first
+            }
+        }
+
+        // Pattern 2: "Project \u{2014} file" (em dash)
+        if let emDashRange = title.range(of: " \u{2014} ") {
+            let projectPart = String(title[..<emDashRange.lowerBound]).trimmingCharacters(in: .whitespaces)
+            if !projectPart.isEmpty && !isAppName(projectPart) {
+                return projectPart.components(separatedBy: " ").first
+            }
+        }
+
+        // Pattern 3: Look for capitalized words that might be project names
+        let words = title.components(separatedBy: .whitespaces)
+        for word in words {
+            if word.count > 3,
+               word.first?.isUppercase == true,
+               !isCommonWord(word),
+               !isAppName(word) {
+                return word
+            }
+        }
+
+        return nil
+    }
+
+    private func isAppName(_ text: String) -> Bool {
+        let appNames = ["Xcode", "Safari", "Chrome", "Firefox", "Slack", "Discord", "Terminal",
+                        "iTerm", "Visual", "Code", "Studio", "Sublime", "Atom", "Nova",
+                        "Preview", "Finder", "Mail", "Messages", "Notes", "Notion", "Figma"]
+        return appNames.contains { text.localizedCaseInsensitiveContains($0) }
+    }
+
+    private func isCommonWord(_ word: String) -> Bool {
+        let common = ["The", "And", "For", "With", "From", "This", "That", "File", "New",
+                      "Edit", "View", "Help", "Window", "Menu", "Open", "Save", "Close",
+                      "Untitled", "Document", "Welcome", "Settings", "Preferences"]
+        return common.contains(word)
     }
 }

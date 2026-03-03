@@ -139,6 +139,58 @@ public final class SettingsStore {
         set { update { $0.wizardPage = newValue } }
     }
 
+    // MARK: - Notification Settings
+
+    public var notificationsEnabled: Bool {
+        get { load().notificationsEnabled ?? true }
+        set { update { $0.notificationsEnabled = newValue } }
+    }
+
+    public var notificationsDailyMax: Int {
+        get { load().notificationsDailyMax ?? 3 }
+        set { update { $0.notificationsDailyMax = newValue } }
+    }
+
+    public var notificationsRequireIdle: Bool {
+        get { load().notificationsRequireIdle ?? true }
+        set { update { $0.notificationsRequireIdle = newValue } }
+    }
+
+    public var notificationsQuietHoursEnabled: Bool {
+        get { load().notificationsQuietHoursEnabled ?? false }
+        set { update { $0.notificationsQuietHoursEnabled = newValue } }
+    }
+
+    public var notificationsQuietHoursStart: Int {
+        get { load().notificationsQuietHoursStart ?? 22 }
+        set { update { $0.notificationsQuietHoursStart = newValue } }
+    }
+
+    public var notificationsQuietHoursEnd: Int {
+        get { load().notificationsQuietHoursEnd ?? 8 }
+        set { update { $0.notificationsQuietHoursEnd = newValue } }
+    }
+
+    public var notificationsEnabledCategories: Set<String> {
+        get { Set(load().notificationsEnabledCategories ?? NotificationCategory.allCases.map { $0.rawValue }) }
+        set { update { $0.notificationsEnabledCategories = Array(newValue) } }
+    }
+
+    public var notificationsPreferChatPrompts: Bool {
+        get { load().notificationsPreferChatPrompts ?? false }
+        set { update { $0.notificationsPreferChatPrompts = newValue } }
+    }
+
+    public var notificationsMinRelevanceScore: Double {
+        get { load().notificationsMinRelevanceScore ?? 0.6 }
+        set { update { $0.notificationsMinRelevanceScore = newValue } }
+    }
+
+    public var notificationsLearningEnabled: Bool {
+        get { load().notificationsLearningEnabled ?? true }
+        set { update { $0.notificationsLearningEnabled = newValue } }
+    }
+
     // MARK: - Helpers
 
     private func update(_ mutate: (inout AppSettings) -> Void) {
@@ -168,6 +220,29 @@ public struct AppSettings: Codable, Equatable {
     /// Current wizard page (0-3) for resuming setup after quit/reopen.
     public var wizardPage: Int?
 
+    // MARK: - Notification Settings
+
+    /// Whether notifications are enabled (default: true).
+    public var notificationsEnabled: Bool?
+    /// Maximum notifications per day (default: 3, range 1-5).
+    public var notificationsDailyMax: Int?
+    /// Only notify when user is idle (default: true).
+    public var notificationsRequireIdle: Bool?
+    /// Whether quiet hours are enabled (default: false).
+    public var notificationsQuietHoursEnabled: Bool?
+    /// Quiet hours start hour 0-23 (default: 22).
+    public var notificationsQuietHoursStart: Int?
+    /// Quiet hours end hour 0-23 (default: 8).
+    public var notificationsQuietHoursEnd: Int?
+    /// Enabled notification categories (raw values, default: all).
+    public var notificationsEnabledCategories: [String]?
+    /// Prefer chat prompts over links (default: false).
+    public var notificationsPreferChatPrompts: Bool?
+    /// Minimum relevance score to deliver (default: 0.6, range 0.4-0.9).
+    public var notificationsMinRelevanceScore: Double?
+    /// Allow engagement-based learning (default: true).
+    public var notificationsLearningEnabled: Bool?
+
     public init(
         geminiApiKey: String? = nil,
         customPrompt: String? = nil,
@@ -179,7 +254,17 @@ public struct AppSettings: Codable, Equatable {
         exclusions: [String]? = nil,
         appearanceMode: AppearanceMode? = nil,
         analyticsEnabled: Bool? = nil,
-        wizardPage: Int? = nil
+        wizardPage: Int? = nil,
+        notificationsEnabled: Bool? = nil,
+        notificationsDailyMax: Int? = nil,
+        notificationsRequireIdle: Bool? = nil,
+        notificationsQuietHoursEnabled: Bool? = nil,
+        notificationsQuietHoursStart: Int? = nil,
+        notificationsQuietHoursEnd: Int? = nil,
+        notificationsEnabledCategories: [String]? = nil,
+        notificationsPreferChatPrompts: Bool? = nil,
+        notificationsMinRelevanceScore: Double? = nil,
+        notificationsLearningEnabled: Bool? = nil
     ) {
         self.geminiApiKey = geminiApiKey
         self.customPrompt = customPrompt
@@ -192,5 +277,15 @@ public struct AppSettings: Codable, Equatable {
         self.appearanceMode = appearanceMode
         self.analyticsEnabled = analyticsEnabled
         self.wizardPage = wizardPage
+        self.notificationsEnabled = notificationsEnabled
+        self.notificationsDailyMax = notificationsDailyMax
+        self.notificationsRequireIdle = notificationsRequireIdle
+        self.notificationsQuietHoursEnabled = notificationsQuietHoursEnabled
+        self.notificationsQuietHoursStart = notificationsQuietHoursStart
+        self.notificationsQuietHoursEnd = notificationsQuietHoursEnd
+        self.notificationsEnabledCategories = notificationsEnabledCategories
+        self.notificationsPreferChatPrompts = notificationsPreferChatPrompts
+        self.notificationsMinRelevanceScore = notificationsMinRelevanceScore
+        self.notificationsLearningEnabled = notificationsLearningEnabled
     }
 }

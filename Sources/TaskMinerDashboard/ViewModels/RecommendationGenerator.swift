@@ -94,18 +94,17 @@ final class RecommendationGenerator: Sendable {
            IMPORTANT: Do NOT include any greeting like "Hey", "Hi", "Hello", or the user's name — \
            the UI already displays a greeting header. Just jump straight into the context \
            (e.g. "You've been deep into the permission system this week..." not "Hey Sam, you've been..."). \
-        2. suggested_questions: 3-4 SHORT questions (max 6-8 words each) the user might ask about their \
-           CURRENT work, interests, or areas of curiosity. At least one question should be exploratory or \
-           interest-driven — something they'd enjoy learning about, not just need for work. \
-           Keep them punchy and concise — e.g. "Best WAL checkpoint strategy?", "Handle TCC after rebuild?", \
-           "Latest advances in on-device ML?". \
+        2. suggested_questions: 3-4 SHORT prompts (max 6-8 words each) the user might send about their \
+           CURRENT work, interests, or areas of curiosity. These can be questions OR action requests. \
+           Mix it up — include both question-style ("Best WAL checkpoint strategy?") and ask-style \
+           ("Help me optimize the SQLite queries", "Explain the TCC permission model"). \
+           At least one should be exploratory or interest-driven. Keep them punchy and concise. \
            Reference their actual projects, technologies, and interests but stay brief. \
         3. recommendations: Generate 6-8 candidate recommendations (see categories below). \
            These will be refined in a second pass, so include a mix of categories and depths. \
         \
         Categories: \
-        - article: A relevant technical article, tutorial, or documentation page. MUST be a real, \
-          existing URL from official docs, well-known blogs, or established resources. \
+        - article: A relevant technical article, tutorial, or documentation page. \
         - tool: A specific app, extension, CLI tool, or service. Explain HOW it helps their specific situation. \
         - best_practice: A concrete technique or methodology. Explain WHY it applies to their current work. \
         - workflow: A specific workflow improvement based on patterns you've observed across their week. \
@@ -123,7 +122,10 @@ final class RecommendationGenerator: Sendable {
           what files they're editing — then recommend resources that go deeper on those specific topics. \
         - Every recommendation's "reason" must cite specific projects, tasks, or patterns from the data. \
         - Never recommend tools/apps the user already uses heavily. \
-        - URLs must be real and well-known — official docs, tool homepages, established tutorials. \
+        - URLs: ONLY use homepage or landing page URLs that you are CERTAIN exist. Examples: \
+          "https://developer.apple.com/documentation/security" (not deep subpages), \
+          "https://www.sqlite.org/wal.html", "https://github.com/user/repo" (real repos only). \
+          If you're not 100% certain a URL exists, use null instead. Better no link than a 404. \
         - Avoid generic advice ("take breaks", "use version control", "back up your data"). \
         \
         Respond with a JSON object. Do not include any text outside the JSON.
@@ -500,8 +502,8 @@ final class RecommendationGenerator: Sendable {
           "greeting_context": "Deep into the Stubble permission system and SQLite layer this week — here are some things that might help.",
           "suggested_questions": [
             "Handle TCC after rebuild?",
-            "Best WAL checkpoint strategy?",
-            "Cross-process memory on macOS?"
+            "Help me optimize the SQLite queries",
+            "Explain the WAL checkpoint strategy"
           ],
           "recommendations": [
             {
@@ -517,14 +519,14 @@ final class RecommendationGenerator: Sendable {
 
         Top-level fields:
         - greeting_context: 1-2 warm, personal sentences (NO greeting/name — UI shows that) that reference the user's CURRENT projects by name
-        - suggested_questions: 3-4 SHORT questions (max 6-8 words each) tied to their CURRENT work. At least one should be exploratory/interest-driven.
+        - suggested_questions: 3-4 SHORT prompts (max 6-8 words each) tied to their CURRENT work. Mix questions ("Best approach for X?") and action requests ("Help me debug Y", "Explain Z"). At least one should be exploratory/interest-driven.
 
         Recommendation fields:
         - category: one of "article", "tool", "best_practice", "workflow", "learning", "exploration"
         - title: concise, specific title that would only make sense for THIS user's CURRENT work
         - description: 2-3 sentences explaining what this is and why it's valuable for their CURRENT situation
         - reason: 1 sentence citing specific tasks from TODAY or this week
-        - action_url: a real URL (official docs, tool homepage, well-known tutorial). Use null if no URL applies.
+        - action_url: ONLY use URLs you are 100% certain exist (homepages, top-level doc pages). Use null if uncertain — a missing link is better than a 404.
         - icon: an SF Symbol name (e.g. "doc.text", "wrench.and.screwdriver", "lightbulb", "arrow.triangle.branch", "book", "cpu", "network", "lock.shield", "swift", "terminal")
 
         IMPORTANT: Generate 6-8 recommendations. Prioritize TODAY'S work from the 🎯 CURRENT FOCUS section.

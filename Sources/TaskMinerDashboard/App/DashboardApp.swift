@@ -77,10 +77,35 @@ struct DashboardApp: App {
             }
             .onOpenURL { url in
                 // Handle OAuth callback from Supabase Google sign-in
+                if url.scheme == StubbleAPIConfig.callbackScheme && url.host == "auth-callback" {
+                    Task {
+                        let handled = await AuthManager.shared.handleCallback(url: url)
+                        if handled {
+                            // Auth state changed — reinitialize GeminiClient for proxy mode
+                            viewModel.refreshForAuthChange()
+                        }
+                    }
+                    return
+                }
+
+                // Handle chat deep link from notifications: com.stubble://chat?prompt=...
+                if url.host == "chat" {
+                    if let components = URLComponents(url: url, resolvingAgainstBaseURL: false),
+                       let promptParam = components.queryItems?.first(where: { $0.name == "prompt" }),
+                       let prompt = promptParam.value?.removingPercentEncoding,
+                       !prompt.isEmpty {
+                        viewModel.pendingChatQuestion = prompt
+                        viewModel.shouldExpandChatPanel = true
+                        // Post notification to switch to Chat tab (ContentView listens)
+                        NotificationCenter.default.post(name: .switchToChatTab, object: nil)
+                    }
+                    return
+                }
+
+                // Fallback: try auth callback handling
                 Task {
                     let handled = await AuthManager.shared.handleCallback(url: url)
                     if handled {
-                        // Auth state changed — reinitialize GeminiClient for proxy mode
                         viewModel.refreshForAuthChange()
                     }
                 }

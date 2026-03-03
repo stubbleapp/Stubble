@@ -140,7 +140,7 @@ public enum TimelineItem: Identifiable {
         var i = 0
 
         while i < items.count {
-            guard case .gap(_, let start, var end, _) = items[i] else {
+            guard case .gap(_, let start, let end, _) = items[i] else {
                 result.append(items[i])
                 i += 1
                 continue

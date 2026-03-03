@@ -86,7 +86,7 @@ class DatabaseManager {
     }
 
     /// Current schema version — kept in sync with DatabaseReader's migrations.
-    private static let schemaVersion = 13
+    private static let schemaVersion = 14
 
     private func runMigrations() {
         let currentVersion = getUserVersion()
@@ -354,6 +354,61 @@ class DatabaseManager {
 
             if sqlite3_exec(db, "CREATE INDEX IF NOT EXISTS idx_chat_messages_thread_id ON chat_messages(thread_id)", nil, nil, nil) != SQLITE_OK {
                 Logger.warning("Failed to create idx_chat_messages_thread_id index")
+            }
+        }
+
+        if currentVersion < 14 {
+            // Notification delivery and engagement tracking
+            let notificationsSql = """
+            CREATE TABLE IF NOT EXISTS notifications (
+                id TEXT PRIMARY KEY,
+                type TEXT NOT NULL,
+                category TEXT NOT NULL,
+                title TEXT NOT NULL,
+                body TEXT NOT NULL,
+                payload TEXT,
+                relevance_score REAL NOT NULL,
+                delivered_at TEXT NOT NULL,
+                idle_at_delivery INTEGER NOT NULL,
+                active_app_at_delivery TEXT,
+                engagement TEXT,
+                engaged_at TEXT,
+                created_at TEXT NOT NULL DEFAULT (datetime('now'))
+            )
+            """
+            if !execMigration(notificationsSql, label: "14a: create notifications table") {
+                migrationFailed = true
+            }
+            sqlite3_exec(db, "CREATE INDEX IF NOT EXISTS idx_notifications_delivered_at ON notifications(delivered_at)", nil, nil, nil)
+            sqlite3_exec(db, "CREATE INDEX IF NOT EXISTS idx_notifications_category ON notifications(category)", nil, nil, nil)
+
+            // Per-category performance stats (for learning)
+            let statsSql = """
+            CREATE TABLE IF NOT EXISTS notification_category_stats (
+                category TEXT PRIMARY KEY,
+                total_sent INTEGER DEFAULT 0,
+                total_clicked INTEGER DEFAULT 0,
+                total_dismissed INTEGER DEFAULT 0,
+                total_ignored INTEGER DEFAULT 0,
+                confidence REAL DEFAULT 1.0,
+                updated_at TEXT NOT NULL
+            )
+            """
+            if !execMigration(statsSql, label: "14b: create notification_category_stats table") {
+                migrationFailed = true
+            }
+
+            // Daily caps tracking
+            let capsSql = """
+            CREATE TABLE IF NOT EXISTS notification_caps (
+                date TEXT NOT NULL,
+                category TEXT NOT NULL,
+                count INTEGER DEFAULT 0,
+                PRIMARY KEY (date, category)
+            )
+            """
+            if !execMigration(capsSql, label: "14c: create notification_caps table") {
+                migrationFailed = true
             }
         }
 
@@ -1015,6 +1070,217 @@ class DatabaseManager {
             results.append(input)
         }
         return results
+    }
+
+    // MARK: - Notifications
+
+    /// Insert a delivered notification record.
+    func insertNotification(_ record: NotificationRecord) {
+        guard db != nil else { return }
+        let sql = """
+        INSERT INTO notifications (id, type, category, title, body, payload, relevance_score,
+                                   delivered_at, idle_at_delivery, active_app_at_delivery,
+                                   engagement, engaged_at, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
+            Logger.warning("Failed to prepare notification insert: \(lastError)")
+            return
+        }
+        defer { sqlite3_finalize(stmt) }
+
+        let deliveredStr = SharedFormatters.iso8601.string(from: record.deliveredAt)
+        let createdStr = SharedFormatters.iso8601.string(from: record.createdAt)
+        let payloadJson: String? = {
+            guard let payload = record.payload else { return nil }
+            guard let data = try? JSONEncoder().encode(payload),
+                  let str = String(data: data, encoding: .utf8) else { return nil }
+            return str
+        }()
+
+        sqliteBindText(stmt, 1, record.id)
+        sqliteBindText(stmt, 2, record.type.rawValue)
+        sqliteBindText(stmt, 3, record.category.rawValue)
+        sqliteBindText(stmt, 4, record.title)
+        sqliteBindText(stmt, 5, record.body)
+        if let pj = payloadJson { sqliteBindText(stmt, 6, pj) } else { sqlite3_bind_null(stmt, 6) }
+        sqlite3_bind_double(stmt, 7, record.relevanceScore)
+        sqliteBindText(stmt, 8, deliveredStr)
+        sqlite3_bind_int(stmt, 9, record.idleAtDelivery ? 1 : 0)
+        if let app = record.activeAppAtDelivery { sqliteBindText(stmt, 10, app) } else { sqlite3_bind_null(stmt, 10) }
+        if let eng = record.engagement { sqliteBindText(stmt, 11, eng.rawValue) } else { sqlite3_bind_null(stmt, 11) }
+        if let eAt = record.engagedAt { sqliteBindText(stmt, 12, SharedFormatters.iso8601.string(from: eAt)) } else { sqlite3_bind_null(stmt, 12) }
+        sqliteBindText(stmt, 13, createdStr)
+
+        if sqlite3_step(stmt) != SQLITE_DONE {
+            Logger.warning("Failed to insert notification: \(lastError)")
+        }
+    }
+
+    /// Update the engagement for a notification by ID.
+    func updateNotificationEngagement(id: String, engagement: NotificationEngagement) {
+        guard db != nil else { return }
+        let sql = "UPDATE notifications SET engagement = ?, engaged_at = ? WHERE id = ?"
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return }
+        defer { sqlite3_finalize(stmt) }
+
+        let now = SharedFormatters.iso8601.string(from: Date())
+        sqliteBindText(stmt, 1, engagement.rawValue)
+        sqliteBindText(stmt, 2, now)
+        sqliteBindText(stmt, 3, id)
+        sqlite3_step(stmt)
+    }
+
+    /// Get notifications delivered today without engagement (for ignore detection).
+    func notificationsWithoutEngagement(olderThan cutoff: Date) -> [NotificationRecord] {
+        guard db != nil else { return [] }
+        let cutoffStr = SharedFormatters.iso8601.string(from: cutoff)
+        let sql = """
+        SELECT id, type, category, title, body, payload, relevance_score,
+               delivered_at, idle_at_delivery, active_app_at_delivery, engagement, engaged_at, created_at
+        FROM notifications
+        WHERE engagement IS NULL AND delivered_at < ?
+        ORDER BY delivered_at ASC
+        """
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return [] }
+        defer { sqlite3_finalize(stmt) }
+        sqliteBindText(stmt, 1, cutoffStr)
+
+        var results: [NotificationRecord] = []
+        while sqlite3_step(stmt) == SQLITE_ROW {
+            results.append(parseNotificationRow(stmt))
+        }
+        return results
+    }
+
+    /// Get the count of notifications delivered today.
+    func notificationCountToday() -> Int {
+        guard db != nil else { return 0 }
+        let today = SharedFormatters.dayFormatter.string(from: Date())
+        let sql = "SELECT COUNT(*) FROM notifications WHERE date(delivered_at) = ?"
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return 0 }
+        defer { sqlite3_finalize(stmt) }
+        sqliteBindText(stmt, 1, today)
+        if sqlite3_step(stmt) == SQLITE_ROW {
+            return Int(sqlite3_column_int(stmt, 0))
+        }
+        return 0
+    }
+
+    /// Get notifications delivered today for a specific category.
+    func notificationCountToday(category: NotificationCategory) -> Int {
+        guard db != nil else { return 0 }
+        let today = SharedFormatters.dayFormatter.string(from: Date())
+        let sql = "SELECT COUNT(*) FROM notifications WHERE date(delivered_at) = ? AND category = ?"
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return 0 }
+        defer { sqlite3_finalize(stmt) }
+        sqliteBindText(stmt, 1, today)
+        sqliteBindText(stmt, 2, category.rawValue)
+        if sqlite3_step(stmt) == SQLITE_ROW {
+            return Int(sqlite3_column_int(stmt, 0))
+        }
+        return 0
+    }
+
+    /// Check if a similar notification was sent recently (for recency deduplication).
+    func recentSimilarNotificationExists(category: NotificationCategory, titleSubstring: String, withinHours: Int = 24) -> Bool {
+        guard db != nil else { return false }
+        let cutoff = Date().addingTimeInterval(-TimeInterval(withinHours * 3600))
+        let cutoffStr = SharedFormatters.iso8601.string(from: cutoff)
+        let sql = "SELECT 1 FROM notifications WHERE category = ? AND title LIKE ? AND delivered_at > ? LIMIT 1"
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return false }
+        defer { sqlite3_finalize(stmt) }
+        sqliteBindText(stmt, 1, category.rawValue)
+        sqliteBindText(stmt, 2, "%\(titleSubstring)%")
+        sqliteBindText(stmt, 3, cutoffStr)
+        return sqlite3_step(stmt) == SQLITE_ROW
+    }
+
+    private func parseNotificationRow(_ stmt: OpaquePointer?) -> NotificationRecord {
+        let payloadJson = sqlite3_column_text(stmt, 5).map { String(cString: $0) }
+        let payload: NotificationPayload? = payloadJson.flatMap { json in
+            guard let data = json.data(using: .utf8) else { return nil }
+            return try? JSONDecoder().decode(NotificationPayload.self, from: data)
+        }
+        return NotificationRecord(
+            id: sqlite3_column_text(stmt, 0).map { String(cString: $0) } ?? "",
+            type: NotificationType(rawValue: sqlite3_column_text(stmt, 1).map { String(cString: $0) } ?? "") ?? .link,
+            category: NotificationCategory(rawValue: sqlite3_column_text(stmt, 2).map { String(cString: $0) } ?? "") ?? .bestPractice,
+            title: sqlite3_column_text(stmt, 3).map { String(cString: $0) } ?? "",
+            body: sqlite3_column_text(stmt, 4).map { String(cString: $0) } ?? "",
+            payload: payload,
+            relevanceScore: sqlite3_column_double(stmt, 6),
+            deliveredAt: sqlite3_column_text(stmt, 7).flatMap { SharedFormatters.iso8601.date(from: String(cString: $0)) } ?? Date(),
+            idleAtDelivery: sqlite3_column_int(stmt, 8) != 0,
+            activeAppAtDelivery: sqlite3_column_text(stmt, 9).map { String(cString: $0) },
+            engagement: sqlite3_column_text(stmt, 10).flatMap { NotificationEngagement(rawValue: String(cString: $0)) },
+            engagedAt: sqlite3_column_text(stmt, 11).flatMap { SharedFormatters.iso8601.date(from: String(cString: $0)) },
+            createdAt: sqlite3_column_text(stmt, 12).flatMap { SharedFormatters.iso8601.date(from: String(cString: $0)) } ?? Date()
+        )
+    }
+
+    // MARK: - Notification Category Stats
+
+    /// Get or create stats for a category.
+    func notificationCategoryStats(for category: NotificationCategory) -> NotificationCategoryStats {
+        guard db != nil else {
+            return NotificationCategoryStats(category: category)
+        }
+        let sql = "SELECT total_sent, total_clicked, total_dismissed, total_ignored, confidence, updated_at FROM notification_category_stats WHERE category = ?"
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
+            return NotificationCategoryStats(category: category)
+        }
+        defer { sqlite3_finalize(stmt) }
+        sqliteBindText(stmt, 1, category.rawValue)
+
+        if sqlite3_step(stmt) == SQLITE_ROW {
+            return NotificationCategoryStats(
+                category: category,
+                totalSent: Int(sqlite3_column_int(stmt, 0)),
+                totalClicked: Int(sqlite3_column_int(stmt, 1)),
+                totalDismissed: Int(sqlite3_column_int(stmt, 2)),
+                totalIgnored: Int(sqlite3_column_int(stmt, 3)),
+                confidence: sqlite3_column_double(stmt, 4),
+                updatedAt: sqlite3_column_text(stmt, 5).flatMap { SharedFormatters.iso8601.date(from: String(cString: $0)) } ?? Date()
+            )
+        }
+        return NotificationCategoryStats(category: category)
+    }
+
+    /// Update stats for a category (upsert).
+    func updateNotificationCategoryStats(_ stats: NotificationCategoryStats) {
+        guard db != nil else { return }
+        let sql = """
+        INSERT INTO notification_category_stats (category, total_sent, total_clicked, total_dismissed, total_ignored, confidence, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(category) DO UPDATE SET
+            total_sent = excluded.total_sent,
+            total_clicked = excluded.total_clicked,
+            total_dismissed = excluded.total_dismissed,
+            total_ignored = excluded.total_ignored,
+            confidence = excluded.confidence,
+            updated_at = excluded.updated_at
+        """
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return }
+        defer { sqlite3_finalize(stmt) }
+
+        let now = SharedFormatters.iso8601.string(from: Date())
+        sqliteBindText(stmt, 1, stats.category.rawValue)
+        sqlite3_bind_int(stmt, 2, Int32(stats.totalSent))
+        sqlite3_bind_int(stmt, 3, Int32(stats.totalClicked))
+        sqlite3_bind_int(stmt, 4, Int32(stats.totalDismissed))
+        sqlite3_bind_int(stmt, 5, Int32(stats.totalIgnored))
+        sqlite3_bind_double(stmt, 6, stats.confidence)
+        sqliteBindText(stmt, 7, now)
+        sqlite3_step(stmt)
     }
 
     // MARK: - Cleanup

@@ -133,6 +133,12 @@ struct ContentView: View {
             let screenNames = ["Day", "Chat", "Habits", "Log"]
             viewModel.currentScreen = newTab < screenNames.count ? screenNames[newTab] : "Chat"
         }
+        .onReceive(NotificationCenter.default.publisher(for: .switchToChatTab)) { _ in
+            // Deep link from notification requested switching to Chat tab
+            withAnimation(.easeInOut(duration: 0.15)) {
+                selectedTab = chatTabIndex
+            }
+        }
     }
 }
 

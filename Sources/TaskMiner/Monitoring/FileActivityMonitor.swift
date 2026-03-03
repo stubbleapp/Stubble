@@ -75,7 +75,7 @@ class FileActivityMonitor {
         }
 
         self.stream = stream
-        FSEventStreamScheduleWithRunLoop(stream, CFRunLoopGetMain(), CFRunLoopMode.defaultMode.rawValue)
+        FSEventStreamSetDispatchQueue(stream, DispatchQueue.main)
         FSEventStreamStart(stream)
 
         // Flush pending events every 30 seconds
