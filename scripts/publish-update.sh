@@ -149,6 +149,16 @@ if icon:
         2>&1 || true
 
     rm -rf "$DMG_STAGING"
+
+    # Handle create-dmg temp file naming (rw.XXXXX.Stubble-VERSION.dmg)
+    if [ ! -f "$DMG_PATH_ORIG" ]; then
+        TEMP_DMG=$(ls "$OUTPUT_DIR"/rw.*.Stubble-$VERSION.dmg 2>/dev/null | head -1)
+        if [ -n "$TEMP_DMG" ] && [ -f "$TEMP_DMG" ]; then
+            mv "$TEMP_DMG" "$DMG_PATH_ORIG"
+            echo "   ✅ DMG renamed from temp file"
+        fi
+    fi
+
     [ -f "$DMG_PATH_ORIG" ] && echo "   ✅ DMG rebuilt with notarized app"
 fi
 

@@ -25,7 +25,7 @@ public final class SetupFlowController {
     public var accessibilityGranted: Bool = false
     public var screenRecordingGranted: Bool = false
 
-    public let totalPages: Int = 4
+    public let totalPages: Int = 3
 
     public init() {}
 
@@ -64,7 +64,9 @@ public final class SetupFlowController {
     /// The label for the Continue button on the current page.
     public var continueButtonLabel: String {
         if isValidating { return "Verifying..." }
-        return currentPage == 0 ? "Get Started" : "Continue"
+        if currentPage == 0 { return "Get Started" }
+        if isOnLastPage { return "Open Stubble" }
+        return "Continue"
     }
 
     // MARK: - Navigation

@@ -40,13 +40,13 @@ struct HabitsView: View {
                         .font(.system(size: 32))
                         .foregroundStyle(Theme.textMuted.opacity(0.5))
 
-                    Text("Stubble needs some activity data\nto identify patterns.")
+                    Text("Habits needs at least one full day\nof activity to identify patterns.")
                         .font(.system(size: 13))
                         .foregroundStyle(Theme.textMuted)
                         .multilineTextAlignment(.center)
                         .lineSpacing(2)
 
-                    Text("Keep using the app and check back soon.")
+                    Text("Check back tomorrow.")
                         .font(.system(size: 12))
                         .foregroundStyle(Theme.textQuaternary)
                 }

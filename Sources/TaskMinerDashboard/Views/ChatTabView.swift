@@ -95,7 +95,7 @@ struct ChatTabView: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Theme.secondaryBackground)
+        .background(Theme.chatBackground)
         .onAppear {
             // Auto-generate stubs on first visit (same logic as RecommendationsView)
             if !hasRecommendations

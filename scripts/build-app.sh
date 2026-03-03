@@ -40,17 +40,48 @@ TEAM_ID="M3QBXSJ3A2"
 # TelemetryDeck — app ID injected into Info.plist (not hardcoded in Swift)
 TELEMETRY_DECK_APP_ID="${TELEMETRY_DECK_APP_ID:-E9AC5258-ACC0-499A-9BE7-226EC2E6E511}"
 
+# ─── Certificate Expiry Check ─────────────────────────────────────
+# Developer ID certificates expire after 5 years — warn if expiring soon
+CERT_INFO=$(security find-certificate -c "Developer ID Application" -p 2>/dev/null | openssl x509 -noout -enddate -subject 2>/dev/null || true)
+if [ -n "$CERT_INFO" ]; then
+    CERT_EXPIRY=$(echo "$CERT_INFO" | grep notAfter | cut -d= -f2)
+    if [ -n "$CERT_EXPIRY" ]; then
+        EXPIRY_EPOCH=$(date -j -f "%b %d %T %Y %Z" "$CERT_EXPIRY" "+%s" 2>/dev/null || true)
+        NOW_EPOCH=$(date "+%s")
+        if [ -n "$EXPIRY_EPOCH" ]; then
+            DAYS_LEFT=$(( (EXPIRY_EPOCH - NOW_EPOCH) / 86400 ))
+            if [ "$DAYS_LEFT" -lt 30 ]; then
+                echo "⚠️  WARNING: Developer ID certificate expires in $DAYS_LEFT days ($CERT_EXPIRY)"
+            elif [ "$DAYS_LEFT" -lt 90 ]; then
+                echo "📜 Certificate expires in $DAYS_LEFT days ($CERT_EXPIRY)"
+            fi
+        fi
+    fi
+fi
+
 echo "🔨 Building $APP_NAME v$VERSION (both dashboard + daemon)..."
 cd "$BUILD_DIR"
 
-# Build both products in release mode
-swift build -c release 2>&1
+# Build both products in release mode with size optimization
+# -Osize produces 5-30% smaller binaries while maintaining good performance
+swift build -c release -Xswiftc -Osize 2>&1
 
 DASHBOARD_BINARY="$BUILD_DIR/.build/release/TaskMinerDashboard"
 
 if [ ! -f "$DASHBOARD_BINARY" ]; then
     echo "❌ Dashboard build failed — binary not found"
     exit 1
+fi
+
+# ─── Generate dSYM for crash symbolication ────────────────────────
+# dSYMs are required to make sense of crash reports from users
+DSYM_DIR="$OUTPUT_DIR/dSYMs"
+mkdir -p "$DSYM_DIR"
+DSYM_PATH="$DSYM_DIR/$APP_NAME-$VERSION.dSYM"
+if dsymutil "$DASHBOARD_BINARY" -o "$DSYM_PATH" 2>/dev/null; then
+    echo "🔍 dSYM generated: $DSYM_PATH"
+else
+    echo "⚠️  dSYM generation failed (crash symbolication won't work)"
 fi
 
 echo "📦 Creating $APP_NAME.app bundle..."
@@ -64,6 +95,9 @@ mkdir -p "$APP_BUNDLE/Contents/Frameworks"
 
 # Copy dashboard binary
 cp "$DASHBOARD_BINARY" "$APP_BUNDLE/Contents/MacOS/$APP_NAME"
+
+# Strip debug symbols for smaller binary (dSYM already generated above)
+strip -x "$APP_BUNDLE/Contents/MacOS/$APP_NAME" 2>/dev/null || true
 
 # Strip the linker-applied ad-hoc signature; we'll re-sign the whole
 # bundle at the end with the Developer ID identity.
@@ -113,7 +147,11 @@ SPARKLE_PLIST_ENTRIES="    <key>SUFeedURL</key>
 if [ -n "$SPARKLE_ED_KEY" ]; then
     SPARKLE_PLIST_ENTRIES="$SPARKLE_PLIST_ENTRIES
     <key>SUPublicEDKey</key>
-    <string>$SPARKLE_ED_KEY</string>"
+    <string>$SPARKLE_ED_KEY</string>
+    <key>SUEnableAutomaticChecks</key>
+    <true/>
+    <key>SUAllowsAutomaticUpdates</key>
+    <true/>"
 fi
 
 cat > "$APP_BUNDLE/Contents/Info.plist" << PLIST
@@ -206,8 +244,13 @@ if [ -d "$SPARKLE_FW" ]; then
     codesign --force --sign "$CODESIGN_IDENTITY" --options runtime --timestamp "$SPARKLE_FW" 2>&1 || SIGN_FAILED=1
 fi
 
-# 5) The main app bundle (outermost)
-codesign --force --sign "$CODESIGN_IDENTITY" --options runtime --timestamp "$APP_BUNDLE" 2>&1 || SIGN_FAILED=1
+# 5) The main app bundle (outermost) — with entitlements
+ENTITLEMENTS="$BUILD_DIR/Resources/Stubble.entitlements"
+if [ -f "$ENTITLEMENTS" ]; then
+    codesign --force --sign "$CODESIGN_IDENTITY" --options runtime --timestamp --entitlements "$ENTITLEMENTS" "$APP_BUNDLE" 2>&1 || SIGN_FAILED=1
+else
+    codesign --force --sign "$CODESIGN_IDENTITY" --options runtime --timestamp "$APP_BUNDLE" 2>&1 || SIGN_FAILED=1
+fi
 
 if [ "$SIGN_FAILED" -ne 0 ]; then
     echo "❌ One or more code signing steps failed"
@@ -288,6 +331,15 @@ else:
 
     rm -rf "$DMG_STAGING"
 
+    # Handle create-dmg temp file naming (rw.XXXXX.Stubble-VERSION.dmg)
+    if [ ! -f "$DMG_PATH" ]; then
+        TEMP_DMG=$(ls "$OUTPUT_DIR"/rw.*.$APP_NAME-$VERSION.dmg 2>/dev/null | head -1)
+        if [ -n "$TEMP_DMG" ] && [ -f "$TEMP_DMG" ]; then
+            mv "$TEMP_DMG" "$DMG_PATH"
+            echo "🎨 DMG renamed from temp file"
+        fi
+    fi
+
     if [ -f "$DMG_PATH" ]; then
         echo "✅ DMG: $DMG_PATH ($(du -sh "$DMG_PATH" | cut -f1))"
     else
@@ -301,4 +353,8 @@ fi
 echo ""
 echo "── To publish a release ────────────────────────────────────"
 echo "   bash scripts/publish-update.sh"
+echo ""
+echo "── To profile launch time ──────────────────────────────────"
+echo "   xcrun xctrace record --template 'App Launch' --launch '$APP_BUNDLE' --output launch.trace"
+echo "   open launch.trace"
 echo ""

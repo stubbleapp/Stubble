@@ -336,13 +336,12 @@ struct TaskCardView: View {
 }
 
 /// A single vertical color bar segment that connects to adjacent cards.
-/// Rounded caps appear only at the start/end of a continuous run.
+/// Always uses rounded endcaps for a polished look.
 struct ActivityBarSegment: View {
     let color: Color
     let continuesUp: Bool
     let continuesDown: Bool
 
-    private let capRadius: CGFloat = 2.0
     private let inset: CGFloat = 4 // visual breathing room at start/end of a run
 
     var body: some View {
@@ -350,15 +349,10 @@ struct ActivityBarSegment: View {
             let top: CGFloat = continuesUp ? 0 : inset
             let bottom = continuesDown ? geo.size.height : geo.size.height - inset
 
-            UnevenRoundedRectangle(
-                topLeadingRadius: continuesUp ? 0 : capRadius,
-                bottomLeadingRadius: continuesDown ? 0 : capRadius,
-                bottomTrailingRadius: continuesDown ? 0 : capRadius,
-                topTrailingRadius: continuesUp ? 0 : capRadius
-            )
-            .fill(color)
-            .frame(height: bottom - top)
-            .offset(y: top)
+            Capsule()
+                .fill(color)
+                .frame(height: bottom - top)
+                .offset(y: top)
         }
     }
 }

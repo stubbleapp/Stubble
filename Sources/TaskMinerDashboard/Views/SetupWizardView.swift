@@ -55,7 +55,7 @@ struct SetupWizardView: View {
             // Step indicator at top (only shown after welcome page)
             if flow.currentPage > 0 {
                 HStack(spacing: 12) {
-                    ForEach(1...3, id: \.self) { step in
+                    ForEach(1...2, id: \.self) { step in
                         let isActive = (flow.currentPage >= step)
                         HStack(spacing: 6) {
                             Text("\(step)")
@@ -91,8 +91,6 @@ struct SetupWizardView: View {
                     .accessibilityIdentifier("wizard-sign-in")
                 case 2: PermissionsPage(allGranted: $permissionsGranted)
                     .accessibilityIdentifier("wizard-permissions")
-                case 3: PreferencesPage(onComplete: finish)
-                    .accessibilityIdentifier("wizard-preferences")
                 default: EmptyView()
                 }
             }
@@ -148,6 +146,11 @@ struct SetupWizardView: View {
     }
 
     private func handleContinue() {
+        // On the last page (permissions), complete setup instead of advancing
+        if flow.isOnLastPage && flow.canContinue {
+            finish()
+            return
+        }
         switch flow.handleContinue() {
         case .advance:
             break // flow controller already advanced
@@ -191,6 +194,11 @@ struct SetupWizardView: View {
         let key = flow.apiKey.trimmingCharacters(in: CharacterSet.whitespacesAndNewlines)
         if !key.isEmpty {
             SettingsManager.shared.geminiApiKey = key
+        }
+        // Enable launch at login by default
+        SettingsManager.shared.launchAtLogin = true
+        if #available(macOS 13.0, *) {
+            try? SMAppService.mainApp.register()
         }
         // Clear wizard page state since setup is complete
         SettingsManager.shared.wizardPage = 0
@@ -574,97 +582,6 @@ private struct PermissionsPage: View {
             let hasScreenRecording = await PermissionManager.checkScreenRecording()
             screenRecordingGranted = hasScreenRecording
             allGranted = accessibilityGranted && hasScreenRecording
-        }
-    }
-}
-
-// MARK: - Page 4: Preferences + Finish
-
-private struct PreferencesPage: View {
-    var onComplete: () -> Void
-    @State private var launchAtLogin = true
-
-    var body: some View {
-        VStack(spacing: 0) {
-            Spacer()
-
-            Image(systemName: "checkmark.seal.fill")
-                .font(.system(size: 48, weight: .thin))
-                .foregroundStyle(Theme.accent)
-                .padding(.bottom, 16)
-
-            Text("You're All Set")
-                .font(.system(size: 24, weight: .semibold))
-                .foregroundStyle(Theme.textPrimary)
-                .padding(.bottom, 6)
-
-            Text("Stubble will run in the background and summarize your day.\nYou can access it from the menu bar icon any time.")
-                .font(.system(size: 13))
-                .foregroundStyle(Theme.textSecondary)
-                .multilineTextAlignment(.center)
-                .lineSpacing(2)
-                .padding(.bottom, 32)
-                .padding(.horizontal, 40)
-
-            // Launch at login toggle
-            VStack(spacing: 16) {
-                Toggle(isOn: $launchAtLogin) {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("Launch at login")
-                            .font(.system(size: 14, weight: .medium))
-                            .foregroundStyle(Theme.textPrimary)
-                        Text("Start Stubble automatically when you log in to your Mac.")
-                            .font(.system(size: 12))
-                            .foregroundStyle(Theme.textMuted)
-                    }
-                }
-                .toggleStyle(.switch)
-                .tint(Theme.accent)
-                .padding(.horizontal, 60)
-                .accessibilityIdentifier("wizard-launch-at-login")
-                .onChange(of: launchAtLogin) { _, enabled in
-                    updateLoginItem(enabled: enabled)
-                }
-            }
-
-            Spacer()
-                .frame(maxHeight: 40)
-
-            Button {
-                onComplete()
-            } label: {
-                Text("Open Stubble")
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(.white)
-                    .padding(.horizontal, 28)
-                    .padding(.vertical, 10)
-                    .background(Theme.accent)
-                    .clipShape(Capsule())
-            }
-            .buttonStyle(.plain)
-            .accessibilityIdentifier("wizard-finish")
-
-            Spacer()
-        }
-        .onAppear {
-            // Register login item immediately since default is ON.
-            // onChange only fires on changes, so we need this for the default case.
-            updateLoginItem(enabled: launchAtLogin)
-        }
-    }
-
-    private func updateLoginItem(enabled: Bool) {
-        SettingsManager.shared.launchAtLogin = enabled
-        if #available(macOS 13.0, *) {
-            do {
-                if enabled {
-                    try SMAppService.mainApp.register()
-                } else {
-                    try SMAppService.mainApp.unregister()
-                }
-            } catch {
-                Logger.error("Failed to update login item: \(error.localizedDescription)")
-            }
         }
     }
 }

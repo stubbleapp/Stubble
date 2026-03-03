@@ -5,7 +5,7 @@ import TaskMinerShared
 
 extension DashboardViewModel {
 
-    /// Check if the database has any activity data (async to avoid blocking main thread during view layout).
+    /// Check if the database has at least one full day of activity (a completed day before today).
     func checkHasSufficientData() {
         guard habitsHasSufficientData == nil else { return }
         guard let db = dbReader else {
@@ -15,7 +15,12 @@ extension DashboardViewModel {
         // Defer the DB query to next run loop iteration so it doesn't block the tab switch animation
         Task { @MainActor in
             let dates = db.datesWithData()
-            self.habitsHasSufficientData = !dates.isEmpty
+            let formatter = DateFormatter()
+            formatter.dateFormat = "yyyy-MM-dd"
+            let today = formatter.string(from: Date())
+            // Require at least one completed day (any date before today)
+            let hasCompletedDay = dates.contains { $0 < today }
+            self.habitsHasSufficientData = hasCompletedDay
         }
     }
 
