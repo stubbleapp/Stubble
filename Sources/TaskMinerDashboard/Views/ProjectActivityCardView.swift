@@ -6,7 +6,7 @@ struct ProjectActivityCardView: View {
     @Environment(DashboardViewModel.self) var viewModel
 
     private var activityColor: Color {
-        Theme.barPalette[activity.colorIndex % Theme.barPalette.count]
+        viewModel.resolvedColor(for: activity)
     }
 
     var body: some View {

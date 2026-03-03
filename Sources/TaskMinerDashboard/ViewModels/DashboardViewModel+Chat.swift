@@ -5,9 +5,21 @@ import TaskMinerShared
 
 extension DashboardViewModel {
 
+    /// Maximum number of chat messages to keep in memory per thread.
+    private static let maxChatMessages = 50
+
     /// The date string for the currently selected date (yyyy-MM-dd).
     private var selectedDateString: String {
         SharedFormatters.dayFormatter.string(from: selectedDate)
+    }
+
+    /// Prune oldest messages if we're at capacity, then append the new message.
+    /// This prevents unbounded memory growth by capping before adding.
+    private func appendChatMessage(_ message: ChatMessage) {
+        while chatMessages.count >= Self.maxChatMessages {
+            chatMessages.removeFirst()
+        }
+        chatMessages.append(message)
     }
 
     /// Load persisted chat threads and hydrate the active thread.
@@ -209,7 +221,7 @@ extension DashboardViewModel {
         guard activeThreadId != nil else { return }
 
         let userMessage = ChatMessage(role: .user, content: trimmed)
-        chatMessages.append(userMessage)
+        appendChatMessage(userMessage)
         persistMessage(userMessage)
         refreshActiveThreadMeta()
 
@@ -221,7 +233,11 @@ extension DashboardViewModel {
             let firstLine = trimmed.replacingOccurrences(of: "\n", with: " ").trimmingCharacters(in: .whitespaces)
             let title = String(firstLine.prefix(40))
             if !title.isEmpty {
-                try? writer.renameChatThread(threadId: activeThreadId, title: title)
+                do {
+                    try writer.renameChatThread(threadId: activeThreadId, title: title)
+                } catch {
+                    Logger.warning("Failed to rename chat thread: \(error.localizedDescription)")
+                }
                 thread.title = title
                 thread.updatedAt = Date()
             }
@@ -239,7 +255,7 @@ extension DashboardViewModel {
 
         // Create empty assistant message for streaming
         let assistantMessage = ChatMessage(role: .assistant, content: "", isStreaming: true)
-        chatMessages.append(assistantMessage)
+        appendChatMessage(assistantMessage)
 
         Task {
             do {
@@ -314,10 +330,6 @@ extension DashboardViewModel {
                     }
                 }
 
-                // Keep chat history bounded to prevent unbounded memory growth
-                if self.chatMessages.count > 50 {
-                    self.chatMessages.removeFirst(self.chatMessages.count - 50)
-                }
                 self.loadChatThreads()
             } catch {
                 // Remove the empty assistant message on error
@@ -342,8 +354,16 @@ extension DashboardViewModel {
 
         // Clear only the active thread's messages.
         if let writer = taskWriter, let activeThreadId {
-            try? writer.deleteChatMessages(threadId: activeThreadId)
-            try? writer.touchChatThread(threadId: activeThreadId, lastMessageAt: Date(), messageCount: 0)
+            do {
+                try writer.deleteChatMessages(threadId: activeThreadId)
+            } catch {
+                Logger.warning("Failed to delete chat messages: \(error.localizedDescription)")
+            }
+            do {
+                try writer.touchChatThread(threadId: activeThreadId, lastMessageAt: Date(), messageCount: 0)
+            } catch {
+                Logger.warning("Failed to update chat thread: \(error.localizedDescription)")
+            }
             if let thread = chatThreads.first(where: { $0.id == activeThreadId }) {
                 thread.messageCount = 0
                 thread.lastMessageAt = nil

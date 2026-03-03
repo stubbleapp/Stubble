@@ -194,7 +194,7 @@ struct ProjectRow: View {
     }
 
     private var activityColor: Color {
-        Theme.barPalette[activity.colorIndex % Theme.barPalette.count]
+        viewModel.resolvedColor(for: activity)
     }
 
     var body: some View {

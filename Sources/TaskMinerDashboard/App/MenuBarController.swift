@@ -338,6 +338,27 @@ final class MenuBarDelegate: NSObject, NSApplicationDelegate {
 
         menu.addItem(NSMenuItem.separator())
 
+        // Suggested chats (top 3 questions)
+        let questions = loadSuggestedQuestions()
+        if !questions.isEmpty {
+            // Header (disabled, as a label)
+            let headerItem = NSMenuItem(title: "Ask Stubble", action: nil, keyEquivalent: "")
+            headerItem.isEnabled = false
+            menu.addItem(headerItem)
+
+            for (index, question) in questions.prefix(3).enumerated() {
+                let truncated = question.count > 40 ? String(question.prefix(37)) + "..." : question
+                let item = NSMenuItem(title: truncated, action: #selector(askQuestion(_:)), keyEquivalent: "")
+                item.target = self
+                item.tag = index
+                item.representedObject = question
+                item.image = NSImage(systemSymbolName: "bubble.left", accessibilityDescription: nil)
+                menu.addItem(item)
+            }
+
+            menu.addItem(NSMenuItem.separator())
+        }
+
         // Pause / Resume
         let isPaused = pauseController?.isPaused ?? false
 
@@ -430,6 +451,34 @@ final class MenuBarDelegate: NSObject, NSApplicationDelegate {
     @objc private func quitApp() {
         NSApp.terminate(nil)
     }
+
+    @objc private func askQuestion(_ sender: NSMenuItem) {
+        guard let question = sender.representedObject as? String else { return }
+        // Post notification with the question — DashboardViewModel listens for this
+        NotificationCenter.default.post(name: .menuBarChatQuestion, object: nil, userInfo: ["question": question])
+        // Open the app
+        openApp()
+    }
+
+    /// Load suggested questions from today's stubs content in the database.
+    private func loadSuggestedQuestions() -> [String] {
+        guard let config = try? SharedConfiguration(),
+              let dbReader = try? DatabaseReader(path: config.databasePath) else {
+            return []
+        }
+
+        guard let record = dbReader.stubsContent(for: Date()) else {
+            return []
+        }
+
+        // Parse JSON array of questions
+        guard let data = record.questionsJson.data(using: String.Encoding.utf8),
+              let questions = try? JSONDecoder().decode([String].self, from: data) else {
+            return []
+        }
+
+        return questions
+    }
 }
 
 // MARK: - Notifications
@@ -441,4 +490,6 @@ extension Notification.Name {
     static let appearanceModeChanged = Notification.Name("appearanceModeChanged")
     /// Posted by the About menu item to switch Settings to the About tab.
     static let showAboutInSettings = Notification.Name("showAboutInSettings")
+    /// Posted by menu bar when user clicks a suggested chat question.
+    static let menuBarChatQuestion = Notification.Name("menuBarChatQuestion")
 }

@@ -15,15 +15,12 @@ extension TimelineItem {
 @MainActor
 extension Array where Element == TimelineItem {
     /// Activity names overlapping the nearest task before `index`.
-    /// When separated by a gap, returns the current task's own names so the
-    /// solid bar extends flush (continuesUp = true) to meet the dotted bar.
+    /// Returns empty when separated by a gap, so bars get rounded tops after away periods.
     func prevTaskActivityNames(before index: Int, viewModel: DashboardViewModel) -> Set<String> {
         let prevIndex = index - 1
         guard prevIndex >= 0 else { return [] }
+        // Gap before this task → bar should have rounded top (return empty)
         if case .gap = self[prevIndex] {
-            if case .task(let current, _, _) = self[index] {
-                return viewModel.overlappingActivityNames(for: current)
-            }
             return []
         }
         if case .task(let record, _, _) = self[prevIndex] {
@@ -33,15 +30,12 @@ extension Array where Element == TimelineItem {
     }
 
     /// Activity names overlapping the nearest task after `index`.
-    /// When separated by a gap, returns the current task's own names so the
-    /// solid bar extends flush (continuesDown = true) to meet the dotted bar.
+    /// Returns empty when separated by a gap, so bars get rounded bottoms before away periods.
     func nextTaskActivityNames(after index: Int, viewModel: DashboardViewModel) -> Set<String> {
         let nextIndex = index + 1
         guard nextIndex < count else { return [] }
+        // Gap after this task → bar should have rounded bottom (return empty)
         if case .gap = self[nextIndex] {
-            if case .task(let current, _, _) = self[index] {
-                return viewModel.overlappingActivityNames(for: current)
-            }
             return []
         }
         if case .task(let record, _, _) = self[nextIndex] {

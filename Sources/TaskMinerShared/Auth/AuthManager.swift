@@ -44,14 +44,35 @@ public final class AuthManager: @unchecked Sendable {
         }
     }
 
-    // MARK: - State
+    // MARK: - State (thread-safe via sessionQueue)
 
-    public private(set) var isSignedIn: Bool = false
-    public private(set) var userEmail: String?
-    public private(set) var userName: String?
-    public private(set) var userAvatarURL: URL?
-    public private(set) var currentState: AuthState = .signedOut
-    public private(set) var subscriptionTier: String?
+    /// Thread-safe access to sign-in state.
+    public var isSignedIn: Bool {
+        sessionQueue.sync { _isSignedIn }
+    }
+    public var userEmail: String? {
+        sessionQueue.sync { _userEmail }
+    }
+    public var userName: String? {
+        sessionQueue.sync { _userName }
+    }
+    public var userAvatarURL: URL? {
+        sessionQueue.sync { _userAvatarURL }
+    }
+    public var currentState: AuthState {
+        sessionQueue.sync { _currentState }
+    }
+    public var subscriptionTier: String? {
+        sessionQueue.sync { _subscriptionTier }
+    }
+
+    // Backing storage (accessed only via sessionQueue)
+    private var _isSignedIn: Bool = false
+    private var _userEmail: String?
+    private var _userName: String?
+    private var _userAvatarURL: URL?
+    private var _currentState: AuthState = .signedOut
+    private var _subscriptionTier: String?
 
     // MARK: - Session Data
 
@@ -236,7 +257,8 @@ public final class AuthManager: @unchecked Sendable {
     /// Automatically refreshes the token if it's expired or about to expire.
     /// Multiple concurrent callers share a single in-flight refresh to prevent races.
     public func validAccessToken() async throws -> String {
-        let signedIn = sessionQueue.sync { self.isSignedIn }
+        // Use _isSignedIn directly to avoid nested sessionQueue.sync (deadlock)
+        let signedIn = sessionQueue.sync { self._isSignedIn }
         guard signedIn else { throw AuthError.sessionExpired }
 
         // Refresh if token expires within 60 seconds
@@ -256,7 +278,8 @@ public final class AuthManager: @unchecked Sendable {
     /// Refresh the session token if it's expired or about to expire.
     /// Safe to call even if the token is still valid (no-op).
     public func refreshSessionIfNeeded() async throws {
-        let signedIn = sessionQueue.sync { self.isSignedIn }
+        // Use _isSignedIn directly to avoid nested sessionQueue.sync (deadlock)
+        let signedIn = sessionQueue.sync { self._isSignedIn }
         guard signedIn else { return }
 
         let needsRefresh = sessionQueue.sync { () -> Bool in
@@ -304,12 +327,12 @@ public final class AuthManager: @unchecked Sendable {
             tokenExpiresAt = nil
             userCreatedAt = nil
             userId = nil
-            userEmail = nil
-            userName = nil
-            userAvatarURL = nil
-            subscriptionTier = nil
-            isSignedIn = false
-            currentState = .signedOut
+            _userEmail = nil
+            _userName = nil
+            _userAvatarURL = nil
+            _subscriptionTier = nil
+            _isSignedIn = false
+            _currentState = .signedOut
         }
 
         // Delete auth.json
@@ -399,29 +422,29 @@ public final class AuthManager: @unchecked Sendable {
             // Parse user info
             if let user = json["user"] as? [String: Any] {
                 self.userId = user["id"] as? String
-                self.userEmail = user["email"] as? String
+                self._userEmail = user["email"] as? String
 
                 if let createdAtStr = user["created_at"] as? String {
                     self.userCreatedAt = Self.iso8601Formatter.date(from: createdAtStr)
                 }
 
                 if let metadata = user["user_metadata"] as? [String: Any] {
-                    self.subscriptionTier = metadata["subscription_tier"] as? String
+                    self._subscriptionTier = metadata["subscription_tier"] as? String
                     if let avatarStr = metadata["avatar_url"] as? String,
                        avatarStr.hasPrefix("https://") {
-                        self.userAvatarURL = URL(string: avatarStr)
+                        self._userAvatarURL = URL(string: avatarStr)
                     }
                     if let name = metadata["full_name"] as? String ?? metadata["name"] as? String {
-                        self.userName = name
+                        self._userName = name
                     }
                     // Google profile might provide email via metadata
-                    if self.userEmail == nil, let email = metadata["email"] as? String {
-                        self.userEmail = email
+                    if self._userEmail == nil, let email = metadata["email"] as? String {
+                        self._userEmail = email
                     }
                 }
             }
 
-            self.isSignedIn = true
+            self._isSignedIn = true
         }
 
         updateAuthState()
@@ -433,19 +456,29 @@ public final class AuthManager: @unchecked Sendable {
     // MARK: - Auth State Derivation
 
     private func updateAuthState() {
-        if isSignedIn {
-            if subscriptionTier == "pro" {
-                currentState = .pro
-            } else if let remaining = trialDaysRemaining, remaining > 0 {
-                currentState = .trial(daysRemaining: remaining)
+        sessionQueue.sync {
+            if _isSignedIn {
+                if _subscriptionTier == "pro" {
+                    _currentState = .pro
+                } else if let remaining = computeTrialDaysRemaining(), remaining > 0 {
+                    _currentState = .trial(daysRemaining: remaining)
+                } else {
+                    _currentState = .expired
+                }
+            } else if hasBYOKKey() {
+                _currentState = .byok
             } else {
-                currentState = .expired
+                _currentState = .signedOut
             }
-        } else if hasBYOKKey() {
-            currentState = .byok
-        } else {
-            currentState = .signedOut
         }
+    }
+
+    /// Internal helper for trial days calculation (called within sessionQueue).
+    private func computeTrialDaysRemaining() -> Int? {
+        guard let createdAt = userCreatedAt else { return nil }
+        let daysSinceSignup = Calendar.current.dateComponents([.day], from: createdAt, to: Date()).day ?? 0
+        let remaining = StubbleAPIConfig.trialDays - daysSinceSignup
+        return max(0, remaining)
     }
 
     /// Check if a BYOK API key exists in settings.json (same pattern as GeminiClient).
@@ -462,16 +495,19 @@ public final class AuthManager: @unchecked Sendable {
     // MARK: - Persistence (auth.json)
 
     private func persistSession() {
-        var dict: [String: Any] = [:]
-        if let accessToken { dict["access_token"] = accessToken }
-        if let refreshToken { dict["refresh_token"] = refreshToken }
-        if let tokenExpiresAt { dict["expires_at"] = tokenExpiresAt.timeIntervalSince1970 }
-        if let userId { dict["user_id"] = userId }
-        if let userEmail { dict["user_email"] = userEmail }
-        if let userName { dict["user_name"] = userName }
-        if let userCreatedAt { dict["user_created_at"] = Self.iso8601Formatter.string(from: userCreatedAt) }
-        if let subscriptionTier { dict["subscription_tier"] = subscriptionTier }
-        if let userAvatarURL { dict["avatar_url"] = userAvatarURL.absoluteString }
+        let dict: [String: Any] = sessionQueue.sync {
+            var d: [String: Any] = [:]
+            if let accessToken { d["access_token"] = accessToken }
+            if let refreshToken { d["refresh_token"] = refreshToken }
+            if let tokenExpiresAt { d["expires_at"] = tokenExpiresAt.timeIntervalSince1970 }
+            if let userId { d["user_id"] = userId }
+            if let email = _userEmail { d["user_email"] = email }
+            if let name = _userName { d["user_name"] = name }
+            if let userCreatedAt { d["user_created_at"] = Self.iso8601Formatter.string(from: userCreatedAt) }
+            if let tier = _subscriptionTier { d["subscription_tier"] = tier }
+            if let avatar = _userAvatarURL { d["avatar_url"] = avatar.absoluteString }
+            return d
+        }
 
         do {
             let data = try JSONSerialization.data(withJSONObject: dict, options: [.prettyPrinted, .sortedKeys])
@@ -498,17 +534,17 @@ public final class AuthManager: @unchecked Sendable {
             tokenExpiresAt = Date(timeIntervalSince1970: expiresAt)
         }
         userId = dict["user_id"] as? String
-        userEmail = dict["user_email"] as? String
-        userName = dict["user_name"] as? String
-        subscriptionTier = dict["subscription_tier"] as? String
+        _userEmail = dict["user_email"] as? String
+        _userName = dict["user_name"] as? String
+        _subscriptionTier = dict["subscription_tier"] as? String
         if let createdAtStr = dict["user_created_at"] as? String {
             userCreatedAt = Self.iso8601Formatter.date(from: createdAtStr)
         }
         if let avatarStr = dict["avatar_url"] as? String {
-            userAvatarURL = URL(string: avatarStr)
+            _userAvatarURL = URL(string: avatarStr)
         }
 
-        isSignedIn = (accessToken != nil && refreshToken != nil)
+        _isSignedIn = (accessToken != nil && refreshToken != nil)
     }
 
     // MARK: - PKCE Helpers

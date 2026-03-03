@@ -22,6 +22,8 @@ public class TaskWriter {
 
         // WAL busy timeout for contention with CLI process
         sqlite3_busy_timeout(dbPointer, 5000)
+        // Enable WAL mode for better concurrent read/write performance
+        sqlite3_exec(dbPointer, "PRAGMA journal_mode=WAL", nil, nil, nil)
     }
 
     deinit {
@@ -448,6 +450,8 @@ public class TaskWriter {
     public func deleteScreenshots(ids: Set<Int64>) throws {
         guard !ids.isEmpty else { return }
 
+        // Safety: placeholders are always literal "?" characters, never interpolated values.
+        // The actual IDs are bound via sqlite3_bind_int64 below, preventing SQL injection.
         let placeholders = ids.map { _ in "?" }.joined(separator: ",")
         let sql = "DELETE FROM screenshots WHERE id IN (\(placeholders))"
         var stmt: OpaquePointer?

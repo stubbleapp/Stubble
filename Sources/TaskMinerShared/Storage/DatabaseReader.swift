@@ -35,6 +35,9 @@ public class DatabaseReader {
         }
         self.db = dbPointer
         sqlite3_busy_timeout(dbPointer, 5000)
+        // Enable WAL mode for better concurrent read/write performance.
+        // Dashboard reads while daemon writes — WAL prevents lock contention.
+        sqlite3_exec(dbPointer, "PRAGMA journal_mode=WAL", nil, nil, nil)
         runMigrations()
     }
 

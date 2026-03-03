@@ -176,47 +176,34 @@ struct ChatTabView: View {
                 .foregroundStyle(Theme.textPrimary)
                 .padding(.horizontal, 24)
 
-            VStack(spacing: 8) {
+            VStack(spacing: 6) {
                 ForEach(viewModel.chatThreads.prefix(5)) { thread in
                     Button {
                         viewModel.switchToThread(thread.id)
                         viewModel.shouldExpandChatPanel = true
                     } label: {
-                        HStack(spacing: 12) {
-                            Image(systemName: "bubble.left.fill")
-                                .font(.system(size: 12))
-                                .foregroundStyle(Theme.accent.opacity(0.7))
+                        HStack(spacing: 10) {
+                            ActivityHaloDot(color: Theme.accent, size: 10)
 
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(threadTitle(thread))
-                                    .font(.system(size: 13, weight: .medium))
-                                    .foregroundStyle(Theme.textPrimary)
-                                    .lineLimit(1)
-
-                                Text(threadDate(thread))
-                                    .font(.system(size: 11))
-                                    .foregroundStyle(Theme.textMuted)
-                            }
+                            Text(threadTitle(thread))
+                                .font(.system(size: 13, weight: .regular))
+                                .foregroundStyle(Theme.textPrimary)
+                                .lineLimit(1)
 
                             Spacer()
 
-                            if thread.id == viewModel.activeThreadId {
-                                Image(systemName: "checkmark")
-                                    .font(.system(size: 10, weight: .semibold))
-                                    .foregroundStyle(Theme.accent)
-                            }
+                            Text(threadDate(thread))
+                                .font(.system(size: 11))
+                                .foregroundStyle(Theme.textQuaternary)
                         }
-                        .padding(.horizontal, 14)
-                        .padding(.vertical, 10)
-                        .background(
-                            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                                .fill(thread.id == viewModel.activeThreadId
-                                      ? Theme.selectedSurface
-                                      : Theme.cardBackground)
-                        )
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 8)
+                        .background(Theme.primaryBackground.opacity(0.5))
+                        .background(.ultraThinMaterial)
+                        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
                         .overlay(
-                            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                                .strokeBorder(Theme.cardBorder, lineWidth: 0.5)
+                            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                .strokeBorder(Color.white.opacity(0.08), lineWidth: 0.5)
                         )
                     }
                     .buttonStyle(.plain)

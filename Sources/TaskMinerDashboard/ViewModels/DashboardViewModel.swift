@@ -89,33 +89,94 @@ final class DashboardViewModel {
     var expandedProjectActivityId: UUID?
     var expandedActivityGroupId: String?
 
-    // Chat
-    var chatThreads: [ChatThread] = []
-    var activeThreadId: Int64?
-    var chatMessages: [ChatMessage] = []
-    var isChatLoading = false
-    var chatError: String?
-    var isCreatingThread = false
-    var isSummarizingThread = false
-    var threadSummaryMessageCounts: [Int64: Int] = [:]
+    // MARK: - Sub-ViewModels (Domain-Specific State)
+
+    /// Chat state and operations. Access via `chat` property.
+    private(set) var chatVM: ChatViewModel!
+
+    /// Habits analysis state and operations. Access via `habits` property.
+    private(set) var habitsVM: HabitsViewModel!
+
+    // MARK: - Chat (bridged to chatVM for backwards compatibility)
+
+    var chatThreads: [ChatThread] {
+        get { chatVM.threads }
+        set { chatVM.threads = newValue }
+    }
+    var activeThreadId: Int64? {
+        get { chatVM.activeThreadId }
+        set { chatVM.activeThreadId = newValue }
+    }
+    var chatMessages: [ChatMessage] {
+        get { chatVM.messages }
+        set { chatVM.messages = newValue }
+    }
+    var isChatLoading: Bool {
+        get { chatVM.isLoading }
+        set { chatVM.isLoading = newValue }
+    }
+    var chatError: String? {
+        get { chatVM.error }
+        set { chatVM.error = newValue }
+    }
+    var isCreatingThread: Bool {
+        get { chatVM.isCreatingThread }
+        set { chatVM.isCreatingThread = newValue }
+    }
+    var isSummarizingThread: Bool {
+        get { chatVM.isSummarizingThread }
+        set { chatVM.isSummarizingThread = newValue }
+    }
+    var threadSummaryMessageCounts: [Int64: Int] {
+        get { chatVM.threadSummaryMessageCounts }
+        set { chatVM.threadSummaryMessageCounts = newValue }
+    }
     /// The name of the currently active screen/tab (e.g. "Day", "Chat", "Habits").
     /// Used to give the chat assistant context about what the user is looking at.
     var currentScreen: String = "Chat"
     /// Set by ChatTabView or ChatOverlayView to trigger a chat question.
-    var pendingChatQuestion: String?
+    var pendingChatQuestion: String? {
+        get { chatVM.pendingQuestion }
+        set { chatVM.pendingQuestion = newValue }
+    }
     /// Set to true to expand the chat overlay panel (e.g., when clicking a recent chat).
-    var shouldExpandChatPanel = false
+    var shouldExpandChatPanel: Bool {
+        get { chatVM.shouldExpandPanel }
+        set { chatVM.shouldExpandPanel = newValue }
+    }
 
-    // Habits (cross-day analysis)
-    var habitsAnalysis: HabitsAnalysis?
-    var habitsSnapshot: HabitsDataSnapshot?
-    var isGeneratingHabits = false
-    var habitsError: String?
-    var habitsGenerator: HabitsGenerator?
-    var hasAttemptedHabitsGeneration = false
+    // MARK: - Habits (bridged to habitsVM for backwards compatibility)
+
+    var habitsAnalysis: HabitsAnalysis? {
+        get { habitsVM.analysis }
+        set { habitsVM.analysis = newValue }
+    }
+    var habitsSnapshot: HabitsDataSnapshot? {
+        get { habitsVM.snapshot }
+        set { habitsVM.snapshot = newValue }
+    }
+    var isGeneratingHabits: Bool {
+        get { habitsVM.isGenerating }
+        set { habitsVM.isGenerating = newValue }
+    }
+    var habitsError: String? {
+        get { habitsVM.error }
+        set { habitsVM.error = newValue }
+    }
+    var habitsGenerator: HabitsGenerator? {
+        get { habitsVM.habitsGenerator }
+        set { habitsVM.habitsGenerator = newValue }
+    }
+    var hasAttemptedHabitsGeneration: Bool {
+        get { habitsVM.hasAttemptedGeneration }
+        set { habitsVM.hasAttemptedGeneration = newValue }
+    }
     /// Cached result of whether the database has any activity data.
     /// Checked asynchronously on Habits tab appearance to avoid blocking the main thread.
-    var habitsHasSufficientData: Bool?
+    var habitsHasSufficientData: Bool? {
+        get { habitsVM.hasSufficientData }
+        set { habitsVM.hasSufficientData = newValue }
+    }
 
     // App name → bundle ID mapping (for icon resolution)
     var appNameBundleMap: [String: String] = [:]
@@ -130,6 +191,7 @@ final class DashboardViewModel {
     private var refreshTimer: Timer?
     private var wakeObserver: NSObjectProtocol?
     private var timeChangeObserver: NSObjectProtocol?
+    private var menuBarChatObserver: NSObjectProtocol?
 
     deinit {
         // deinit is nonisolated but this @MainActor class is always deallocated on
@@ -140,6 +202,7 @@ final class DashboardViewModel {
             refreshTimer?.invalidate()
             if let wakeObserver { NotificationCenter.default.removeObserver(wakeObserver) }
             if let timeChangeObserver { NotificationCenter.default.removeObserver(timeChangeObserver) }
+            if let menuBarChatObserver { NotificationCenter.default.removeObserver(menuBarChatObserver) }
         }
     }
 
@@ -178,21 +241,38 @@ final class DashboardViewModel {
 
         // Initialize AI client: proxy mode (signed-in) → BYOK key (settings.json) → env var.
         // Skip if setup wizard hasn't completed yet.
+        var habitsGen: HabitsGenerator? = nil
         if SettingsManager.shared.hasCompletedSetup, let client = GeminiClient.resolvedClient() {
             self.geminiClient = client
             self.taskSummarizer = TaskSummarizer(geminiClient: client)
             self.activityGenerator = ProjectActivityGenerator(geminiClient: client)
             self.recommendationGenerator = RecommendationGenerator(geminiClient: client)
-            self.habitsGenerator = HabitsGenerator(geminiClient: client)
+            habitsGen = HabitsGenerator(geminiClient: client)
             self.hasGeminiKey = true
         } else {
             self.geminiClient = nil
             self.taskSummarizer = nil
             self.activityGenerator = nil
             self.recommendationGenerator = nil
-            self.habitsGenerator = nil
             self.hasGeminiKey = false
         }
+
+        // Initialize sub-view-models (must be done before loading data)
+        // Note: We pass `self` after stored properties are initialized
+        self.chatVM = ChatViewModel(
+            dashboardViewModel: self,
+            dbReader: dbReader,
+            taskWriter: taskWriter,
+            memoryStore: memoryStore,
+            geminiClient: geminiClient
+        )
+        self.habitsVM = HabitsViewModel(
+            dashboardViewModel: self,
+            dbReader: dbReader,
+            taskWriter: taskWriter,
+            memoryStore: memoryStore,
+            habitsGenerator: habitsGen
+        )
 
         loadAvailableDates()
         loadDataForSelectedDate()
@@ -516,15 +596,19 @@ final class DashboardViewModel {
             self.taskSummarizer = TaskSummarizer(geminiClient: client)
             self.activityGenerator = ProjectActivityGenerator(geminiClient: client)
             self.recommendationGenerator = RecommendationGenerator(geminiClient: client)
-            self.habitsGenerator = HabitsGenerator(geminiClient: client)
             self.hasGeminiKey = true
+            // Update sub-view-models
+            self.chatVM.geminiClient = client
+            self.habitsVM.habitsGenerator = HabitsGenerator(geminiClient: client)
         } else {
             self.geminiClient = nil
             self.taskSummarizer = nil
             self.activityGenerator = nil
             self.recommendationGenerator = nil
-            self.habitsGenerator = nil
             self.hasGeminiKey = false
+            // Clear sub-view-models
+            self.chatVM.geminiClient = nil
+            self.habitsVM.habitsGenerator = nil
         }
     }
 
@@ -541,8 +625,10 @@ final class DashboardViewModel {
             self.taskSummarizer = TaskSummarizer(geminiClient: client)
             self.activityGenerator = ProjectActivityGenerator(geminiClient: client)
             self.recommendationGenerator = RecommendationGenerator(geminiClient: client)
-            self.habitsGenerator = HabitsGenerator(geminiClient: client)
             self.hasGeminiKey = true
+            // Update sub-view-models
+            self.chatVM.geminiClient = client
+            self.habitsVM.habitsGenerator = HabitsGenerator(geminiClient: client)
         } else {
             // No BYOK key — try proxy mode (signed-in user) before giving up
             refreshForAuthChange()
@@ -618,6 +704,18 @@ final class DashboardViewModel {
     /// Returns a set of top-3 activity names that overlap the given task.
     func overlappingActivityNames(for task: TaskRecord) -> Set<String> {
         Set(overlappingActivities(for: task).map(\.name))
+    }
+
+    /// Returns the resolved color for a given activity.
+    /// If the activity is in the top 3, returns its collision-resolved color.
+    /// Otherwise, returns the raw color from its colorIndex.
+    func resolvedColor(for activity: ProjectActivity) -> Color {
+        // Check if this activity is in the resolved top 3
+        if let match = resolvedTop3.first(where: { $0.activity.id == activity.id }) {
+            return match.color
+        }
+        // Fallback to raw color for activities outside top 3
+        return Theme.barPalette[activity.colorIndex % Theme.barPalette.count]
     }
 
     // MARK: - Helpers
@@ -718,7 +816,11 @@ final class DashboardViewModel {
         // 2. Delete screenshot files from disk
         let fm = FileManager.default
         for path in screenshotPaths {
-            try? fm.removeItem(atPath: path)
+            do {
+                try fm.removeItem(atPath: path)
+            } catch {
+                Logger.warning("Failed to delete screenshot at \(path): \(error.localizedDescription)")
+            }
         }
 
         // Also clear the screenshots directory of any orphaned files
@@ -726,14 +828,22 @@ final class DashboardViewModel {
             let ssDir = config.screenshotDirectory
             if let files = try? fm.contentsOfDirectory(at: ssDir, includingPropertiesForKeys: nil) {
                 for file in files {
-                    try? fm.removeItem(at: file)
+                    do {
+                        try fm.removeItem(at: file)
+                    } catch {
+                        Logger.warning("Failed to delete file \(file.lastPathComponent): \(error.localizedDescription)")
+                    }
                 }
             }
         }
 
         // 3. Reset memory
         if let config = try? SharedConfiguration() {
-            try? fm.removeItem(at: config.memoryPath)
+            do {
+                try fm.removeItem(at: config.memoryPath)
+            } catch {
+                Logger.warning("Failed to delete memory file: \(error.localizedDescription)")
+            }
         }
         memoryStore.clear()
 
@@ -795,6 +905,19 @@ final class DashboardViewModel {
             queue: .main
         ) { [weak self] _ in
             Task { @MainActor in self?.advanceToTodayIfNeeded() }
+        }
+
+        // Listen for menu bar chat triggers
+        menuBarChatObserver = NotificationCenter.default.addObserver(
+            forName: .menuBarChatQuestion,
+            object: nil,
+            queue: .main
+        ) { [weak self] notification in
+            Task { @MainActor in
+                guard let question = notification.userInfo?["question"] as? String else { return }
+                self?.pendingChatQuestion = question
+                self?.shouldExpandChatPanel = true
+            }
         }
     }
 

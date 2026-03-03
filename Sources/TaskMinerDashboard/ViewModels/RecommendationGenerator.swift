@@ -14,6 +14,7 @@ final class RecommendationGenerator: Sendable {
     // MARK: - Public API
 
     /// Generate stubs content: greeting, suggested questions, and recommendations.
+    /// Uses two-stage generation: first generates candidates, then refines for relevance.
     func generate(
         recentTasks: [String: [TaskRecord]],
         projectActivities: [ProjectActivity],
@@ -22,6 +23,49 @@ final class RecommendationGenerator: Sendable {
         activityLog: String? = nil,
         weeklyTrends: String? = nil,
         ocrDigest: String? = nil
+    ) async throws -> StubsContent {
+        // Stage 1: Generate candidate recommendations (6-8 items)
+        let candidateContent = try await generateCandidates(
+            recentTasks: recentTasks,
+            projectActivities: projectActivities,
+            appsUsed: appsUsed,
+            memoryContext: memoryContext,
+            activityLog: activityLog,
+            weeklyTrends: weeklyTrends,
+            ocrDigest: ocrDigest
+        )
+
+        // If we got few recommendations, skip refinement
+        guard candidateContent.recommendations.count > 3 else {
+            return candidateContent
+        }
+
+        // Stage 2: Refine recommendations for relevance
+        let refinedRecs = try await refineRecommendations(
+            candidates: candidateContent.recommendations,
+            memoryContext: memoryContext,
+            primaryFocus: extractPrimaryFocus(from: recentTasks, projectActivities: projectActivities)
+        )
+
+        return StubsContent(
+            greetingContext: candidateContent.greetingContext,
+            daySummary: nil,
+            suggestedQuestions: candidateContent.suggestedQuestions,
+            recommendations: refinedRecs
+        )
+    }
+
+    // MARK: - Two-Stage Generation
+
+    /// Stage 1: Generate 6-8 candidate recommendations with full context.
+    private func generateCandidates(
+        recentTasks: [String: [TaskRecord]],
+        projectActivities: [ProjectActivity],
+        appsUsed: [String: TimeInterval],
+        memoryContext: String?,
+        activityLog: String?,
+        weeklyTrends: String?,
+        ocrDigest: String?
     ) async throws -> StubsContent {
         let prompt = buildPrompt(
             recentTasks: recentTasks,
@@ -40,19 +84,24 @@ final class RecommendationGenerator: Sendable {
         to THEM specifically. A recommendation for a Swift/macOS developer should be completely different \
         from one for a web developer, even if the activity looks similar. \
         \
+        IMPORTANT: Pay close attention to the RECENCY TIERS in the activity data. Today and yesterday \
+        show full detail because that's what the user is actively working on RIGHT NOW. Older data \
+        shows summaries for context. Prioritize recommendations that help with TODAY'S work. \
+        \
         Your output has three parts: \
         1. greeting_context: A warm, personal 1-2 sentence contextual note that shows you know what they're \
-           working on. Reference their specific projects or goals by name. \
+           working on RIGHT NOW. Reference their specific projects or goals by name. \
            IMPORTANT: Do NOT include any greeting like "Hey", "Hi", "Hello", or the user's name — \
            the UI already displays a greeting header. Just jump straight into the context \
            (e.g. "You've been deep into the permission system this week..." not "Hey Sam, you've been..."). \
         2. suggested_questions: 3-4 SHORT questions (max 6-8 words each) the user might ask about their \
-           work, interests, or areas of curiosity. At least one question should be exploratory or \
+           CURRENT work, interests, or areas of curiosity. At least one question should be exploratory or \
            interest-driven — something they'd enjoy learning about, not just need for work. \
            Keep them punchy and concise — e.g. "Best WAL checkpoint strategy?", "Handle TCC after rebuild?", \
            "Latest advances in on-device ML?". \
            Reference their actual projects, technologies, and interests but stay brief. \
-        3. recommendations: 3-6 actionable items (see categories below). \
+        3. recommendations: Generate 6-8 candidate recommendations (see categories below). \
+           These will be refined in a second pass, so include a mix of categories and depths. \
         \
         Categories: \
         - article: A relevant technical article, tutorial, or documentation page. MUST be a real, \
@@ -67,22 +116,13 @@ final class RecommendationGenerator: Sendable {
         \
         Rules: \
         - The User Profile is your primary lens. If the user is building a macOS app in Swift, recommend \
-          Swift/macOS resources, not generic productivity tools. If they do legal work, recommend legal \
-          tech and compliance resources. \
-        - If the User Profile mentions interests or curiosity areas, weave at least one recommendation \
-          that expands on those — a deeper resource, adjacent topic, or something that connects their \
-          interests with their current work. \
+          Swift/macOS resources, not generic productivity tools. \
+        - PRIORITIZE TODAY'S WORK: The most relevant recommendations address what the user is doing RIGHT NOW. \
         - Cross-reference the weekly trends with the user profile to find the most impactful recommendations. \
-          For example, if they've spent 3 days on a database layer, recommend specific database optimization \
-          techniques for their stack. \
-        - Use the browser URLs and document paths from the activity log to understand EXACTLY what pages \
-          they're reading and what files they're editing — then recommend resources that go deeper on those \
-          specific topics. \
-        - Use relevant links from tasks (repos, docs, file paths) to understand EXACTLY what projects and \
-          codebases they're working in, then recommend resources specific to those. \
+        - Use the browser URLs and document paths to understand EXACTLY what pages they're reading and \
+          what files they're editing — then recommend resources that go deeper on those specific topics. \
         - Every recommendation's "reason" must cite specific projects, tasks, or patterns from the data. \
         - Never recommend tools/apps the user already uses heavily. \
-        - Prefer depth over breadth: 3 highly relevant recommendations beat 6 generic ones. \
         - URLs must be real and well-known — official docs, tool homepages, established tutorials. \
         - Avoid generic advice ("take breaks", "use version control", "back up your data"). \
         \
@@ -110,6 +150,117 @@ final class RecommendationGenerator: Sendable {
         }
 
         return StubsContent(greetingContext: "", daySummary: nil, suggestedQuestions: [], recommendations: [])
+    }
+
+    /// Stage 2: Refine candidates by scoring for relevance and filtering to top 3-4.
+    private func refineRecommendations(
+        candidates: [Recommendation],
+        memoryContext: String?,
+        primaryFocus: String
+    ) async throws -> [Recommendation] {
+        // Build a compact representation of candidates for the refinement prompt
+        var candidateLines: [String] = []
+        for (index, rec) in candidates.enumerated() {
+            candidateLines.append("""
+            [\(index)] \(rec.category.rawValue): "\(rec.title)"
+               Description: \(rec.description)
+               Reason: \(rec.reason)
+            """)
+        }
+
+        let refinementPrompt = """
+        ## User Context
+        \(memoryContext ?? "No profile available")
+
+        ## Current Primary Focus
+        \(primaryFocus)
+
+        ## Candidate Recommendations
+        \(candidateLines.joined(separator: "\n\n"))
+
+        ## Task
+        Score each recommendation on a scale of 1-5 for:
+        1. RELEVANCE: Does this directly help with their PRIMARY focus (not tangential projects)?
+        2. ACTIONABILITY: Can they use this TODAY, not someday?
+        3. NOVELTY: Is this something they likely DON'T already know?
+
+        Select the TOP 3-4 recommendations that score highest overall (minimum 3 on relevance).
+        Return ONLY the indices of the selected recommendations, in order of relevance.
+
+        Respond with JSON: {"selected_indices": [0, 2, 5]}
+        """
+
+        let systemInstruction = """
+        You are a recommendation quality filter. Your job is to select the most relevant, \
+        actionable, and novel recommendations from a candidate list. \
+        Be ruthless — only keep recommendations that DIRECTLY help with the user's current work. \
+        Discard anything generic, tangential, or that the user likely already knows. \
+        Respond with ONLY a JSON object containing the selected indices.
+        """
+
+        do {
+            let response = try await geminiClient.generateContent(
+                prompt: refinementPrompt,
+                systemInstruction: systemInstruction
+            )
+
+            // Parse the selected indices
+            guard let parsed = JSONSanitizer.parse(response) as? [String: Any],
+                  let indices = parsed["selected_indices"] as? [Int] else {
+                Logger.warning("RecommendationGenerator: refinement parse failed, returning top 4 candidates")
+                return Array(candidates.prefix(4))
+            }
+
+            // Map indices back to recommendations
+            let refined = indices.compactMap { index -> Recommendation? in
+                guard index >= 0 && index < candidates.count else { return nil }
+                return candidates[index]
+            }
+
+            return refined.isEmpty ? Array(candidates.prefix(4)) : refined
+
+        } catch {
+            Logger.warning("RecommendationGenerator: refinement failed (\(error.localizedDescription)), returning top 4 candidates")
+            return Array(candidates.prefix(4))
+        }
+    }
+
+    /// Extract the user's primary focus from recent activity for refinement context.
+    private func extractPrimaryFocus(
+        from recentTasks: [String: [TaskRecord]],
+        projectActivities: [ProjectActivity]
+    ) -> String {
+        var focusLines: [String] = []
+
+        // Get today's date string
+        let today = SharedFormatters.dayFormatter.string(from: Date())
+        let yesterday = SharedFormatters.dayFormatter.string(
+            from: Calendar.current.date(byAdding: .day, value: -1, to: Date()) ?? Date()
+        )
+
+        // Primary focus from today's tasks
+        if let todayTasks = recentTasks[today], !todayTasks.isEmpty {
+            let totalTime = todayTasks.reduce(0.0) { $0 + $1.duration }
+            let topTask = todayTasks.max(by: { $0.duration < $1.duration })
+            if let top = topTask {
+                focusLines.append("Today's main work: \(top.title) (\(Int(top.duration / 60))m of \(Int(totalTime / 60))m total)")
+            }
+        }
+
+        // Yesterday's context
+        if let yesterdayTasks = recentTasks[yesterday], !yesterdayTasks.isEmpty {
+            let topTask = yesterdayTasks.max(by: { $0.duration < $1.duration })
+            if let top = topTask {
+                focusLines.append("Yesterday's main work: \(top.title)")
+            }
+        }
+
+        // Top project activity
+        if let topProject = projectActivities.max(by: { $0.totalDuration < $1.totalDuration }) {
+            focusLines.append("Current project: \(topProject.name) — \(topProject.summary)")
+        }
+
+        return focusLines.isEmpty ? "General work activity" : focusLines.joined(separator: "\n")
     }
 
     /// Generate a retrospective day summary for a past day.
@@ -222,25 +373,88 @@ final class RecommendationGenerator: Sendable {
             lines.append("")
         }
 
-        // 4. Recent tasks by day — expanded detail with links
+        // 4. Recent tasks with RECENCY WEIGHTING
+        // - Tier 1 (Today/Yesterday): Full detail — titles, descriptions, apps, links
+        // - Tier 2 (2-3 days ago): Summarized — titles and durations only
+        // - Tier 3 (4-7 days ago): Themes only — project names, no individual tasks
         lines.append("## Recent Activity Data")
+        lines.append("(Note: Data is tiered by recency — TODAY is most important for recommendations)")
         lines.append("")
 
-        let sortedDates = recentTasks.keys.sorted().reversed()
-        for dateStr in sortedDates {
-            guard let tasks = recentTasks[dateStr] else { continue }
-            lines.append("### \(dateStr)")
-            for task in tasks.prefix(15) {
-                let durMins = Int(task.duration / 60)
-                let apps = task.appNamesList.joined(separator: ", ")
-                lines.append("- \"\(task.title)\" (\(durMins)m) — \(apps)")
-                if !task.description.isEmpty {
-                    lines.append("  \(task.description)")
+        let calendar = Calendar.current
+        let today = calendar.startOfDay(for: Date())
+
+        // Categorize dates into tiers
+        var tier1Dates: [String] = []  // Today, Yesterday
+        var tier2Dates: [String] = []  // 2-3 days ago
+        var tier3Dates: [String] = []  // 4-7 days ago
+
+        for dateStr in recentTasks.keys {
+            guard let date = SharedFormatters.dayFormatter.date(from: dateStr) else { continue }
+            let dayStart = calendar.startOfDay(for: date)
+            let daysAgo = calendar.dateComponents([.day], from: dayStart, to: today).day ?? 0
+
+            switch daysAgo {
+            case 0...1: tier1Dates.append(dateStr)
+            case 2...3: tier2Dates.append(dateStr)
+            default: tier3Dates.append(dateStr)
+            }
+        }
+
+        // Tier 1: Full detail (Today/Yesterday) — THIS IS WHAT MATTERS MOST
+        if !tier1Dates.isEmpty {
+            lines.append("### 🎯 CURRENT FOCUS (Today/Yesterday) — Prioritize recommendations for this work")
+            for dateStr in tier1Dates.sorted().reversed() {
+                guard let tasks = recentTasks[dateStr] else { continue }
+                let isToday = dateStr == SharedFormatters.dayFormatter.string(from: Date())
+                lines.append("#### \(dateStr)\(isToday ? " (TODAY)" : "")")
+                for task in tasks.prefix(15) {
+                    let durMins = Int(task.duration / 60)
+                    let apps = task.appNamesList.joined(separator: ", ")
+                    lines.append("- \"\(task.title)\" (\(durMins)m) — \(apps)")
+                    if !task.description.isEmpty {
+                        lines.append("  \(task.description)")
+                    }
+                    let links = task.linksList.map(\.value)
+                    if !links.isEmpty {
+                        lines.append("  Links: \(links.prefix(3).joined(separator: ", "))")
+                    }
                 }
-                let links = task.linksList.map(\.value)
-                if !links.isEmpty {
-                    lines.append("  Links: \(links.prefix(3).joined(separator: ", "))")
+            }
+            lines.append("")
+        }
+
+        // Tier 2: Summarized (2-3 days ago) — titles and durations only
+        if !tier2Dates.isEmpty {
+            lines.append("### Recent Context (2-3 days ago)")
+            for dateStr in tier2Dates.sorted().reversed() {
+                guard let tasks = recentTasks[dateStr] else { continue }
+                lines.append("#### \(dateStr)")
+                for task in tasks.prefix(10) {
+                    let durMins = Int(task.duration / 60)
+                    lines.append("- \"\(task.title)\" (\(durMins)m)")
                 }
+            }
+            lines.append("")
+        }
+
+        // Tier 3: Themes only (4-7 days ago) — aggregate into project summaries
+        if !tier3Dates.isEmpty {
+            lines.append("### Background Context (4-7 days ago) — themes only")
+            var projectTotals: [String: (minutes: Int, count: Int)] = [:]
+            for dateStr in tier3Dates {
+                guard let tasks = recentTasks[dateStr] else { continue }
+                for task in tasks {
+                    // Use first 3 words of title as a rough project key
+                    let words = task.title.split(separator: " ").prefix(3).joined(separator: " ")
+                    let key = words.isEmpty ? "Other" : words
+                    let current = projectTotals[key] ?? (0, 0)
+                    projectTotals[key] = (current.minutes + Int(task.duration / 60), current.count + 1)
+                }
+            }
+            let sorted = projectTotals.sorted { $0.value.minutes > $1.value.minutes }
+            for (theme, stats) in sorted.prefix(8) {
+                lines.append("- \(theme): \(stats.minutes)m across \(stats.count) tasks")
             }
             lines.append("")
         }
@@ -258,11 +472,11 @@ final class RecommendationGenerator: Sendable {
             lines.append("")
         }
 
-        // 6. Apps and time spent
+        // 6. Apps and time spent (weighted toward recent usage)
         if !appsUsed.isEmpty {
             lines.append("## Apps Used (sorted by time)")
             let sorted = appsUsed.sorted { $0.value > $1.value }
-            for (app, seconds) in sorted.prefix(15) {
+            for (app, seconds) in sorted.prefix(12) {
                 let mins = Int(seconds / 60)
                 if mins > 0 {
                     lines.append("- \(app): \(mins)m")
@@ -302,16 +516,18 @@ final class RecommendationGenerator: Sendable {
         }
 
         Top-level fields:
-        - greeting_context: 1-2 warm, personal sentences (NO greeting/name — UI shows that) that reference the user's actual projects by name
-        - suggested_questions: 3-4 SHORT questions (max 6-8 words each) tied to their current work, interests, or curiosity areas. At least one should be exploratory/interest-driven.
+        - greeting_context: 1-2 warm, personal sentences (NO greeting/name — UI shows that) that reference the user's CURRENT projects by name
+        - suggested_questions: 3-4 SHORT questions (max 6-8 words each) tied to their CURRENT work. At least one should be exploratory/interest-driven.
 
         Recommendation fields:
         - category: one of "article", "tool", "best_practice", "workflow", "learning", "exploration"
-        - title: concise, specific title that would only make sense for THIS user
-        - description: 2-3 sentences explaining what this is and why it's valuable for THIS user's specific situation
-        - reason: 1 sentence citing specific tasks, projects, or multi-day patterns from the data
+        - title: concise, specific title that would only make sense for THIS user's CURRENT work
+        - description: 2-3 sentences explaining what this is and why it's valuable for their CURRENT situation
+        - reason: 1 sentence citing specific tasks from TODAY or this week
         - action_url: a real URL (official docs, tool homepage, well-known tutorial). Use null if no URL applies.
         - icon: an SF Symbol name (e.g. "doc.text", "wrench.and.screwdriver", "lightbulb", "arrow.triangle.branch", "book", "cpu", "network", "lock.shield", "swift", "terminal")
+
+        IMPORTANT: Generate 6-8 recommendations. Prioritize TODAY'S work from the 🎯 CURRENT FOCUS section.
         """)
 
         return lines.joined(separator: "\n")

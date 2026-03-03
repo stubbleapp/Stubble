@@ -5,10 +5,14 @@ import Foundation
 ///
 /// The dashboard's `SettingsManager` delegates to this class so the singleton
 /// still works but the core logic is testable via the shared library.
+/// Thread-safe via internal lock.
 public final class SettingsStore {
 
     /// The file URL where settings are persisted.
     public let filePath: URL
+
+    /// Lock for thread-safe cache access.
+    private let lock = NSLock()
 
     /// In-memory cache to avoid disk reads on every access.
     private var cached: AppSettings?
@@ -20,7 +24,11 @@ public final class SettingsStore {
     // MARK: - Read / Write
 
     /// Load settings from disk (or return defaults if the file doesn't exist).
+    /// Thread-safe.
     public func load() -> AppSettings {
+        lock.lock()
+        defer { lock.unlock() }
+
         if let cached { return cached }
 
         guard FileManager.default.fileExists(atPath: filePath.path) else {
@@ -38,8 +46,12 @@ public final class SettingsStore {
 
     /// Save settings to disk, creating the parent directory if needed.
     /// Sets file permissions to 0600 (owner-only) to protect the API key.
+    /// Thread-safe.
     @discardableResult
     public func save(_ settings: AppSettings) -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+
         let dir = filePath.deletingLastPathComponent()
         do {
             try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
@@ -63,7 +75,10 @@ public final class SettingsStore {
     }
 
     /// Invalidate the in-memory cache so the next `load()` reads from disk.
+    /// Thread-safe.
     public func invalidateCache() {
+        lock.lock()
+        defer { lock.unlock() }
         cached = nil
     }
 

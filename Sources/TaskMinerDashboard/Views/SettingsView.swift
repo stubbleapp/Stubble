@@ -71,7 +71,6 @@ struct SettingsView: View {
     @State private var granularity: TaskGranularity = .medium
     @State private var minAwayMinutes: Int = 15
     @State private var appearanceMode: AppearanceMode = .system
-    @State private var analyticsEnabled: Bool = true
 
     // Exclusions
     @State private var exclusions: [String] = []
@@ -162,10 +161,6 @@ struct SettingsView: View {
             guard !isLoading else { return }
             SettingsManager.shared.minAwayMinutes = minAwayMinutes
         }
-        .onChange(of: analyticsEnabled) {
-            guard !isLoading else { return }
-            SettingsManager.shared.analyticsEnabled = analyticsEnabled
-        }
         .onChange(of: apiKey) {
             guard !isLoading else { return }
             viewModel.updateGeminiKey(apiKey)
@@ -204,7 +199,6 @@ struct SettingsView: View {
         minAwayMinutes = SettingsManager.shared.minAwayMinutes
         appearanceMode = SettingsManager.shared.appearanceMode
         exclusions = SettingsManager.shared.exclusions
-        analyticsEnabled = SettingsManager.shared.analyticsEnabled
         loadMemoryEntries()
         isLoading = false
     }
@@ -391,20 +385,6 @@ struct SettingsView: View {
                     .italic()
             }
 
-            // Analytics
-            VStack(alignment: .leading, spacing: 8) {
-                Toggle(isOn: $analyticsEnabled) {
-                    Text("Send anonymous usage data")
-                        .font(.subheadline.weight(.medium))
-                        .foregroundStyle(Theme.textPrimary)
-                }
-                .toggleStyle(.switch)
-                .controlSize(.small)
-
-                Text("Helps improve Stubble by sharing anonymous feature usage counts. No personal data, screen content, or activity details are ever sent.")
-                    .font(.caption2)
-                    .foregroundStyle(Theme.textMuted)
-            }
         }
     }
 

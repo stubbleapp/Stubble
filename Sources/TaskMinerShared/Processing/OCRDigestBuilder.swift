@@ -97,11 +97,17 @@ public enum OCRDigestBuilder {
 
     // MARK: - Private Extraction
 
-    private static let urlPattern = try! NSRegularExpression(
-        pattern: #"https?://[^\s"'<>\]\)}{,]+"#
-    )
+    private static let urlPattern: NSRegularExpression? = {
+        do {
+            return try NSRegularExpression(pattern: #"https?://[^\s"'<>\]\)}{,]+"#)
+        } catch {
+            assertionFailure("Invalid URL regex pattern: \(error)")
+            return nil
+        }
+    }()
 
     private static func extractURLs(from text: String, into set: inout Set<String>) {
+        guard let urlPattern else { return }
         let range = NSRange(text.startIndex..., in: text)
         for match in urlPattern.matches(in: text, range: range) {
             guard let r = Range(match.range, in: text) else { continue }
@@ -118,11 +124,17 @@ public enum OCRDigestBuilder {
         }
     }
 
-    private static let filePathPattern = try! NSRegularExpression(
-        pattern: #"(?:/Users/[^\s:;,"']+|~/[^\s:;,"']+)"#
-    )
+    private static let filePathPattern: NSRegularExpression? = {
+        do {
+            return try NSRegularExpression(pattern: #"(?:/Users/[^\s:;,"']+|~/[^\s:;,"']+)"#)
+        } catch {
+            assertionFailure("Invalid file path regex pattern: \(error)")
+            return nil
+        }
+    }()
 
     private static func extractFilePaths(from text: String, into set: inout Set<String>) {
+        guard let filePathPattern else { return }
         let range = NSRange(text.startIndex..., in: text)
         for match in filePathPattern.matches(in: text, range: range) {
             guard let r = Range(match.range, in: text) else { continue }
@@ -145,7 +157,14 @@ public enum OCRDigestBuilder {
             (#"(?:class|struct|enum|protocol|interface)\s+([A-Z]\w{2,})"#, 1),
             (#"(?:import|from)\s+([A-Za-z_][\w.]{2,})"#, 1),
         ]
-        return defs.map { (try! NSRegularExpression(pattern: $0.0), $0.1) }
+        return defs.compactMap { def in
+            do {
+                return (try NSRegularExpression(pattern: def.0), def.1)
+            } catch {
+                assertionFailure("Invalid code symbol regex pattern: \(error)")
+                return nil
+            }
+        }
     }()
 
     private static func extractCodeSymbols(from text: String, into set: inout Set<String>) {
@@ -176,11 +195,17 @@ public enum OCRDigestBuilder {
         set.insert(trimmed)
     }
 
-    private static let channelPattern = try! NSRegularExpression(
-        pattern: #"#[a-z][a-z0-9_-]{2,30}"#
-    )
+    private static let channelPattern: NSRegularExpression? = {
+        do {
+            return try NSRegularExpression(pattern: #"#[a-z][a-z0-9_-]{2,30}"#)
+        } catch {
+            assertionFailure("Invalid channel regex pattern: \(error)")
+            return nil
+        }
+    }()
 
     private static func extractCommunications(from text: String, into set: inout Set<String>) {
+        guard let channelPattern else { return }
         let range = NSRange(text.startIndex..., in: text)
         for match in channelPattern.matches(in: text, range: range) {
             guard let r = Range(match.range, in: text) else { continue }
@@ -188,11 +213,17 @@ public enum OCRDigestBuilder {
         }
     }
 
-    private static let commandPattern = try! NSRegularExpression(
-        pattern: #"(?:^|\n)\s*[$%>]\s+(.{5,80})"#
-    )
+    private static let commandPattern: NSRegularExpression? = {
+        do {
+            return try NSRegularExpression(pattern: #"(?:^|\n)\s*[$%>]\s+(.{5,80})"#)
+        } catch {
+            assertionFailure("Invalid command regex pattern: \(error)")
+            return nil
+        }
+    }()
 
     private static func extractCommands(from text: String, into set: inout Set<String>) {
+        guard let commandPattern else { return }
         let range = NSRange(text.startIndex..., in: text)
         for match in commandPattern.matches(in: text, range: range) {
             guard match.numberOfRanges > 1,
