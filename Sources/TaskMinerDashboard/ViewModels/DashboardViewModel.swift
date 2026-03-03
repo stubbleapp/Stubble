@@ -178,6 +178,21 @@ final class DashboardViewModel {
         set { habitsVM.hasSufficientData = newValue }
     }
 
+    /// Composite focus score for the simplified HabitsView.
+    var focusScore: FocusScore? { habitsVM.focusScore }
+
+    /// The current tip to show — first high-impact suggestion not yet dismissed.
+    var todayTip: ImprovementSuggestion? { habitsVM.todayTip }
+
+    /// Weekly activity bars for the sparkline visualization.
+    var weeklyBars: [DailyActivityBar]? { habitsVM.weeklyBars }
+
+    /// Dismiss a tip so it won't show again.
+    func dismissTip(_ id: UUID) { habitsVM.dismissTip(id) }
+
+    /// Load weekly bars asynchronously.
+    func loadWeeklyBars() { habitsVM.loadWeeklyBars() }
+
     // App name → bundle ID mapping (for icon resolution)
     var appNameBundleMap: [String: String] = [:]
 

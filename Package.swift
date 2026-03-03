@@ -58,5 +58,13 @@ let package = Package(
                 .linkedLibrary("sqlite3")
             ]
         ),
+        // Unit tests for dashboard view models and processing
+        .testTarget(
+            name: "TaskMinerDashboardTests",
+            dependencies: ["TaskMinerDashboard", "TaskMinerShared"],
+            linkerSettings: [
+                .linkedLibrary("sqlite3")
+            ]
+        ),
     ]
 )

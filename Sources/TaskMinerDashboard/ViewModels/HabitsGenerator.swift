@@ -69,6 +69,7 @@ final class HabitsGenerator: Sendable {
         return HabitsAnalysis(
             generatedAt: Date(),
             daysAnalyzed: snapshot.totalDaysAnalyzed,
+            headline: nil,
             summary: "",
             habits: [],
             improvements: []
@@ -165,6 +166,7 @@ final class HabitsGenerator: Sendable {
         ## Output Format
         Respond with a JSON object:
         {
+          "headline": "Single punchy insight for the Focus Score card, max 80 chars. e.g., 'Strong deep work — 35min avg focus blocks'",
           "summary": "A 2-3 sentence overview of the user's key work patterns and notable strengths or areas for growth.",
           "habits": [
             {
@@ -216,6 +218,7 @@ final class HabitsGenerator: Sendable {
             return nil
         }
 
+        let headline = parsed["headline"] as? String
         let summary = parsed["summary"] as? String ?? ""
 
         let habitsArray = parsed["habits"] as? [[String: Any]] ?? []
@@ -269,6 +272,7 @@ final class HabitsGenerator: Sendable {
         return HabitsAnalysis(
             generatedAt: Date(),
             daysAnalyzed: daysAnalyzed,
+            headline: headline,
             summary: summary,
             habits: habits,
             improvements: improvements

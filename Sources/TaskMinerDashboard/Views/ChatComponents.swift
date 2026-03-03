@@ -141,6 +141,6 @@ struct MessageBubble: View {
             content: message.content,
             isStreaming: message.isStreaming
         )
-        .padding(.vertical, 6)
+        .padding(.vertical, 8)
     }
 }

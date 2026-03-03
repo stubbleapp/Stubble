@@ -66,6 +66,7 @@ struct WeeklyHoursStat {
 struct HabitsAnalysis: Codable {
     let generatedAt: Date
     let daysAnalyzed: Int
+    let headline: String?                  // Single punchy insight (max 80 chars) for Focus Score card
     let summary: String                    // 2-3 sentence overview
     let habits: [HabitInsight]
     let improvements: [ImprovementSuggestion]
@@ -152,6 +153,148 @@ struct ImprovementSuggestion: Identifiable, Codable {
             case .medium: return .yellow
             case .low: return Color(white: 0.5)
             }
+        }
+    }
+}
+
+// MARK: - Focus Score (Simplified Main Metric)
+
+/// Composite focus score for the simplified HabitsView.
+/// Combines deep work ratio, focus duration, and context switching into a single 0-100% score.
+struct FocusScore {
+    let value: Double           // 0-1
+    let percentage: Int         // 0-100
+    let trend: Trend
+    let trendDelta: Int         // e.g., +8 or -3 (percentage points)
+    let insight: String         // Single sentence insight
+
+    enum Trend: String {
+        case up, down, stable
+
+        var icon: String {
+            switch self {
+            case .up: return "arrow.up.right"
+            case .down: return "arrow.down.right"
+            case .stable: return "minus"
+            }
+        }
+
+        var color: Color {
+            switch self {
+            case .up: return .green
+            case .down: return .red
+            case .stable: return Color(white: 0.5)
+            }
+        }
+    }
+
+    var scoreColor: Color {
+        if value > 0.7 { return .green }
+        if value > 0.5 { return .yellow }
+        return .orange
+    }
+
+    /// Compute focus score from snapshot data.
+    /// Formula: 40% deep work ratio + 30% focus duration (normalized) + 30% inverse app switches
+    static func compute(
+        from snapshot: HabitsDataSnapshot,
+        previousSnapshot: HabitsDataSnapshot?,
+        headline: String?
+    ) -> FocusScore {
+        // Deep work ratio already 0-1
+        let deepWorkComponent = snapshot.deepWorkRatio * 0.4
+
+        // Focus duration: normalize to 0-1 (45 min = perfect score)
+        let focusNormalized = min(snapshot.avgFocusDurationMinutes / 45.0, 1.0)
+        let focusComponent = focusNormalized * 0.3
+
+        // App switches: lower is better (20 switches/hr = 0 score, 0 = perfect)
+        let switchesNormalized = max(1.0 - snapshot.avgAppSwitchesPerHour / 20.0, 0.0)
+        let switchesComponent = switchesNormalized * 0.3
+
+        let score = deepWorkComponent + focusComponent + switchesComponent
+        let percentage = Int(score * 100)
+
+        // Compute trend if we have previous data
+        var trend: Trend = .stable
+        var trendDelta = 0
+
+        if let previous = previousSnapshot {
+            let previousDeep = previous.deepWorkRatio * 0.4
+            let previousFocus = min(previous.avgFocusDurationMinutes / 45.0, 1.0) * 0.3
+            let previousSwitches = max(1.0 - previous.avgAppSwitchesPerHour / 20.0, 0.0) * 0.3
+            let previousScore = previousDeep + previousFocus + previousSwitches
+
+            let delta = score - previousScore
+            trendDelta = Int(delta * 100)
+
+            if trendDelta > 3 {
+                trend = .up
+            } else if trendDelta < -3 {
+                trend = .down
+            }
+        }
+
+        // Use headline if provided, otherwise generate a simple insight
+        let insight = headline ?? generateDefaultInsight(score: score, snapshot: snapshot)
+
+        return FocusScore(
+            value: score,
+            percentage: percentage,
+            trend: trend,
+            trendDelta: trendDelta,
+            insight: insight
+        )
+    }
+
+    private static func generateDefaultInsight(score: Double, snapshot: HabitsDataSnapshot) -> String {
+        if score > 0.7 {
+            return "Strong focus this week with \(Int(snapshot.deepWorkRatio * 100))% deep work"
+        } else if score > 0.5 {
+            return "Moderate focus — try reducing app switches"
+        } else {
+            return "Focus needs attention — averaging \(Int(snapshot.avgAppSwitchesPerHour)) switches/hr"
+        }
+    }
+}
+
+// MARK: - Daily Activity Bar (Weekly Sparkline)
+
+/// Single day's activity for the weekly sparkline visualization.
+struct DailyActivityBar: Identifiable {
+    let id: Date
+    let dayLabel: String        // "M", "T", "W", etc.
+    let hours: Double
+    let isToday: Bool
+
+    /// Generate 7 days of activity bars from a date range.
+    static func generateWeek(
+        dailyHours: [Date: Double],
+        referenceDate: Date = Date()
+    ) -> [DailyActivityBar] {
+        let calendar = Calendar.current
+        let today = calendar.startOfDay(for: referenceDate)
+
+        // Get the start of the week (Monday)
+        var weekStart = today
+        while calendar.component(.weekday, from: weekStart) != 2 { // 2 = Monday
+            weekStart = calendar.date(byAdding: .day, value: -1, to: weekStart)!
+        }
+
+        let dayLabels = ["M", "T", "W", "T", "F", "S", "S"]
+
+        return (0..<7).map { offset in
+            let date = calendar.date(byAdding: .day, value: offset, to: weekStart)!
+            let startOfDate = calendar.startOfDay(for: date)
+            let hours = dailyHours[startOfDate] ?? 0
+            let isToday = calendar.isDate(date, inSameDayAs: today)
+
+            return DailyActivityBar(
+                id: date,
+                dayLabel: dayLabels[offset],
+                hours: hours,
+                isToday: isToday
+            )
         }
     }
 }

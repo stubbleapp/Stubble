@@ -27,8 +27,102 @@ final class HabitsViewModel {
     /// Cached result of whether the database has sufficient activity data.
     var hasSufficientData: Bool?
 
+    /// Cached weekly activity bars (loaded asynchronously).
+    var weeklyBars: [DailyActivityBar]?
+
     /// In-flight task handle for cancellation.
     private var generationTask: Task<Void, Never>?
+
+    /// Cached set of dismissed tip IDs (loaded from UserDefaults once).
+    private var _seenTipIds: Set<String>?
+
+    /// IDs of tips the user has dismissed (persisted in UserDefaults).
+    private var seenTipIds: Set<String> {
+        get {
+            if let cached = _seenTipIds { return cached }
+            let ids = Set(UserDefaults.standard.stringArray(forKey: "seenHabitsTipIds") ?? [])
+            _seenTipIds = ids
+            return ids
+        }
+        set {
+            _seenTipIds = newValue
+            UserDefaults.standard.set(Array(newValue), forKey: "seenHabitsTipIds")
+        }
+    }
+
+    // MARK: - Computed Properties (Simplified View)
+
+    /// Composite focus score for the simplified HabitsView.
+    var focusScore: FocusScore? {
+        guard let snap = snapshot else { return nil }
+        // Use dedicated headline if available, otherwise fall back to first sentence of summary
+        let headline = analysis?.headline ?? analysis?.summary.components(separatedBy: ".").first
+        return FocusScore.compute(
+            from: snap,
+            previousSnapshot: nil,  // TODO: Could load previous week's snapshot for trend
+            headline: headline
+        )
+    }
+
+    /// The current tip to show — first high-impact suggestion not yet dismissed.
+    var todayTip: ImprovementSuggestion? {
+        guard let improvements = analysis?.improvements else { return nil }
+
+        // First try high-impact suggestions
+        if let highImpact = improvements.first(where: { $0.impact == .high && !seenTipIds.contains($0.id.uuidString) }) {
+            return highImpact
+        }
+
+        // Fall back to medium impact
+        if let mediumImpact = improvements.first(where: { $0.impact == .medium && !seenTipIds.contains($0.id.uuidString) }) {
+            return mediumImpact
+        }
+
+        // Fall back to any unseen suggestion
+        return improvements.first { !seenTipIds.contains($0.id.uuidString) }
+    }
+
+    /// Load weekly activity bars asynchronously (called on view appear).
+    func loadWeeklyBars() {
+        guard let db = dbReader else { return }
+        guard weeklyBars == nil else { return }  // Already loaded
+
+        // Use Task (not detached) since db is @MainActor isolated.
+        // This still yields to the UI, preventing blocking.
+        Task { @MainActor in
+            let calendar = Calendar.current
+            let today = calendar.startOfDay(for: Date())
+
+            var dailyHours: [Date: Double] = [:]
+
+            // Query activities for each of the last 7 days
+            for dayOffset in 0..<7 {
+                guard let date = calendar.date(byAdding: .day, value: -dayOffset, to: today) else { continue }
+                let activities = db.activities(for: date)
+
+                // Sum non-idle time
+                let activeSeconds = activities
+                    .filter { !$0.isIdle }
+                    .reduce(0.0) { $0 + ($1.duration ?? 0) }
+
+                dailyHours[date] = activeSeconds / 3600.0
+            }
+
+            self.weeklyBars = DailyActivityBar.generateWeek(dailyHours: dailyHours, referenceDate: today)
+        }
+    }
+
+    /// Dismiss a tip so it won't show again.
+    func dismissTip(_ id: UUID) {
+        var ids = seenTipIds
+        ids.insert(id.uuidString)
+        seenTipIds = ids
+    }
+
+    /// Reset seen tips (useful for testing or if user wants to see tips again).
+    func resetSeenTips() {
+        seenTipIds = []
+    }
 
     // MARK: - Init
 
@@ -167,6 +261,7 @@ final class HabitsViewModel {
         error = nil
         hasAttemptedGeneration = false
         hasSufficientData = nil
+        weeklyBars = nil
         generationTask?.cancel()
         generationTask = nil
     }

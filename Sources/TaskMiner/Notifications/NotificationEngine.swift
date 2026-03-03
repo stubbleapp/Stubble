@@ -40,12 +40,7 @@ actor NotificationEngine {
         db: DatabaseManager,
         settingsPath: URL
     ) async {
-        // Load settings
         let settings = loadSettings(from: settingsPath)
-        guard settings.notificationsEnabled else { return }
-
-        // Check if we're in quiet hours
-        if isInQuietHours(settings: settings) { return }
 
         // Batching: only evaluate every 15 minutes
         let elapsed = Date().timeIntervalSince(lastEvaluationTime)
@@ -59,14 +54,14 @@ actor NotificationEngine {
             return
         }
 
-        // If require-idle is enabled, only proceed when user is idle
-        if settings.requireIdle && !isIdle {
-            Logger.debug("NotificationEngine: Skipping — user is active and require-idle is enabled")
+        // Only notify when user is idle (less intrusive)
+        guard isIdle else {
+            Logger.debug("NotificationEngine: Skipping — user is active")
             return
         }
 
         // Check for ignored notifications (1 hour window)
-        await checkForIgnoredNotifications(db: db, settings: settings)
+        await checkForIgnoredNotifications(db: db)
 
         // Generate and evaluate candidates
         await evaluateAndDeliver(
@@ -89,8 +84,6 @@ actor NotificationEngine {
         guard isIdle else { return }  // Only trigger on becoming idle
 
         let settings = loadSettings(from: settingsPath)
-        guard settings.notificationsEnabled else { return }
-        guard !isInQuietHours(settings: settings) else { return }
 
         // Check daily cap
         let dailyCount = db.notificationCountToday()
@@ -108,6 +101,9 @@ actor NotificationEngine {
 
     // MARK: - Evaluation & Delivery
 
+    /// Minimum relevance score for a notification to be delivered.
+    private let minRelevanceScore: Double = 0.6
+
     private func evaluateAndDeliver(
         isIdle: Bool,
         activeApp: String?,
@@ -115,10 +111,10 @@ actor NotificationEngine {
         db: DatabaseManager,
         settings: NotificationSettings
     ) async {
-        // Generate candidates from today's recommendations
+        // Generate candidates from today's recommendations (all categories enabled)
         let candidates = await candidateGenerator.generateCandidates(
             db: db,
-            enabledCategories: settings.enabledCategories,
+            enabledCategories: Set(NotificationCategory.allCases.map { $0.rawValue }),
             preferChatPrompts: settings.preferChatPrompts
         )
 
@@ -127,19 +123,19 @@ actor NotificationEngine {
             return
         }
 
-        // Score candidates with context
+        // Score candidates with context (learning always enabled)
         let scoredCandidates = scorer.scoreAll(
             candidates: candidates,
             currentProject: currentProject,
             activeApp: activeApp,
             db: db,
-            learningEnabled: settings.learningEnabled
+            learningEnabled: true
         )
 
         // Filter by minimum relevance score
-        let qualified = scoredCandidates.filter { $0.totalScore >= settings.minRelevanceScore }
+        let qualified = scoredCandidates.filter { $0.totalScore >= minRelevanceScore }
         guard !qualified.isEmpty else {
-            Logger.debug("NotificationEngine: No candidates passed minimum relevance threshold (\(settings.minRelevanceScore))")
+            Logger.debug("NotificationEngine: No candidates passed minimum relevance threshold (\(minRelevanceScore))")
             return
         }
 
@@ -196,11 +192,8 @@ actor NotificationEngine {
     // MARK: - Engagement Tracking
 
     /// Called when a notification is clicked (from the delivery scheduler delegate).
-    func recordClick(notificationId: String, db: DatabaseManager, settings: NotificationSettings) {
+    func recordClick(notificationId: String, db: DatabaseManager) {
         db.updateNotificationEngagement(id: notificationId, engagement: .clicked)
-
-        // Update category stats if learning is enabled
-        guard settings.learningEnabled else { return }
         engagementTracker.recordEngagement(
             notificationId: notificationId,
             engagement: .clicked,
@@ -209,10 +202,8 @@ actor NotificationEngine {
     }
 
     /// Called when a notification is dismissed (from the delivery scheduler delegate).
-    func recordDismiss(notificationId: String, db: DatabaseManager, settings: NotificationSettings) {
+    func recordDismiss(notificationId: String, db: DatabaseManager) {
         db.updateNotificationEngagement(id: notificationId, engagement: .dismissed)
-
-        guard settings.learningEnabled else { return }
         engagementTracker.recordEngagement(
             notificationId: notificationId,
             engagement: .dismissed,
@@ -221,96 +212,40 @@ actor NotificationEngine {
     }
 
     /// Check for notifications that were delivered more than 1 hour ago with no engagement.
-    private func checkForIgnoredNotifications(db: DatabaseManager, settings: NotificationSettings) async {
+    private func checkForIgnoredNotifications(db: DatabaseManager) async {
         let cutoff = Date().addingTimeInterval(-3600)  // 1 hour ago
         let unengaged = db.notificationsWithoutEngagement(olderThan: cutoff)
 
         for notification in unengaged {
             db.updateNotificationEngagement(id: notification.id, engagement: .ignored)
-
-            if settings.learningEnabled {
-                engagementTracker.recordEngagement(
-                    notificationId: notification.id,
-                    engagement: .ignored,
-                    db: db
-                )
-            }
+            engagementTracker.recordEngagement(
+                notificationId: notification.id,
+                engagement: .ignored,
+                db: db
+            )
         }
     }
 
-    // MARK: - Settings & Helpers
+    // MARK: - Settings
 
     private func loadSettings(from path: URL) -> NotificationSettings {
         let store = SettingsStore(filePath: path)
         return NotificationSettings(
-            notificationsEnabled: store.notificationsEnabled,
             dailyMax: store.notificationsDailyMax,
-            requireIdle: store.notificationsRequireIdle,
-            quietHoursEnabled: store.notificationsQuietHoursEnabled,
-            quietHoursStart: store.notificationsQuietHoursStart,
-            quietHoursEnd: store.notificationsQuietHoursEnd,
-            enabledCategories: store.notificationsEnabledCategories,
-            preferChatPrompts: store.notificationsPreferChatPrompts,
-            minRelevanceScore: store.notificationsMinRelevanceScore,
-            learningEnabled: store.notificationsLearningEnabled
+            preferChatPrompts: store.notificationsPreferChatPrompts
         )
-    }
-
-    private func isInQuietHours(settings: NotificationSettings) -> Bool {
-        guard settings.quietHoursEnabled else { return false }
-
-        let calendar = Calendar.current
-        let now = Date()
-        let hour = calendar.component(.hour, from: now)
-
-        let start = settings.quietHoursStart
-        let end = settings.quietHoursEnd
-
-        // Handle overnight quiet hours (e.g., 22:00 - 08:00)
-        if start > end {
-            return hour >= start || hour < end
-        } else {
-            return hour >= start && hour < end
-        }
     }
 }
 
 // MARK: - Settings Struct
 
-/// Lightweight settings struct for notification configuration.
+/// Simplified settings struct — only user-configurable options.
 struct NotificationSettings {
-    let notificationsEnabled: Bool
     let dailyMax: Int
-    let requireIdle: Bool
-    let quietHoursEnabled: Bool
-    let quietHoursStart: Int
-    let quietHoursEnd: Int
-    let enabledCategories: Set<String>
     let preferChatPrompts: Bool
-    let minRelevanceScore: Double
-    let learningEnabled: Bool
 
-    init(
-        notificationsEnabled: Bool = true,
-        dailyMax: Int = 3,
-        requireIdle: Bool = true,
-        quietHoursEnabled: Bool = false,
-        quietHoursStart: Int = 22,
-        quietHoursEnd: Int = 8,
-        enabledCategories: Set<String> = Set(NotificationCategory.allCases.map { $0.rawValue }),
-        preferChatPrompts: Bool = false,
-        minRelevanceScore: Double = 0.6,
-        learningEnabled: Bool = true
-    ) {
-        self.notificationsEnabled = notificationsEnabled
+    init(dailyMax: Int = 3, preferChatPrompts: Bool = false) {
         self.dailyMax = dailyMax
-        self.requireIdle = requireIdle
-        self.quietHoursEnabled = quietHoursEnabled
-        self.quietHoursStart = quietHoursStart
-        self.quietHoursEnd = quietHoursEnd
-        self.enabledCategories = enabledCategories
         self.preferChatPrompts = preferChatPrompts
-        self.minRelevanceScore = minRelevanceScore
-        self.learningEnabled = learningEnabled
     }
 }

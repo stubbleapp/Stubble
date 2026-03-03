@@ -65,10 +65,10 @@ enum Theme {
         dark: NSColor(red: 0.161, green: 0.161, blue: 0.161, alpha: 1)     // RGB(41,41,41) — matches primary
     )
 
-    /// Chat background — lighter in dark mode for better contrast with cards.
+    /// Chat background — matches primary background for consistency.
     static let chatBackground = adaptive(
         light: NSColor(red: 0.969, green: 0.969, blue: 0.953, alpha: 1),   // #F7F7F3 — same as secondary
-        dark: NSColor(red: 0.208, green: 0.208, blue: 0.208, alpha: 1)     // RGB(53,53,53) — lighter grey
+        dark: NSColor(red: 0.161, green: 0.161, blue: 0.161, alpha: 1)     // RGB(41,41,41) — matches primary
     )
 
     /// Elevated surface — segmented controls, group headers.

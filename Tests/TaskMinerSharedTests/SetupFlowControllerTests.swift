@@ -12,13 +12,14 @@ final class SetupFlowControllerTests: XCTestCase {
     func testInitialState() {
         let c = makeController()
         XCTAssertEqual(c.currentPage, 0)
-        XCTAssertEqual(c.totalPages, 4)
+        XCTAssertEqual(c.totalPages, 3)
         XCTAssertTrue(c.apiKey.isEmpty)
         XCTAssertFalse(c.isValidating)
         XCTAssertNil(c.apiKeyError)
         XCTAssertFalse(c.apiKeyValidated)
         XCTAssertFalse(c.accessibilityGranted)
         XCTAssertFalse(c.screenRecordingGranted)
+        XCTAssertFalse(c.isSignedInViaGoogle)
     }
 
     // MARK: - Page Navigation
@@ -31,15 +32,15 @@ final class SetupFlowControllerTests: XCTestCase {
 
     func testAdvanceToLastPage() {
         let c = makeController()
-        for _ in 0..<3 { c.advance() }
-        XCTAssertEqual(c.currentPage, 3)
+        for _ in 0..<2 { c.advance() }
+        XCTAssertEqual(c.currentPage, 2)
     }
 
     func testAdvanceBeyondLastPage() {
         let c = makeController()
-        for _ in 0..<3 { c.advance() }
+        for _ in 0..<2 { c.advance() }
         XCTAssertFalse(c.advance())
-        XCTAssertEqual(c.currentPage, 3, "Should not go beyond last page")
+        XCTAssertEqual(c.currentPage, 2, "Should not go beyond last page")
     }
 
     func testGoBackFromSecondPage() {
@@ -66,12 +67,28 @@ final class SetupFlowControllerTests: XCTestCase {
         XCTAssertTrue(c.canGoBack)
     }
 
+    func testSetPage() {
+        let c = makeController()
+        c.setPage(2)
+        XCTAssertEqual(c.currentPage, 2)
+        c.setPage(0)
+        XCTAssertEqual(c.currentPage, 0)
+    }
+
+    func testSetPageOutOfBounds() {
+        let c = makeController()
+        c.setPage(-1)
+        XCTAssertEqual(c.currentPage, 0, "Should not go below 0")
+        c.setPage(10)
+        XCTAssertEqual(c.currentPage, 0, "Should not exceed totalPages")
+    }
+
     // MARK: - isOnLastPage
 
     func testIsOnLastPage() {
         let c = makeController()
         XCTAssertFalse(c.isOnLastPage)
-        for _ in 0..<3 { c.advance() }
+        for _ in 0..<2 { c.advance() }
         XCTAssertTrue(c.isOnLastPage)
     }
 
@@ -82,66 +99,48 @@ final class SetupFlowControllerTests: XCTestCase {
         XCTAssertTrue(c.canContinue, "Welcome page should always allow continue")
     }
 
-    func testCanContinueOnApiKeyPageWithEmptyKey() {
+    func testCanContinueOnSignInPageWithoutSignIn() {
         let c = makeController()
         c.advance() // page 1
-        XCTAssertFalse(c.canContinue, "Empty API key should block continue")
+        XCTAssertFalse(c.canContinue, "Should require Google sign-in")
     }
 
-    func testCanContinueOnApiKeyPageWithWhitespaceOnly() {
+    func testCanContinueOnSignInPageWithGoogleSignIn() {
         let c = makeController()
-        c.advance()
-        c.apiKey = "   \n  "
-        XCTAssertFalse(c.canContinue, "Whitespace-only key should block continue")
-    }
-
-    func testCanContinueOnApiKeyPageWithValidKey() {
-        let c = makeController()
-        c.advance()
-        c.apiKey = "AIzaSyABC123"
+        c.advance() // page 1
+        c.isSignedInViaGoogle = true
         XCTAssertTrue(c.canContinue)
-    }
-
-    func testCanContinueOnApiKeyPageWhileValidating() {
-        let c = makeController()
-        c.advance()
-        c.apiKey = "AIzaSyABC123"
-        c.beginValidation()
-        XCTAssertFalse(c.canContinue, "Should not continue while validating")
     }
 
     func testCanContinueOnPermissionsPageNeitherGranted() {
         let c = makeController()
-        c.advance(); c.advance() // page 2
+        c.advance()
+        c.isSignedInViaGoogle = true
+        c.advance() // page 2
+        c.isSignedInViaGoogle = false // Reset for this test
         XCTAssertFalse(c.canContinue, "No permissions = blocked")
     }
 
     func testCanContinueOnPermissionsPageOnlyAccessibility() {
         let c = makeController()
-        c.advance(); c.advance()
+        c.setPage(2)
         c.accessibilityGranted = true
         XCTAssertFalse(c.canContinue, "Only one permission = blocked")
     }
 
     func testCanContinueOnPermissionsPageOnlyScreenRecording() {
         let c = makeController()
-        c.advance(); c.advance()
+        c.setPage(2)
         c.screenRecordingGranted = true
         XCTAssertFalse(c.canContinue, "Only one permission = blocked")
     }
 
     func testCanContinueOnPermissionsPageBothGranted() {
         let c = makeController()
-        c.advance(); c.advance()
+        c.setPage(2)
         c.accessibilityGranted = true
         c.screenRecordingGranted = true
         XCTAssertTrue(c.canContinue)
-    }
-
-    func testCanContinueOnPreferencesPage() {
-        let c = makeController()
-        for _ in 0..<3 { c.advance() }
-        XCTAssertTrue(c.canContinue, "Preferences page always allows continue")
     }
 
     // MARK: - allPermissionsGranted
@@ -166,34 +165,35 @@ final class SetupFlowControllerTests: XCTestCase {
         XCTAssertEqual(c.currentPage, 1)
     }
 
-    func testHandleContinueOnApiKeyPageTriggersValidation() {
-        let c = makeController()
-        c.advance()
-        c.apiKey = "somekey"
-        let action = c.handleContinue()
-        XCTAssertEqual(action, .validate)
-        XCTAssertEqual(c.currentPage, 1, "Should NOT advance — validation needed")
-    }
-
     func testHandleContinueBlockedWhenCannotContinue() {
         let c = makeController()
-        c.advance() // page 1, empty key
+        c.advance() // page 1, not signed in
         let action = c.handleContinue()
         XCTAssertEqual(action, .blocked)
         XCTAssertEqual(c.currentPage, 1, "Should stay on same page")
     }
 
+    func testHandleContinueOnSignInPageWithGoogleSignIn() {
+        let c = makeController()
+        c.advance() // page 1
+        c.isSignedInViaGoogle = true
+        let action = c.handleContinue()
+        XCTAssertEqual(action, .advance)
+        XCTAssertEqual(c.currentPage, 2)
+    }
+
     func testHandleContinueOnPermissionsPageWithPermissions() {
         let c = makeController()
-        c.advance(); c.advance() // page 2
+        c.setPage(2)
         c.accessibilityGranted = true
         c.screenRecordingGranted = true
         let action = c.handleContinue()
+        // On last page, canContinue is true so returns .advance (signals wizard should close)
         XCTAssertEqual(action, .advance)
-        XCTAssertEqual(c.currentPage, 3)
+        XCTAssertEqual(c.currentPage, 2, "Page doesn't change since already on last")
     }
 
-    // MARK: - API Key Validation Flow
+    // MARK: - API Key Validation (for BYOK flow, kept for potential future use)
 
     func testValidateApiKeyFormatEmpty() {
         let c = makeController()
@@ -229,7 +229,7 @@ final class SetupFlowControllerTests: XCTestCase {
         XCTAssertFalse(c.isValidating)
         XCTAssertTrue(c.apiKeyValidated)
         XCTAssertNil(c.apiKeyError)
-        XCTAssertEqual(c.currentPage, 2, "Should advance to permissions page")
+        XCTAssertEqual(c.currentPage, 2, "Should advance after validation")
     }
 
     func testHandleValidationFailureAuthError() {
@@ -294,10 +294,16 @@ final class SetupFlowControllerTests: XCTestCase {
         XCTAssertEqual(c.continueButtonLabel, "Get Started")
     }
 
-    func testContinueButtonLabelOnOtherPages() {
+    func testContinueButtonLabelOnMiddlePage() {
         let c = makeController()
         c.advance()
         XCTAssertEqual(c.continueButtonLabel, "Continue")
+    }
+
+    func testContinueButtonLabelOnLastPage() {
+        let c = makeController()
+        c.setPage(2)
+        XCTAssertEqual(c.continueButtonLabel, "Open Stubble")
     }
 
     func testContinueButtonLabelWhileValidating() {
@@ -309,7 +315,7 @@ final class SetupFlowControllerTests: XCTestCase {
 
     // MARK: - Full Happy Path
 
-    func testFullHappyPathWalkthrough() {
+    func testFullHappyPathWithGoogleSignIn() {
         let c = makeController()
 
         // Page 0: Welcome
@@ -317,26 +323,19 @@ final class SetupFlowControllerTests: XCTestCase {
         XCTAssertTrue(c.canContinue)
         XCTAssertEqual(c.handleContinue(), .advance)
 
-        // Page 1: API Key
+        // Page 1: Sign-In
         XCTAssertEqual(c.currentPage, 1)
-        c.apiKey = "AIzaSyABC123"
-        XCTAssertEqual(c.handleContinue(), .validate)
-        c.beginValidation()
-        XCTAssertFalse(c.canContinue) // validating
-        c.handleValidationSuccess()
-        XCTAssertTrue(c.apiKeyValidated)
-
-        // Page 2: Permissions
-        XCTAssertEqual(c.currentPage, 2)
         XCTAssertFalse(c.canContinue)
-        c.accessibilityGranted = true
-        c.screenRecordingGranted = true
+        c.isSignedInViaGoogle = true
         XCTAssertTrue(c.canContinue)
         XCTAssertEqual(c.handleContinue(), .advance)
 
-        // Page 3: Preferences (last page)
-        XCTAssertEqual(c.currentPage, 3)
+        // Page 2: Permissions (last page)
+        XCTAssertEqual(c.currentPage, 2)
         XCTAssertTrue(c.isOnLastPage)
+        XCTAssertFalse(c.canContinue)
+        c.accessibilityGranted = true
+        c.screenRecordingGranted = true
         XCTAssertTrue(c.canContinue)
     }
 
@@ -345,23 +344,11 @@ final class SetupFlowControllerTests: XCTestCase {
     func testBackFromPage1ResetsToPage0() {
         let c = makeController()
         c.advance()
-        c.apiKey = "somekey"
-        c.setApiKeyError("some error")
+        c.isSignedInViaGoogle = true
         c.goBack()
         XCTAssertEqual(c.currentPage, 0)
-        // Error persists but key remains — user can go forward again
-        XCTAssertEqual(c.apiKey, "somekey")
-    }
-
-    func testValidationStateSurvivesNavigation() {
-        let c = makeController()
-        c.advance()
-        c.apiKey = "key"
-        c.beginValidation()
-        c.handleValidationSuccess()
-        // Now on page 2
-        c.goBack() // back to page 1
-        XCTAssertTrue(c.apiKeyValidated, "Validation state should persist")
+        // Sign-in state persists
+        XCTAssertTrue(c.isSignedInViaGoogle)
     }
 
     func testSetApiKeyError() {
@@ -382,126 +369,13 @@ final class SetupFlowControllerTests: XCTestCase {
         XCTAssertEqual(c.apiKeyError, "Invalid key format.")
     }
 
-    // MARK: - Google Sign-In Flow
-
-    func testSignedInViaGoogleInitiallyFalse() {
-        let c = makeController()
-        XCTAssertFalse(c.isSignedInViaGoogle)
-    }
-
-    func testShowBYOKInputInitiallyFalse() {
-        let c = makeController()
-        XCTAssertFalse(c.showBYOKInput)
-    }
-
-    func testCanContinueOnSignInPageWhenSignedInViaGoogle() {
-        let c = makeController()
-        c.advance() // page 1
-        XCTAssertFalse(c.canContinue, "Should be blocked without sign-in or key")
-        c.isSignedInViaGoogle = true
-        XCTAssertTrue(c.canContinue, "Should allow continue after Google sign-in")
-    }
-
-    func testCanContinueOnSignInPagePrefersGoogleOverEmptyKey() {
-        let c = makeController()
-        c.advance()
-        c.isSignedInViaGoogle = true
-        c.apiKey = "" // No BYOK key
-        XCTAssertTrue(c.canContinue, "Google sign-in should be sufficient")
-    }
-
-    func testHandleContinueWithGoogleSignInAdvances() {
-        let c = makeController()
-        c.advance() // page 1
-        c.isSignedInViaGoogle = true
-        let action = c.handleContinue()
-        XCTAssertEqual(action, .advance)
-        XCTAssertEqual(c.currentPage, 2, "Should advance to permissions page")
-    }
-
-    func testHandleContinueWithGoogleSignInSkipsValidation() {
-        let c = makeController()
-        c.advance() // page 1
-        c.isSignedInViaGoogle = true
-        c.apiKey = "some-key" // BYOK key also present
-        let action = c.handleContinue()
-        // Google sign-in takes priority — no validation needed
-        XCTAssertEqual(action, .advance, "Should advance directly, not validate")
-        XCTAssertEqual(c.currentPage, 2)
-    }
-
-    func testHandleContinueWithBYOKKeyTriggersValidation() {
-        let c = makeController()
-        c.advance() // page 1
-        c.isSignedInViaGoogle = false
-        c.apiKey = "AIzaSy123"
-        let action = c.handleContinue()
-        XCTAssertEqual(action, .validate, "Should require API key validation")
-        XCTAssertEqual(c.currentPage, 1, "Should NOT advance yet")
-    }
-
-    func testSkipSignInAdvancesFromPage1() {
-        let c = makeController()
-        c.advance() // page 1
-        c.skipSignIn()
-        XCTAssertEqual(c.currentPage, 2, "Should advance to permissions")
-    }
-
-    func testSkipSignInNoOpOnOtherPages() {
-        let c = makeController()
-        // On page 0
-        c.skipSignIn()
-        XCTAssertEqual(c.currentPage, 0, "Should not advance from page 0")
-    }
-
-    func testFullHappyPathWithGoogleSignIn() {
-        let c = makeController()
-
-        // Page 0: Welcome
-        XCTAssertEqual(c.handleContinue(), .advance)
-        XCTAssertEqual(c.currentPage, 1)
-
-        // Page 1: Google Sign-In
-        c.isSignedInViaGoogle = true
-        XCTAssertEqual(c.handleContinue(), .advance)
-        XCTAssertEqual(c.currentPage, 2)
-
-        // Page 2: Permissions
-        c.accessibilityGranted = true
-        c.screenRecordingGranted = true
-        XCTAssertEqual(c.handleContinue(), .advance)
-        XCTAssertEqual(c.currentPage, 3)
-
-        // Page 3: Preferences (last page)
-        XCTAssertTrue(c.isOnLastPage)
-    }
-
-    func testFullHappyPathWithSkip() {
-        let c = makeController()
-
-        // Page 0 → 1
-        c.handleContinue()
-        XCTAssertEqual(c.currentPage, 1)
-
-        // Page 1: Skip sign-in
-        c.skipSignIn()
-        XCTAssertEqual(c.currentPage, 2)
-
-        // Page 2: Grant permissions → 3
-        c.accessibilityGranted = true
-        c.screenRecordingGranted = true
-        c.handleContinue()
-        XCTAssertEqual(c.currentPage, 3)
-        XCTAssertTrue(c.isOnLastPage)
-    }
-
     func testGoogleSignInStateDoesNotAffectOtherPages() {
         let c = makeController()
         c.isSignedInViaGoogle = true
-        // Should not affect page 0 or 2
+        // Should not affect page 0
         XCTAssertTrue(c.canContinue, "Page 0 should always allow continue")
-        c.handleContinue() // → page 1
-        c.handleContinue() // → page 2 (Google signed in, so advance)
+        _ = c.handleContinue() // → page 1
+        _ = c.handleContinue() // → page 2 (Google signed in, so advance)
         XCTAssertFalse(c.canContinue, "Permissions page still requires permissions")
     }
 }

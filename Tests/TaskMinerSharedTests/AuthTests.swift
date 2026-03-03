@@ -98,8 +98,8 @@ final class StubbleAPIConfigTests: XCTestCase {
         XCTAssertEqual(StubbleAPIConfig.callbackScheme, "com.stubble")
     }
 
-    func testTrialDaysIs30() {
-        XCTAssertEqual(StubbleAPIConfig.trialDays, 30)
+    func testTrialDays() {
+        XCTAssertEqual(StubbleAPIConfig.trialDays, 10)
     }
 
     func testProxyBaseURLIsHTTPS() {
