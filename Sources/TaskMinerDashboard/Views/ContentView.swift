@@ -98,6 +98,7 @@ struct ContentView: View {
                 let isOption = event.modifierFlags.contains(.option)
                 if isOption != optionKeyHeld {
                     optionKeyHeld = isOption
+                    viewModel.isDebugMode = isOption
                     if isOption {
                         withAnimation(.easeInOut(duration: 0.15)) {
                             showDebugTabs = true

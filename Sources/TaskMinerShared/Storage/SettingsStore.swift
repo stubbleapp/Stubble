@@ -139,6 +139,11 @@ public final class SettingsStore {
         set { update { $0.wizardPage = newValue } }
     }
 
+    public var dayWrapHour: Int {
+        get { load().dayWrapHour ?? 18 }
+        set { update { $0.dayWrapHour = newValue } }
+    }
+
     // MARK: - Notification Settings
 
     public var notificationsEnabled: Bool {
@@ -219,6 +224,8 @@ public struct AppSettings: Codable, Equatable {
     public var analyticsEnabled: Bool?
     /// Current wizard page (0-3) for resuming setup after quit/reopen.
     public var wizardPage: Int?
+    /// Hour (0-23) at which the current day switches to "Day Wrap" view (default: 18 = 6pm).
+    public var dayWrapHour: Int?
 
     // MARK: - Notification Settings
 
@@ -255,6 +262,7 @@ public struct AppSettings: Codable, Equatable {
         appearanceMode: AppearanceMode? = nil,
         analyticsEnabled: Bool? = nil,
         wizardPage: Int? = nil,
+        dayWrapHour: Int? = nil,
         notificationsEnabled: Bool? = nil,
         notificationsDailyMax: Int? = nil,
         notificationsRequireIdle: Bool? = nil,
@@ -277,6 +285,7 @@ public struct AppSettings: Codable, Equatable {
         self.appearanceMode = appearanceMode
         self.analyticsEnabled = analyticsEnabled
         self.wizardPage = wizardPage
+        self.dayWrapHour = dayWrapHour
         self.notificationsEnabled = notificationsEnabled
         self.notificationsDailyMax = notificationsDailyMax
         self.notificationsRequireIdle = notificationsRequireIdle

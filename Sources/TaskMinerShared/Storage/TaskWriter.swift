@@ -402,8 +402,8 @@ public class TaskWriter {
     public func insertOrReplaceStubsContent(_ record: StubsContentRecord) throws -> Int64 {
         let sql = """
         INSERT OR REPLACE INTO stubs_content
-        (date, greeting_context, day_summary, questions_json, recommendations_json, generated_at)
-        VALUES (?, ?, ?, ?, ?, ?)
+        (date, greeting_context, day_summary, questions_json, recommendations_json, generated_at, focus_time_seconds, meeting_time_seconds, project_count)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         """
         var stmt: OpaquePointer?
         guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
@@ -421,6 +421,22 @@ public class TaskWriter {
         sqliteBindText(stmt, 4, record.questionsJson)
         sqliteBindText(stmt, 5, record.recommendationsJson)
         sqliteBindText(stmt, 6, SharedFormatters.iso8601.string(from: record.generatedAt))
+
+        if let focusTime = record.focusTimeSeconds {
+            sqlite3_bind_int(stmt, 7, Int32(focusTime))
+        } else {
+            sqlite3_bind_null(stmt, 7)
+        }
+        if let meetingTime = record.meetingTimeSeconds {
+            sqlite3_bind_int(stmt, 8, Int32(meetingTime))
+        } else {
+            sqlite3_bind_null(stmt, 8)
+        }
+        if let projectCount = record.projectCount {
+            sqlite3_bind_int(stmt, 9, Int32(projectCount))
+        } else {
+            sqlite3_bind_null(stmt, 9)
+        }
 
         guard sqlite3_step(stmt) == SQLITE_DONE else {
             throw DatabaseError.executionFailed(lastError)

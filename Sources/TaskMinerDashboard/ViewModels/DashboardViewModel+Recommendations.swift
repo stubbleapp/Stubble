@@ -227,11 +227,15 @@ extension DashboardViewModel {
             greetingContext: content.greetingContext,
             daySummary: content.daySummary,
             questionsJson: questionsJson,
-            recommendationsJson: recsJson
+            recommendationsJson: recsJson,
+            focusTimeSeconds: Int(totalFocusTime),
+            meetingTimeSeconds: Int(totalMeetingTime),
+            projectCount: projectActivities.count
         )
 
         do {
             try writer.insertOrReplaceStubsContent(record)
+            Logger.info("persistStubsContent: saved for \(dateString), daySummary=\(content.daySummary != nil ? "present" : "nil")")
         } catch {
             Logger.error("Failed to persist stubs content: \(error.localizedDescription)")
         }

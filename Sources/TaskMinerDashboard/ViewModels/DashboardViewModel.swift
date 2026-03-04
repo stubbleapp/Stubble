@@ -87,14 +87,17 @@ final class DashboardViewModel {
         Calendar.current.isDateInToday(selectedDate)
     }
 
+    /// Whether debug mode is active (Option key held). Set by ContentView.
+    var isDebugMode: Bool = false
+
     // MARK: - Day Wrap Metrics
 
     /// Whether to show the Day Wrap card instead of the regular summary.
-    /// True for past days, or today after 6pm.
+    /// True for past days, or today after the configured wrap hour (default 6pm).
     var shouldShowDayWrap: Bool {
         if !isViewingToday { return true }
         let hour = Calendar.current.component(.hour, from: Date())
-        return hour >= 18
+        return hour >= SettingsManager.shared.dayWrapHour
     }
 
     /// Total focus time (non-idle task duration).
@@ -123,6 +126,35 @@ final class DashboardViewModel {
         return appDurations
             .map { (app: $0.key, duration: $0.value.duration, bundleId: $0.value.bundleId) }
             .sorted { $0.duration > $1.duration }
+    }
+
+    // MARK: - Persisted Day Wrap Metrics
+
+    /// Persisted focus time from database (for past days).
+    var persistedFocusTime: TimeInterval?
+
+    /// Persisted meeting time from database (for past days).
+    var persistedMeetingTime: TimeInterval?
+
+    /// Persisted project count from database (for past days).
+    var persistedProjectCount: Int?
+
+    /// Display focus time: live for today, persisted for past days.
+    var displayFocusTime: TimeInterval {
+        if isViewingToday { return totalFocusTime }
+        return persistedFocusTime ?? totalFocusTime
+    }
+
+    /// Display meeting time: live for today, persisted for past days.
+    var displayMeetingTime: TimeInterval {
+        if isViewingToday { return totalMeetingTime }
+        return persistedMeetingTime ?? totalMeetingTime
+    }
+
+    /// Display project count: live for today, persisted for past days.
+    var displayProjectCount: Int {
+        if isViewingToday { return projectActivities.count }
+        return persistedProjectCount ?? projectActivities.count
     }
 
     // Expand state — only one item expanded at a time across the whole screen.
@@ -318,12 +350,19 @@ final class DashboardViewModel {
         lastStubsTaskFingerprint = ""
         lastStubsGenerationTime = .distantPast
         recommendationsError = nil
+        // Reset persisted day wrap metrics
+        persistedFocusTime = nil
+        persistedMeetingTime = nil
+        persistedProjectCount = nil
         loadDataForSelectedDate()
 
         // Auto-generate stubs if no persisted content was loaded and we have data.
         // This handles the case where the user changes dates while already on the Stubs tab
         // (where onAppear won't re-fire).
-        if recommendations.isEmpty
+        // For past days: also regenerate if day summary is missing (even if recommendations exist,
+        // since the record may have been created when this day was "today" with no day summary).
+        let needsDaySummaryForPastDay = !isViewingToday && daySummaryContent == nil
+        if (recommendations.isEmpty || needsDaySummaryForPastDay)
             && daySummaryContent == nil
             && !isGeneratingRecommendations
             && hasGeminiKey
@@ -807,8 +846,13 @@ final class DashboardViewModel {
     /// Attempt to load stubs content from the database for the selected date.
     /// If found, populates greetingContext, daySummaryContent, suggestedQuestions, and recommendations.
     private func loadPersistedStubs(from db: DatabaseReader) {
-        guard let record = db.stubsContent(for: selectedDate) else { return }
+        let dateStr = SharedFormatters.dayFormatter.string(from: selectedDate)
+        guard let record = db.stubsContent(for: selectedDate) else {
+            Logger.info("loadPersistedStubs: no record for \(dateStr)")
+            return
+        }
 
+        Logger.info("loadPersistedStubs: found record for \(dateStr), daySummary=\(record.daySummary != nil ? "present" : "nil")")
         greetingContext = record.greetingContext.isEmpty ? nil : record.greetingContext
         daySummaryContent = record.daySummary
 
@@ -844,6 +888,11 @@ final class DashboardViewModel {
                 )
             }
         }
+
+        // Load persisted day wrap metrics
+        persistedFocusTime = record.focusTimeSeconds.map { TimeInterval($0) }
+        persistedMeetingTime = record.meetingTimeSeconds.map { TimeInterval($0) }
+        persistedProjectCount = record.projectCount
 
         // Mark as already loaded so auto-generate doesn't fire
         if !recommendations.isEmpty || daySummaryContent != nil {

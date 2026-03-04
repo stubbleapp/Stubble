@@ -22,7 +22,7 @@ struct StreamingMarkdownView: View {
                     .markdownTheme(chatTheme)
                     .markdownBlockStyle(\.paragraph) { configuration in
                         configuration.label
-                            .lineSpacing(6)
+                            .lineSpacing(8)
                     }
             }
         }

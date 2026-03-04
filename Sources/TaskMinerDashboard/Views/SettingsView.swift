@@ -54,6 +54,28 @@ private enum AwayDuration: Int, CaseIterable, Identifiable {
     var label: String { "\(rawValue) min" }
 }
 
+private enum DayWrapTime: Int, CaseIterable, Identifiable {
+    case fourPM = 16
+    case fivePM = 17
+    case sixPM = 18
+    case sevenPM = 19
+    case eightPM = 20
+    case never = 24
+
+    var id: Int { rawValue }
+
+    var label: String {
+        switch self {
+        case .fourPM: return "4 PM"
+        case .fivePM: return "5 PM"
+        case .sixPM: return "6 PM"
+        case .sevenPM: return "7 PM"
+        case .eightPM: return "8 PM"
+        case .never: return "Never"
+        }
+    }
+}
+
 // MARK: - Settings View
 
 struct SettingsView: View {
@@ -73,6 +95,7 @@ struct SettingsView: View {
     @State private var customPrompt: String = ""
     @State private var granularity: TaskGranularity = .medium
     @State private var minAwayMinutes: Int = 15
+    @State private var dayWrapHour: Int = 18
     @State private var appearanceMode: AppearanceMode = .system
 
     // Exclusions
@@ -166,6 +189,10 @@ struct SettingsView: View {
             guard !isLoading else { return }
             SettingsManager.shared.minAwayMinutes = minAwayMinutes
         }
+        .onChange(of: dayWrapHour) {
+            guard !isLoading else { return }
+            SettingsManager.shared.dayWrapHour = dayWrapHour
+        }
         .onChange(of: apiKey) {
             guard !isLoading else { return }
             viewModel.updateGeminiKey(apiKey)
@@ -202,6 +229,7 @@ struct SettingsView: View {
         customPrompt = SettingsManager.shared.customPrompt ?? ""
         granularity = SettingsManager.shared.granularity
         minAwayMinutes = SettingsManager.shared.minAwayMinutes
+        dayWrapHour = SettingsManager.shared.dayWrapHour
         appearanceMode = SettingsManager.shared.appearanceMode
         exclusions = SettingsManager.shared.exclusions
         loadMemoryEntries()
@@ -370,6 +398,45 @@ struct SettingsView: View {
                     .foregroundStyle(Theme.textMuted)
             }
 
+            // Day Wrap Hour
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Day Wrap Time")
+                    .font(.subheadline.weight(.medium))
+                    .foregroundStyle(Theme.textPrimary)
+
+                HStack(spacing: 0) {
+                    ForEach(DayWrapTime.allCases) { time in
+                        Button {
+                            withAnimation(.easeInOut(duration: 0.15)) {
+                                dayWrapHour = time.rawValue
+                            }
+                        } label: {
+                            Text(time.label)
+                                .font(.system(size: 12, weight: dayWrapHour == time.rawValue ? .semibold : .regular))
+                                .foregroundStyle(dayWrapHour == time.rawValue ? Theme.textPrimary : Theme.textSecondary)
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 7)
+                                .background(
+                                    RoundedRectangle(cornerRadius: 6, style: .continuous)
+                                        .fill(dayWrapHour == time.rawValue ? Theme.selectedSurface : Color.clear)
+                                )
+                                .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .padding(3)
+                .background(
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .fill(Theme.surfaceElevated)
+                )
+                .accessibilityIdentifier("settings-day-wrap-hour")
+
+                Text("After this time, today's view shows a Day Wrap summary with the timeline collapsed.")
+                    .font(.caption2)
+                    .foregroundStyle(Theme.textMuted)
+            }
+
             // Custom Instructions
             VStack(alignment: .leading, spacing: 8) {
                 Text("Custom Instructions")
@@ -520,9 +587,7 @@ struct SettingsView: View {
             // Upgrade to Pro
             if AuthManager.shared.currentState != .pro {
                 Button {
-                    if let url = URL(string: StubbleAPIConfig.paddleCheckoutURL) {
-                        NSWorkspace.shared.open(url)
-                    }
+                    openPaddleCheckout()
                 } label: {
                     HStack(spacing: 6) {
                         Image(systemName: "star.fill")
@@ -681,6 +746,22 @@ struct SettingsView: View {
         }
     }
 
+    private func openPaddleCheckout() {
+        guard let userId = AuthManager.shared.publicUserId else {
+            // Fallback: open generic checkout (no user attribution)
+            if let url = URL(string: "https://checkout.paddle.com/checkout/custom/\(StubbleAPIConfig.paddlePriceId)") {
+                NSWorkspace.shared.open(url)
+            }
+            return
+        }
+
+        if let url = StubbleAPIConfig.paddleCheckoutURL(
+            userId: userId,
+            email: AuthManager.shared.userEmail
+        ) {
+            NSWorkspace.shared.open(url)
+        }
+    }
 
     // MARK: - Exclusions Pane
 

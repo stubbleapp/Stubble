@@ -187,6 +187,7 @@ struct RecommendationsView: View {
 struct ProjectRow: View {
     let activity: ProjectActivity
     @Binding var expandedID: UUID?
+    var onTap: (() -> Void)? = nil
     @Environment(DashboardViewModel.self) var viewModel
 
     private var isExpanded: Bool {
@@ -200,8 +201,12 @@ struct ProjectRow: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             Button {
-                withAnimation(.easeInOut(duration: 0.2)) {
-                    expandedID = isExpanded ? nil : activity.id
+                if let onTap = onTap {
+                    onTap()
+                } else {
+                    withAnimation(.easeInOut(duration: 0.2)) {
+                        expandedID = isExpanded ? nil : activity.id
+                    }
                 }
             } label: {
                 HStack(spacing: 10) {

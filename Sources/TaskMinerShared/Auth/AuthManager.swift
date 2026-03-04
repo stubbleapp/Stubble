@@ -65,6 +65,9 @@ public final class AuthManager: @unchecked Sendable {
     public var subscriptionTier: String? {
         sessionQueue.sync { _subscriptionTier }
     }
+    public var publicUserId: String? {
+        sessionQueue.sync { userId }
+    }
 
     // Backing storage (accessed only via sessionQueue)
     private var _isSignedIn: Bool = false
@@ -343,7 +346,8 @@ public final class AuthManager: @unchecked Sendable {
 
     // MARK: - Token Refresh
 
-    private func refreshSession() async throws {
+    /// Force refresh the session token. Used after subscription changes to pick up new user_metadata.
+    public func refreshSession() async throws {
         // Coalesce concurrent refresh calls into a single in-flight task.
         // This prevents the race where two callers both see near-expiry,
         // both call Supabase, and the second invalidates the first's new token.

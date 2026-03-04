@@ -373,20 +373,18 @@ final class RecommendationGenerator: Sendable {
            IMPORTANT: Do NOT include any greeting like "Hey", "Hi", "Hello", or the user's name — \
            the UI already displays a greeting header. Do NOT summarize the full day here — save details \
            for the day_summary. Just a brief hook, e.g. "A deep dive into the permission system and SQLite layer." \
-        2. day_summary: A comprehensive 2-4 paragraph narrative. This is the main content — include ALL detail here: \
-           - What the user worked on and how time was split, referencing project names from the profile \
-           - Notable patterns (focus blocks, context-switching, deep work vs. communication) \
-           - How this day's work fits into their broader goals and ongoing projects \
-           - Any interesting observations about their habits or workflow \
-           Write in second person ("you"), warm and conversational. Use markdown for structure. \
+        2. day_summary: A CONCISE 1-2 paragraph narrative (maximum 2 paragraphs). Keep it focused and punchy: \
+           - What the user worked on and key accomplishments \
+           - One notable pattern or insight about their workflow \
+           Write in second person ("you"), warm and conversational. Use **bold** for emphasis on key terms. \
            Do NOT repeat the greeting_context — dive straight into the detail. \
         \
         Rules: \
         - Be specific — reference actual tasks, apps, and projects from the data \
-        - Use the User Profile to add meaning beyond raw data (connect activities to goals) \
-        - The day_summary should feel like a thoughtful, personalized end-of-day review \
-        - Don't be generic — every observation should be rooted in the data and profile \
-        - If the data is sparse, keep the summary short and honest about it \
+        - Keep it SHORT — 2 paragraphs maximum, no fluff or filler \
+        - Use **bold** markdown for key project names and accomplishments \
+        - Don't be generic — every observation should be rooted in the data \
+        - If the data is sparse, keep it to a single short paragraph \
         \
         Respond with a JSON object. Do not include any text outside the JSON. \
         \

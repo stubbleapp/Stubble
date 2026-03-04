@@ -11,6 +11,11 @@ public struct StubsContentRecord: Sendable {
     public let recommendationsJson: String  // JSON-encoded [[String: Any]]
     public let generatedAt: Date
 
+    // Day wrap metrics (persisted for past days)
+    public let focusTimeSeconds: Int?
+    public let meetingTimeSeconds: Int?
+    public let projectCount: Int?
+
     public init(
         id: Int64? = nil,
         date: String,
@@ -18,7 +23,10 @@ public struct StubsContentRecord: Sendable {
         daySummary: String? = nil,
         questionsJson: String = "[]",
         recommendationsJson: String = "[]",
-        generatedAt: Date = Date()
+        generatedAt: Date = Date(),
+        focusTimeSeconds: Int? = nil,
+        meetingTimeSeconds: Int? = nil,
+        projectCount: Int? = nil
     ) {
         self.id = id
         self.date = date
@@ -27,5 +35,8 @@ public struct StubsContentRecord: Sendable {
         self.questionsJson = questionsJson
         self.recommendationsJson = recommendationsJson
         self.generatedAt = generatedAt
+        self.focusTimeSeconds = focusTimeSeconds
+        self.meetingTimeSeconds = meetingTimeSeconds
+        self.projectCount = projectCount
     }
 }

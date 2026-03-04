@@ -96,4 +96,39 @@ extension ProjectActivity {
             colorIndex: colorIndex
         )
     }
+
+    /// Convert to an AggregatedProject for use with ProjectDetailSheet.
+    /// Creates a single-day aggregation with minimal work pattern data.
+    func toAggregatedProject() -> AggregatedProject {
+        let weekday = Calendar.current.component(.weekday, from: startTime)
+        let startHour = Calendar.current.component(.hour, from: startTime)
+        let endHour = Calendar.current.component(.hour, from: endTime)
+
+        // Distribute duration across hours worked
+        var hourlyDistribution: [Int: TimeInterval] = [:]
+        let hoursWorked = max(1, endHour - startHour + 1)
+        let durationPerHour = totalDuration / Double(hoursWorked)
+        for hour in startHour...endHour {
+            hourlyDistribution[hour] = durationPerHour
+        }
+
+        // Single day's data
+        let dayStart = Calendar.current.startOfDay(for: startTime)
+
+        return AggregatedProject(
+            id: AggregatedProject.stableID(for: name),
+            name: name,
+            summary: summary,
+            totalDuration: totalDuration,
+            daysActive: 1,
+            appNames: Set(appNames),
+            taskTitles: taskTitles,
+            colorIndex: colorIndex,
+            weekdayDistribution: [weekday: totalDuration],
+            hourlyDistribution: hourlyDistribution,
+            dailyDurations: [dayStart: totalDuration],
+            firstActiveDate: startTime,
+            lastActiveDate: endTime
+        )
+    }
 }

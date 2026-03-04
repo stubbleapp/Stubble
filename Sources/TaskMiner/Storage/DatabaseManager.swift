@@ -86,7 +86,7 @@ class DatabaseManager {
     }
 
     /// Current schema version — kept in sync with DatabaseReader's migrations.
-    private static let schemaVersion = 14
+    private static let schemaVersion = 15
 
     private func runMigrations() {
         let currentVersion = getUserVersion()
@@ -409,6 +409,22 @@ class DatabaseManager {
             )
             """
             if !execMigration(capsSql, label: "14c: create notification_caps table") {
+                migrationFailed = true
+            }
+        }
+
+        if currentVersion < 15 {
+            // Day wrap metrics persistence
+            if !execMigration("ALTER TABLE stubs_content ADD COLUMN focus_time_seconds INTEGER",
+                            label: "15a: add focus_time_seconds to stubs_content", ignoreDuplicate: true) {
+                migrationFailed = true
+            }
+            if !execMigration("ALTER TABLE stubs_content ADD COLUMN meeting_time_seconds INTEGER",
+                            label: "15b: add meeting_time_seconds to stubs_content", ignoreDuplicate: true) {
+                migrationFailed = true
+            }
+            if !execMigration("ALTER TABLE stubs_content ADD COLUMN project_count INTEGER",
+                            label: "15c: add project_count to stubs_content", ignoreDuplicate: true) {
                 migrationFailed = true
             }
         }

@@ -42,7 +42,7 @@ public class DatabaseReader {
     }
 
     /// Current schema version. Bump this when adding new migrations.
-    private static let schemaVersion = 14
+    private static let schemaVersion = 15
 
     /// Apply schema migrations so the dashboard works even if the CLI hasn't run yet.
     /// Uses PRAGMA user_version to track which migrations have already run.
@@ -393,6 +393,25 @@ public class DatabaseReader {
             """
             guard execMigration(capsSql, label: "14c: create notification_caps table") else {
                 Logger.error("Migration 14c failed — stopping migrations")
+                return
+            }
+        }
+
+        if currentVersion < 15 {
+            // Day wrap metrics persistence
+            guard execMigration("ALTER TABLE stubs_content ADD COLUMN focus_time_seconds INTEGER",
+                              label: "15a: add focus_time_seconds to stubs_content", ignoreDuplicate: true) else {
+                Logger.error("Migration 15a failed — stopping migrations")
+                return
+            }
+            guard execMigration("ALTER TABLE stubs_content ADD COLUMN meeting_time_seconds INTEGER",
+                              label: "15b: add meeting_time_seconds to stubs_content", ignoreDuplicate: true) else {
+                Logger.error("Migration 15b failed — stopping migrations")
+                return
+            }
+            guard execMigration("ALTER TABLE stubs_content ADD COLUMN project_count INTEGER",
+                              label: "15c: add project_count to stubs_content", ignoreDuplicate: true) else {
+                Logger.error("Migration 15c failed — stopping migrations")
                 return
             }
         }
@@ -904,7 +923,8 @@ public class DatabaseReader {
         let dateStr = SharedFormatters.dayFormatter.string(from: date)
 
         let sql = """
-        SELECT id, date, greeting_context, day_summary, questions_json, recommendations_json, generated_at
+        SELECT id, date, greeting_context, day_summary, questions_json, recommendations_json, generated_at,
+               focus_time_seconds, meeting_time_seconds, project_count
         FROM stubs_content
         WHERE date = ?
         LIMIT 1
@@ -924,7 +944,10 @@ public class DatabaseReader {
             daySummary: sqlite3_column_text(stmt, 3).map({ String(cString: $0) }),
             questionsJson: sqlite3_column_text(stmt, 4).map({ String(cString: $0) }) ?? "[]",
             recommendationsJson: sqlite3_column_text(stmt, 5).map({ String(cString: $0) }) ?? "[]",
-            generatedAt: sqlite3_column_text(stmt, 6).flatMap({ SharedFormatters.iso8601.date(from: String(cString: $0)) }) ?? Date()
+            generatedAt: sqlite3_column_text(stmt, 6).flatMap({ SharedFormatters.iso8601.date(from: String(cString: $0)) }) ?? Date(),
+            focusTimeSeconds: sqlite3_column_type(stmt, 7) != SQLITE_NULL ? Int(sqlite3_column_int(stmt, 7)) : nil,
+            meetingTimeSeconds: sqlite3_column_type(stmt, 8) != SQLITE_NULL ? Int(sqlite3_column_int(stmt, 8)) : nil,
+            projectCount: sqlite3_column_type(stmt, 9) != SQLITE_NULL ? Int(sqlite3_column_int(stmt, 9)) : nil
         )
     }
 

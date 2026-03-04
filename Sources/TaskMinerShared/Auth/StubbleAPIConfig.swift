@@ -23,8 +23,23 @@ public enum StubbleAPIConfig {
     /// Full OAuth callback URL.
     public static var callbackURL: String { "\(callbackScheme)://auth-callback" }
 
-    /// Paddle checkout URL for Pro subscription.
-    public static let paddleCheckoutURL = "https://buy.stubble.app"
+    /// Paddle Price ID for the Pro subscription ($10/month).
+    public static let paddlePriceId = "pri_01kjwwnmrahnxxdbbna0p1myee"
+
+    /// Build checkout URL that opens stubble.ai/checkout with Paddle.js overlay.
+    public static func paddleCheckoutURL(userId: String, email: String?) -> URL? {
+        var components = URLComponents(string: "https://stubble.ai/checkout")
+        var queryItems: [URLQueryItem] = []
+
+        queryItems.append(URLQueryItem(name: "user_id", value: userId))
+
+        if let email = email, !email.isEmpty {
+            queryItems.append(URLQueryItem(name: "email", value: email))
+        }
+
+        components?.queryItems = queryItems
+        return components?.url
+    }
 
     /// Enterprise contact URL.
     public static let enterpriseContactURL = "mailto:hello@stubble.app?subject=Stubble%20Enterprise"

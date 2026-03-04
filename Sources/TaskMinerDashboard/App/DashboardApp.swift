@@ -102,6 +102,17 @@ struct DashboardApp: App {
                     return
                 }
 
+                // Handle subscription activation from Paddle checkout success page
+                // com.stubble://subscription-activated
+                if url.host == "subscription-activated" {
+                    Task {
+                        // Refresh session to pick up new subscription_tier from JWT
+                        try? await AuthManager.shared.refreshSession()
+                        viewModel.refreshForAuthChange()
+                    }
+                    return
+                }
+
                 // Fallback: try auth callback handling
                 Task {
                     let handled = await AuthManager.shared.handleCallback(url: url)
