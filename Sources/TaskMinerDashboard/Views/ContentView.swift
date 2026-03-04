@@ -21,11 +21,11 @@ struct ContentView: View {
     @State private var flagsMonitor: Any?
 
     private let chatTabIndex = 1
-    private let habitsTabIndex = 2
+    private let projectsTabIndex = 2
     private let logTabIndex = 3
 
     private var tabItems: [String] {
-        var items = ["Day", "Chat", "Habits"]
+        var items = ["Day", "Chat", "Projects"]
         if showDebugTabs {
             items.append("Log")
         }
@@ -47,8 +47,8 @@ struct ContentView: View {
                 .background(Theme.statusError.opacity(0.12))
             }
 
-            // Hide date selector on Chat (day-agnostic) and Habits (cross-day analysis)
-            if selectedTab != chatTabIndex && selectedTab != habitsTabIndex {
+            // Hide date selector on Chat and Projects (cross-day views)
+            if selectedTab != chatTabIndex && selectedTab != projectsTabIndex {
                 DaySelectorView()
                     .background(Theme.secondaryBackground)
 
@@ -64,7 +64,7 @@ struct ContentView: View {
                 case 1:
                     ChatTabView()
                 case 2:
-                    HabitsView()
+                    ProjectsView()
                 default:
                     ActivityLogView()
                 }
@@ -130,7 +130,7 @@ struct ContentView: View {
                 viewModel.selectDate(Date())
             }
             // Keep ViewModel's currentScreen in sync so chat context knows which tab is active
-            let screenNames = ["Day", "Chat", "Habits", "Log"]
+            let screenNames = ["Day", "Chat", "Projects", "Log"]
             viewModel.currentScreen = newTab < screenNames.count ? screenNames[newTab] : "Chat"
         }
         .onReceive(NotificationCenter.default.publisher(for: .switchToChatTab)) { _ in

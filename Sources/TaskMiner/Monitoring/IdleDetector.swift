@@ -16,6 +16,10 @@ class IdleDetector {
     /// for the next periodic poll.
     var onSystemIdleTransition: ((IdleTransition) -> Void)?
 
+    /// Optional callback that returns true when the user is engaged in media/video calls.
+    /// When this returns true, idle detection is suppressed (user is watching/listening).
+    var isUserEngagedInMedia: (() -> Bool)?
+
     init(threshold: TimeInterval) {
         self.threshold = threshold
     }
@@ -23,6 +27,10 @@ class IdleDetector {
     var isIdle: Bool {
         // System events (screen lock, sleep) take precedence
         if let forced = systemForcedIdle { return forced }
+
+        // Media/video call engagement suppresses idle detection
+        if isUserEngagedInMedia?() == true { return false }
+
         return idleTime >= threshold
     }
 

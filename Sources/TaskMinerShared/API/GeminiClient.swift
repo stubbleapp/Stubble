@@ -452,4 +452,26 @@ public enum GeminiError: Error, LocalizedError {
             return "Daily request limit reached. Upgrade to Pro for unlimited access."
         }
     }
+
+    /// Convert a network error into a user-friendly message.
+    /// Use this for errors that may be URLErrors or other network-related failures.
+    public static func friendlyNetworkError(_ error: Error) -> String {
+        if let urlError = error as? URLError {
+            switch urlError.code {
+            case .notConnectedToInternet:
+                return "No internet connection. Check your network and try again."
+            case .timedOut:
+                return "Request timed out. The server may be slow or unreachable."
+            case .networkConnectionLost:
+                return "Connection lost. Please try again."
+            case .cannotFindHost, .cannotConnectToHost:
+                return "Cannot reach the server. Check your connection and try again."
+            case .dnsLookupFailed:
+                return "Network error. Check your connection and try again."
+            default:
+                return "Network error. Please check your connection."
+            }
+        }
+        return error.localizedDescription
+    }
 }

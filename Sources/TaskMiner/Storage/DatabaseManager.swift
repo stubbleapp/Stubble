@@ -1352,6 +1352,69 @@ class DatabaseManager {
         }
     }
 
+    // MARK: - Crash Recovery
+
+    /// Finalize stale activities that were left open due to a crash or unexpected termination.
+    /// Stale activities are those with no end_time (duration IS NULL) that started more than
+    /// `staleThreshold` seconds ago.
+    /// - Returns: The number of activities finalized.
+    @discardableResult
+    func finalizeStaleActivities(staleThreshold: TimeInterval = 300) -> Int {
+        guard db != nil else { return 0 }
+
+        let cutoff = Date().addingTimeInterval(-staleThreshold)
+        let cutoffStr = SharedFormatters.iso8601.string(from: cutoff)
+
+        // Find stale activities (no duration, started before cutoff)
+        let selectSql = """
+        SELECT id, timestamp FROM activities
+        WHERE duration IS NULL AND timestamp < ?
+        """
+        var selectStmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, selectSql, -1, &selectStmt, nil) == SQLITE_OK else { return 0 }
+        defer { sqlite3_finalize(selectStmt) }
+        sqliteBindText(selectStmt, 1, cutoffStr)
+
+        var staleActivities: [(id: Int64, timestamp: Date)] = []
+        while sqlite3_step(selectStmt) == SQLITE_ROW {
+            let id = sqlite3_column_int64(selectStmt, 0)
+            if let tsStr = sqlite3_column_text(selectStmt, 1),
+               let ts = SharedFormatters.iso8601.date(from: String(cString: tsStr)) {
+                staleActivities.append((id: id, timestamp: ts))
+            }
+        }
+
+        guard !staleActivities.isEmpty else { return 0 }
+
+        // Finalize each stale activity with estimated duration (5 minutes or time to next activity)
+        let updateSql = "UPDATE activities SET end_time = ?, duration = ? WHERE id = ?"
+        var updateStmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, updateSql, -1, &updateStmt, nil) == SQLITE_OK else { return 0 }
+        defer { sqlite3_finalize(updateStmt) }
+
+        var count = 0
+        for stale in staleActivities {
+            // Estimate end time as 5 minutes after start (reasonable default for crashed activities)
+            let estimatedDuration: TimeInterval = 300
+            let endTime = stale.timestamp.addingTimeInterval(estimatedDuration)
+            let endTimeStr = SharedFormatters.iso8601.string(from: endTime)
+
+            sqlite3_reset(updateStmt)
+            sqliteBindText(updateStmt, 1, endTimeStr)
+            sqlite3_bind_double(updateStmt, 2, estimatedDuration)
+            sqlite3_bind_int64(updateStmt, 3, stale.id)
+
+            if sqlite3_step(updateStmt) == SQLITE_DONE {
+                count += 1
+            }
+        }
+
+        if count > 0 {
+            Logger.info("Crash recovery: finalized \(count) stale activities")
+        }
+        return count
+    }
+
     deinit {
         close()
     }

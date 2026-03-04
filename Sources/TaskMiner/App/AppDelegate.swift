@@ -15,6 +15,7 @@ class AppDelegate {
     private let fileActivityMonitor: FileActivityMonitor
     private let calendarMonitor: CalendarMonitor
     private let granolaMeetingMonitor: GranolaMeetingMonitor
+    private var mediaActivityDetector: MediaActivityDetector?
     /// Lazy-initialized so the daemon defers AI setup until first summarization.
     /// Resolves proxy mode (signed-in user) → BYOK key (settings.json) → env var.
     private lazy var taskSummarizer: TaskSummarizer? = {
@@ -42,6 +43,7 @@ class AppDelegate {
     private var lastMemoryReviewDate: String = ""
     private var lastPruneDate: String = ""
     private var isShuttingDown = false
+    private var lastLoggedMediaSuppression = false
 
     init(config: Configuration, db: DatabaseManager) throws {
         self.config = config
@@ -62,6 +64,9 @@ class AppDelegate {
     }
 
     func start() {
+        // Crash recovery: finalize any stale activities from previous crashed sessions
+        db.finalizeStaleActivities()
+
         // Wire up app change callback
         activityMonitor.onAppChanged = { [weak self] app in
             self?.handleAppChange(app: app)
@@ -77,6 +82,17 @@ class AppDelegate {
         idleDetector.startSystemEventObservers()
         idleDetector.onSystemIdleTransition = { [weak self] transition in
             self?.handleIdleTransition(transition)
+        }
+
+        // Initialize media activity detection (video calls, streaming, calendar meetings)
+        // This suppresses idle detection when the user is watching/listening
+        mediaActivityDetector = MediaActivityDetector(
+            activityMonitor: activityMonitor,
+            calendarMonitor: calendarMonitor,
+            windowTitleMonitor: windowTitleMonitor
+        )
+        idleDetector.isUserEngagedInMedia = { [weak self] in
+            self?.mediaActivityDetector?.isUserEngagedInMedia() ?? false
         }
 
         // Wire up file activity callback
@@ -288,6 +304,16 @@ class AppDelegate {
         }
 
         // 1. Check idle transitions (HID-based polling)
+        // Log when media activity prevents idle (only when HID says idle but media is engaged)
+        let hidIdle = idleDetector.idleTime >= config.idleThreshold
+        if hidIdle, let reason = mediaActivityDetector?.engagementReason() {
+            if !lastLoggedMediaSuppression {
+                Logger.info("Idle suppressed: \(reason)")
+                lastLoggedMediaSuppression = true
+            }
+        } else {
+            lastLoggedMediaSuppression = false
+        }
         let transition = idleDetector.checkTransition()
         handleIdleTransition(transition)
 

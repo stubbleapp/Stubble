@@ -115,11 +115,12 @@ final class GranolaMeetingMonitor {
             endTime = eDate
             meetingDate = Self.dayFormatter.string(from: sDate)
 
-            // Extract video call URL from conferenceData
+            // Extract video call URL from conferenceData (validate HTTPS + known video domains)
             if let confData = calEvent["conferenceData"] as? [String: Any],
                let entryPoints = confData["entryPoints"] as? [[String: Any]],
                let videoEntry = entryPoints.first(where: { ($0["entryPointType"] as? String) == "video" }),
-               let uri = videoEntry["uri"] as? String {
+               let uri = videoEntry["uri"] as? String,
+               Self.isValidMeetingURL(uri) {
                 meetingURL = uri
             } else {
                 meetingURL = nil
@@ -245,5 +246,45 @@ final class GranolaMeetingMonitor {
 
         let result = lines.joined(separator: "\n")
         return result.isEmpty ? nil : result
+    }
+
+    // MARK: - URL Validation
+
+    /// Known video conferencing domains for meeting URL validation.
+    private static let allowedMeetingDomains: Set<String> = [
+        "zoom.us",
+        "meet.google.com",
+        "teams.microsoft.com",
+        "teams.live.com",
+        "webex.com",
+        "whereby.com",
+        "around.co",
+        "cal.com",
+        "riverside.fm",
+        "loom.com",
+        "grain.com",
+        "meetingbird.com",
+        "descript.com",
+        "tuple.app",
+        "pop.com",
+        "tandem.chat",
+        "gather.town",
+        "spatial.chat",
+    ]
+
+    /// Validates that a meeting URL is HTTPS and from a known video conferencing domain.
+    private static func isValidMeetingURL(_ urlString: String) -> Bool {
+        guard urlString.hasPrefix("https://"),
+              let url = URL(string: urlString),
+              let host = url.host?.lowercased() else {
+            return false
+        }
+        // Check if host matches or is a subdomain of an allowed domain
+        for domain in allowedMeetingDomains {
+            if host == domain || host.hasSuffix(".\(domain)") {
+                return true
+            }
+        }
+        return false
     }
 }

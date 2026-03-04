@@ -89,13 +89,30 @@ final class DashboardViewModel {
     var expandedProjectActivityId: UUID?
     var expandedActivityGroupId: String?
 
+    // MARK: - Projects (cross-day aggregation)
+
+    /// Aggregated projects for the current time period.
+    var aggregatedProjects: [AggregatedProject] = []
+
+    /// Current time period for project aggregation.
+    var projectsTimePeriod: ProjectTimePeriod = .week
+
+    /// Whether projects are currently loading.
+    var isLoadingProjects = false
+
+    /// Error message for projects loading.
+    var projectsError: String?
+
+    /// Whether AI analysis is being generated for a project.
+    var isGeneratingProjectAnalysis = false
+
+    /// Cache of AI-generated project analyses (keyed by project ID).
+    var projectAnalysisCache: [UUID: ProjectAnalysis] = [:]
+
     // MARK: - Sub-ViewModels (Domain-Specific State)
 
     /// Chat state and operations. Access via `chat` property.
     private(set) var chatVM: ChatViewModel!
-
-    /// Habits analysis state and operations. Access via `habits` property.
-    private(set) var habitsVM: HabitsViewModel!
 
     // MARK: - Chat (bridged to chatVM for backwards compatibility)
 
@@ -131,7 +148,7 @@ final class DashboardViewModel {
         get { chatVM.threadSummaryMessageCounts }
         set { chatVM.threadSummaryMessageCounts = newValue }
     }
-    /// The name of the currently active screen/tab (e.g. "Day", "Chat", "Habits").
+    /// The name of the currently active screen/tab (e.g. "Day", "Chat").
     /// Used to give the chat assistant context about what the user is looking at.
     var currentScreen: String = "Chat"
     /// Set by ChatTabView or ChatOverlayView to trigger a chat question.
@@ -145,60 +162,11 @@ final class DashboardViewModel {
         set { chatVM.shouldExpandPanel = newValue }
     }
 
-    // MARK: - Habits (bridged to habitsVM for backwards compatibility)
-
-    var habitsAnalysis: HabitsAnalysis? {
-        get { habitsVM.analysis }
-        set { habitsVM.analysis = newValue }
-    }
-    var habitsSnapshot: HabitsDataSnapshot? {
-        get { habitsVM.snapshot }
-        set { habitsVM.snapshot = newValue }
-    }
-    var isGeneratingHabits: Bool {
-        get { habitsVM.isGenerating }
-        set { habitsVM.isGenerating = newValue }
-    }
-    var habitsError: String? {
-        get { habitsVM.error }
-        set { habitsVM.error = newValue }
-    }
-    var habitsGenerator: HabitsGenerator? {
-        get { habitsVM.habitsGenerator }
-        set { habitsVM.habitsGenerator = newValue }
-    }
-    var hasAttemptedHabitsGeneration: Bool {
-        get { habitsVM.hasAttemptedGeneration }
-        set { habitsVM.hasAttemptedGeneration = newValue }
-    }
-    /// Cached result of whether the database has any activity data.
-    /// Checked asynchronously on Habits tab appearance to avoid blocking the main thread.
-    var habitsHasSufficientData: Bool? {
-        get { habitsVM.hasSufficientData }
-        set { habitsVM.hasSufficientData = newValue }
-    }
-
-    /// Composite focus score for the simplified HabitsView.
-    var focusScore: FocusScore? { habitsVM.focusScore }
-
-    /// The current tip to show — first high-impact suggestion not yet dismissed.
-    var todayTip: ImprovementSuggestion? { habitsVM.todayTip }
-
-    /// Weekly activity bars for the sparkline visualization.
-    var weeklyBars: [DailyActivityBar]? { habitsVM.weeklyBars }
-
-    /// Dismiss a tip so it won't show again.
-    func dismissTip(_ id: UUID) { habitsVM.dismissTip(id) }
-
-    /// Load weekly bars asynchronously.
-    func loadWeeklyBars() { habitsVM.loadWeeklyBars() }
-
     // App name → bundle ID mapping (for icon resolution)
     var appNameBundleMap: [String: String] = [:]
 
     // In-flight AI task handles (for cancellation on new request)
     var recommendationsTask: Task<Void, Never>?
-    var habitsTask: Task<Void, Never>?
 
     // Pause
     var pauseState: PauseState?
@@ -256,13 +224,11 @@ final class DashboardViewModel {
 
         // Initialize AI client: proxy mode (signed-in) → BYOK key (settings.json) → env var.
         // Skip if setup wizard hasn't completed yet.
-        var habitsGen: HabitsGenerator? = nil
         if SettingsManager.shared.hasCompletedSetup, let client = GeminiClient.resolvedClient() {
             self.geminiClient = client
             self.taskSummarizer = TaskSummarizer(geminiClient: client)
             self.activityGenerator = ProjectActivityGenerator(geminiClient: client)
             self.recommendationGenerator = RecommendationGenerator(geminiClient: client)
-            habitsGen = HabitsGenerator(geminiClient: client)
             self.hasGeminiKey = true
         } else {
             self.geminiClient = nil
@@ -280,13 +246,6 @@ final class DashboardViewModel {
             taskWriter: taskWriter,
             memoryStore: memoryStore,
             geminiClient: geminiClient
-        )
-        self.habitsVM = HabitsViewModel(
-            dashboardViewModel: self,
-            dbReader: dbReader,
-            taskWriter: taskWriter,
-            memoryStore: memoryStore,
-            habitsGenerator: habitsGen
         )
 
         loadAvailableDates()
@@ -400,11 +359,29 @@ final class DashboardViewModel {
 
                 Analytics.summaryGenerated(taskCount: result.tasks.count)
             } catch {
-                self.summaryError = error.localizedDescription
+                self.summaryError = Self.friendlySummaryError(error)
                 self.isGeneratingSummary = false
                 Analytics.summaryFailed()
             }
         }
+    }
+
+    /// Convert errors into user-friendly messages for summary generation.
+    private static func friendlySummaryError(_ error: Error) -> String {
+        if let gemini = error as? GeminiError {
+            switch gemini {
+            case .trialExpired:
+                return "Your free trial has ended. Open Settings → Account to upgrade to Pro."
+            case .sessionExpired:
+                return "Your session has expired. Open Settings → Account to sign in again."
+            case .rateLimited:
+                return "You've reached today's request limit. Upgrade to Pro for more requests."
+            default:
+                return gemini.localizedDescription
+            }
+        }
+        // Use friendly message for network errors (URLError)
+        return GeminiError.friendlyNetworkError(error)
     }
 
     /// Convert ProjectClusterData from the AI response into ProjectActivity objects
@@ -614,7 +591,6 @@ final class DashboardViewModel {
             self.hasGeminiKey = true
             // Update sub-view-models
             self.chatVM.geminiClient = client
-            self.habitsVM.habitsGenerator = HabitsGenerator(geminiClient: client)
         } else {
             self.geminiClient = nil
             self.taskSummarizer = nil
@@ -623,7 +599,6 @@ final class DashboardViewModel {
             self.hasGeminiKey = false
             // Clear sub-view-models
             self.chatVM.geminiClient = nil
-            self.habitsVM.habitsGenerator = nil
         }
     }
 
@@ -643,7 +618,6 @@ final class DashboardViewModel {
             self.hasGeminiKey = true
             // Update sub-view-models
             self.chatVM.geminiClient = client
-            self.habitsVM.habitsGenerator = HabitsGenerator(geminiClient: client)
         } else {
             // No BYOK key — try proxy mode (signed-in user) before giving up
             refreshForAuthChange()
@@ -883,11 +857,6 @@ final class DashboardViewModel {
         daySummaryText = nil
         summaryError = nil
         recommendationsError = nil
-        habitsAnalysis = nil
-        habitsSnapshot = nil
-        habitsError = nil
-        hasAttemptedHabitsGeneration = false
-        habitsHasSufficientData = nil
 
         Logger.info("All data cleared by user")
         Analytics.dataClearedByUser()

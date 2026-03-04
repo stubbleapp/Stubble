@@ -471,34 +471,6 @@ public class TaskWriter {
 
     // MARK: - Helpers
 
-    // MARK: - Habits Analysis Cache
-
-    /// Insert or replace the cached habits analysis (single-row cache).
-    public func insertOrReplaceHabitsAnalysis(json: String, daysAnalyzed: Int, snapshotHash: String) throws {
-        // Delete existing (only keep one cached analysis)
-        sqlite3_exec(db, "DELETE FROM habits_analysis", nil, nil, nil)
-
-        let sql = """
-        INSERT INTO habits_analysis (generated_at, days_analyzed, analysis_json, snapshot_hash)
-        VALUES (?, ?, ?, ?)
-        """
-        var stmt: OpaquePointer?
-        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
-            throw DatabaseError.executionFailed(lastError)
-        }
-        defer { sqlite3_finalize(stmt) }
-
-        let now = SharedFormatters.iso8601.string(from: Date())
-        sqliteBindText(stmt, 1, now)
-        sqlite3_bind_int(stmt, 2, Int32(daysAnalyzed))
-        sqliteBindText(stmt, 3, json)
-        sqliteBindText(stmt, 4, snapshotHash)
-
-        guard sqlite3_step(stmt) == SQLITE_DONE else {
-            throw DatabaseError.executionFailed(lastError)
-        }
-    }
-
     private var lastError: String {
         db.flatMap { String(cString: sqlite3_errmsg($0)) } ?? "no database"
     }

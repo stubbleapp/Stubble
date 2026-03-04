@@ -56,12 +56,14 @@ public class DatabaseReader {
             return
         }
 
-        var migrationFailed = false
+        // Run migrations sequentially — stop on first failure to prevent schema corruption.
+        // Failed migrations will be retried on next launch since the version isn't bumped.
 
         if currentVersion < 1 {
-            if !execMigration("ALTER TABLE screenshots ADD COLUMN ocr_text TEXT",
-                              label: "1: add ocr_text", ignoreDuplicate: true) {
-                migrationFailed = true
+            guard execMigration("ALTER TABLE screenshots ADD COLUMN ocr_text TEXT",
+                              label: "1: add ocr_text", ignoreDuplicate: true) else {
+                Logger.error("Migration 1 failed — stopping migrations")
+                return
             }
         }
 
@@ -78,17 +80,19 @@ public class DatabaseReader {
                 confidence  REAL DEFAULT 0.0
             )
             """
-            if !execMigration(tasksSql, label: "2: create tasks table") {
-                migrationFailed = true
+            guard execMigration(tasksSql, label: "2: create tasks table") else {
+                Logger.error("Migration 2 failed — stopping migrations")
+                return
             }
             sqlite3_exec(db, "CREATE INDEX IF NOT EXISTS idx_tasks_date ON tasks(date)", nil, nil, nil)
             sqlite3_exec(db, "CREATE INDEX IF NOT EXISTS idx_tasks_start ON tasks(start_time)", nil, nil, nil)
         }
 
         if currentVersion < 3 {
-            if !execMigration("ALTER TABLE tasks ADD COLUMN relevant_links TEXT DEFAULT '[]'",
-                              label: "3: add relevant_links", ignoreDuplicate: true) {
-                migrationFailed = true
+            guard execMigration("ALTER TABLE tasks ADD COLUMN relevant_links TEXT DEFAULT '[]'",
+                              label: "3: add relevant_links", ignoreDuplicate: true) else {
+                Logger.error("Migration 3 failed — stopping migrations")
+                return
             }
         }
 
@@ -107,16 +111,18 @@ public class DatabaseReader {
                 color_index INTEGER DEFAULT 0
             )
             """
-            if !execMigration(paSql, label: "4: create project_activities table") {
-                migrationFailed = true
+            guard execMigration(paSql, label: "4: create project_activities table") else {
+                Logger.error("Migration 4 failed — stopping migrations")
+                return
             }
             sqlite3_exec(db, "CREATE INDEX IF NOT EXISTS idx_pa_date ON project_activities(date)", nil, nil, nil)
         }
 
         if currentVersion < 5 {
-            if !execMigration("ALTER TABLE tasks ADD COLUMN active_duration REAL",
-                              label: "5: add active_duration", ignoreDuplicate: true) {
-                migrationFailed = true
+            guard execMigration("ALTER TABLE tasks ADD COLUMN active_duration REAL",
+                              label: "5: add active_duration", ignoreDuplicate: true) else {
+                Logger.error("Migration 5 failed — stopping migrations")
+                return
             }
         }
 
@@ -130,8 +136,9 @@ public class DatabaseReader {
                 timestamp TEXT NOT NULL
             )
             """
-            if !execMigration(chatSql, label: "6: create chat_messages table") {
-                migrationFailed = true
+            guard execMigration(chatSql, label: "6: create chat_messages table") else {
+                Logger.error("Migration 6 failed — stopping migrations")
+                return
             }
             sqlite3_exec(db, "CREATE INDEX IF NOT EXISTS idx_chat_date ON chat_messages(date)", nil, nil, nil)
         }
@@ -148,8 +155,9 @@ public class DatabaseReader {
                 generated_at         TEXT NOT NULL
             )
             """
-            if !execMigration(stubsSql, label: "7: create stubs_content table") {
-                migrationFailed = true
+            guard execMigration(stubsSql, label: "7: create stubs_content table") else {
+                Logger.error("Migration 7 failed — stopping migrations")
+                return
             }
         }
 
@@ -161,18 +169,28 @@ public class DatabaseReader {
                 generated_at TEXT NOT NULL
             )
             """
-            if !execMigration(digestSql, label: "8: create ocr_digests table") {
-                migrationFailed = true
+            guard execMigration(digestSql, label: "8: create ocr_digests table") else {
+                Logger.error("Migration 8 failed — stopping migrations")
+                return
             }
         }
 
         if currentVersion < 9 {
-            if !execMigration("ALTER TABLE activities ADD COLUMN browser_url TEXT",
-                              label: "9a: add browser_url", ignoreDuplicate: true) { migrationFailed = true }
-            if !execMigration("ALTER TABLE activities ADD COLUMN document_path TEXT",
-                              label: "9b: add document_path", ignoreDuplicate: true) { migrationFailed = true }
-            if !execMigration("ALTER TABLE activities ADD COLUMN focused_element_role TEXT",
-                              label: "9c: add focused_element_role", ignoreDuplicate: true) { migrationFailed = true }
+            guard execMigration("ALTER TABLE activities ADD COLUMN browser_url TEXT",
+                              label: "9a: add browser_url", ignoreDuplicate: true) else {
+                Logger.error("Migration 9a failed — stopping migrations")
+                return
+            }
+            guard execMigration("ALTER TABLE activities ADD COLUMN document_path TEXT",
+                              label: "9b: add document_path", ignoreDuplicate: true) else {
+                Logger.error("Migration 9b failed — stopping migrations")
+                return
+            }
+            guard execMigration("ALTER TABLE activities ADD COLUMN focused_element_role TEXT",
+                              label: "9c: add focused_element_role", ignoreDuplicate: true) else {
+                Logger.error("Migration 9c failed — stopping migrations")
+                return
+            }
             let fileEventsSql = """
             CREATE TABLE IF NOT EXISTS file_events (
                 id          INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -183,7 +201,10 @@ public class DatabaseReader {
                 FOREIGN KEY (activity_id) REFERENCES activities(id)
             )
             """
-            if !execMigration(fileEventsSql, label: "9d: create file_events table") { migrationFailed = true }
+            guard execMigration(fileEventsSql, label: "9d: create file_events table") else {
+                Logger.error("Migration 9d failed — stopping migrations")
+                return
+            }
             sqlite3_exec(db, "CREATE INDEX IF NOT EXISTS idx_file_events_timestamp ON file_events(timestamp)", nil, nil, nil)
         }
 
@@ -197,15 +218,17 @@ public class DatabaseReader {
                 snapshot_hash TEXT NOT NULL
             )
             """
-            if !execMigration(habitsSql, label: "10: create habits_analysis table") {
-                migrationFailed = true
+            guard execMigration(habitsSql, label: "10: create habits_analysis table") else {
+                Logger.error("Migration 10 failed — stopping migrations")
+                return
             }
         }
 
         if currentVersion < 11 {
-            if !execMigration("ALTER TABLE tasks ADD COLUMN websites TEXT DEFAULT '[]'",
-                              label: "11: add websites to tasks", ignoreDuplicate: true) {
-                migrationFailed = true
+            guard execMigration("ALTER TABLE tasks ADD COLUMN websites TEXT DEFAULT '[]'",
+                              label: "11: add websites to tasks", ignoreDuplicate: true) else {
+                Logger.error("Migration 11 failed — stopping migrations")
+                return
             }
         }
 
@@ -229,8 +252,9 @@ public class DatabaseReader {
                 imported_at       TEXT NOT NULL
             )
             """
-            if !execMigration(granolaSql, label: "12: create granola_meetings table") {
-                migrationFailed = true
+            guard execMigration(granolaSql, label: "12: create granola_meetings table") else {
+                Logger.error("Migration 12 failed — stopping migrations")
+                return
             }
             sqlite3_exec(db, "CREATE INDEX IF NOT EXISTS idx_granola_meetings_date ON granola_meetings(meeting_date)", nil, nil, nil)
             sqlite3_exec(db, "CREATE INDEX IF NOT EXISTS idx_granola_meetings_granola_id ON granola_meetings(granola_id)", nil, nil, nil)
@@ -250,15 +274,17 @@ public class DatabaseReader {
                 is_archived       INTEGER NOT NULL DEFAULT 0
             )
             """
-            if !execMigration(threadsSql, label: "13a: create chat_threads table") {
-                migrationFailed = true
+            guard execMigration(threadsSql, label: "13a: create chat_threads table") else {
+                Logger.error("Migration 13a failed — stopping migrations")
+                return
             }
             sqlite3_exec(db, "CREATE INDEX IF NOT EXISTS idx_chat_threads_last_message_at ON chat_threads(last_message_at)", nil, nil, nil)
             sqlite3_exec(db, "CREATE INDEX IF NOT EXISTS idx_chat_threads_updated_at ON chat_threads(updated_at)", nil, nil, nil)
 
-            if !execMigration("ALTER TABLE chat_messages ADD COLUMN thread_id INTEGER NOT NULL DEFAULT 0",
-                              label: "13b: add thread_id to chat_messages", ignoreDuplicate: true) {
-                migrationFailed = true
+            guard execMigration("ALTER TABLE chat_messages ADD COLUMN thread_id INTEGER NOT NULL DEFAULT 0",
+                              label: "13b: add thread_id to chat_messages", ignoreDuplicate: true) else {
+                Logger.error("Migration 13b failed — stopping migrations")
+                return
             }
 
             let backfillThreadsSql = """
@@ -268,8 +294,9 @@ public class DatabaseReader {
             WHERE thread_id = 0
             GROUP BY date
             """
-            if !execMigration(backfillThreadsSql, label: "13c: backfill chat_threads from legacy chat_messages") {
-                migrationFailed = true
+            guard execMigration(backfillThreadsSql, label: "13c: backfill chat_threads from legacy chat_messages") else {
+                Logger.error("Migration 13c failed — stopping migrations")
+                return
             }
 
             let backfillThreadIdsSql = """
@@ -283,8 +310,9 @@ public class DatabaseReader {
             )
             WHERE thread_id = 0
             """
-            if !execMigration(backfillThreadIdsSql, label: "13d: backfill thread_id on chat_messages") {
-                migrationFailed = true
+            guard execMigration(backfillThreadIdsSql, label: "13d: backfill thread_id on chat_messages") else {
+                Logger.error("Migration 13d failed — stopping migrations")
+                return
             }
 
             let fallbackThreadSql = """
@@ -292,8 +320,9 @@ public class DatabaseReader {
             SELECT 'Legacy Chat', '', NULL, datetime('now'), datetime('now'), datetime('now'), 0, 0
             WHERE NOT EXISTS (SELECT 1 FROM chat_threads WHERE title = 'Legacy Chat')
             """
-            if !execMigration(fallbackThreadSql, label: "13e: ensure fallback legacy chat thread") {
-                migrationFailed = true
+            guard execMigration(fallbackThreadSql, label: "13e: ensure fallback legacy chat thread") else {
+                Logger.error("Migration 13e failed — stopping migrations")
+                return
             }
 
             let fallbackAssignSql = """
@@ -301,8 +330,9 @@ public class DatabaseReader {
             SET thread_id = (SELECT id FROM chat_threads WHERE title = 'Legacy Chat' ORDER BY id DESC LIMIT 1)
             WHERE thread_id = 0
             """
-            if !execMigration(fallbackAssignSql, label: "13f: assign fallback thread_id") {
-                migrationFailed = true
+            guard execMigration(fallbackAssignSql, label: "13f: assign fallback thread_id") else {
+                Logger.error("Migration 13f failed — stopping migrations")
+                return
             }
 
             sqlite3_exec(db, "CREATE INDEX IF NOT EXISTS idx_chat_messages_thread_id ON chat_messages(thread_id)", nil, nil, nil)
@@ -327,8 +357,9 @@ public class DatabaseReader {
                 created_at TEXT NOT NULL DEFAULT (datetime('now'))
             )
             """
-            if !execMigration(notificationsSql, label: "14a: create notifications table") {
-                migrationFailed = true
+            guard execMigration(notificationsSql, label: "14a: create notifications table") else {
+                Logger.error("Migration 14a failed — stopping migrations")
+                return
             }
             sqlite3_exec(db, "CREATE INDEX IF NOT EXISTS idx_notifications_delivered_at ON notifications(delivered_at)", nil, nil, nil)
             sqlite3_exec(db, "CREATE INDEX IF NOT EXISTS idx_notifications_category ON notifications(category)", nil, nil, nil)
@@ -345,8 +376,9 @@ public class DatabaseReader {
                 updated_at TEXT NOT NULL
             )
             """
-            if !execMigration(statsSql, label: "14b: create notification_category_stats table") {
-                migrationFailed = true
+            guard execMigration(statsSql, label: "14b: create notification_category_stats table") else {
+                Logger.error("Migration 14b failed — stopping migrations")
+                return
             }
 
             // Daily caps tracking
@@ -358,16 +390,14 @@ public class DatabaseReader {
                 PRIMARY KEY (date, category)
             )
             """
-            if !execMigration(capsSql, label: "14c: create notification_caps table") {
-                migrationFailed = true
+            guard execMigration(capsSql, label: "14c: create notification_caps table") else {
+                Logger.error("Migration 14c failed — stopping migrations")
+                return
             }
         }
 
-        // Only bump the version if all migrations succeeded — failed migrations
-        // will be retried on the next launch.
-        if migrationFailed {
-            Logger.error("One or more migrations failed — schema version NOT updated (will retry next launch)")
-        } else if currentVersion < Self.schemaVersion {
+        // All migrations succeeded — bump the version
+        if currentVersion < Self.schemaVersion {
             setUserVersion(Self.schemaVersion)
             Logger.info("DatabaseReader schema version updated: \(currentVersion) → \(Self.schemaVersion)")
         }
@@ -967,26 +997,6 @@ public class DatabaseReader {
         sqliteBindText(stmt, 2, digest)
         sqliteBindText(stmt, 3, now)
         sqlite3_step(stmt)
-    }
-
-    // MARK: - Habits Analysis Cache
-
-    /// Read the latest cached habits analysis.
-    public func latestHabitsAnalysis() -> (analysisJson: String, snapshotHash: String, generatedAt: Date)? {
-        guard db != nil else { return nil }
-        let sql = "SELECT analysis_json, snapshot_hash, generated_at FROM habits_analysis ORDER BY id DESC LIMIT 1"
-        var stmt: OpaquePointer?
-        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return nil }
-        defer { sqlite3_finalize(stmt) }
-
-        guard sqlite3_step(stmt) == SQLITE_ROW else { return nil }
-
-        let json = sqlite3_column_text(stmt, 0).map { String(cString: $0) } ?? ""
-        let hash = sqlite3_column_text(stmt, 1).map { String(cString: $0) } ?? ""
-        let dateStr = sqlite3_column_text(stmt, 2).map { String(cString: $0) } ?? ""
-        let date = SharedFormatters.iso8601.date(from: dateStr) ?? Date()
-
-        return (json, hash, date)
     }
 
     // MARK: - Clear All Data

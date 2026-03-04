@@ -487,7 +487,8 @@ extension DashboardViewModel {
                 return gemini.localizedDescription
             }
         }
-        return error.localizedDescription
+        // Use friendly message for network errors (URLError)
+        return GeminiError.friendlyNetworkError(error)
     }
 
     /// Build Gemini-compatible conversation history from previous messages (excluding the latest user message).

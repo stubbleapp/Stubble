@@ -1,119 +1,83 @@
 # Stubble
 
-A macOS activity tracker that monitors your desktop usage, captures screenshots, and uses AI to summarise your work into high-level tasks and project activities.
+A native macOS app that tracks your desktop activity and uses AI to transform it into meaningful insights — tasks, project summaries, and personalized recommendations.
 
-Built with Swift, SwiftUI, and the Gemini API.
+**[Download](https://stubble.ai)** · **[Privacy Policy](https://stubble.ai/privacy)** · **[Terms of Service](https://stubble.ai/terms)**
 
 ## How it works
 
-**Stubble** runs two components:
+Stubble runs quietly in the background, observing your work across apps:
 
-1. **Monitor** (daemon) -- a background process that watches app switches, window titles, idle state, and periodically captures screenshots with local OCR.
-2. **Dashboard** (SwiftUI app) -- a native viewer that displays your activity timeline, screenshots, AI-generated task summaries, and project activity clustering.
+- **Activity monitoring** — tracks app switches, window titles, browser URLs, and document paths
+- **Screen capture** — periodic screenshots with local OCR (Apple Vision)
+- **File system** — monitors changes in your code and document directories
+- **Calendar & meetings** — integrates with macOS Calendar and Granola meeting notes
 
-Both share a single SQLite database in `~/Library/Application Support/Stubble/`.
-
-The AI summarisation is optional. Without a Gemini key everything still works -- you just won't get the task grouping, project activities, day summaries, or chat.
+Every 15 minutes, Stubble's AI synthesizes this context into high-level tasks and project activities. Over time, it learns your projects, tools, and workflows to provide increasingly relevant insights.
 
 ## Requirements
 
 - macOS 14.0 (Sonoma) or later
-- A [Gemini API key](https://aistudio.google.com/apikey) (free tier works fine) -- required, for AI features
+- Free 30-day trial, then $X/month for Pro
 
 ## Installation
 
-Download the latest release from [GitHub Releases](https://github.com/samattias/stubble-releases/releases) and move `Stubble.app` to your Applications folder.
+1. Download from [stubble.ai](https://stubble.ai)
+2. Move `Stubble.app` to Applications
+3. Launch and follow the setup wizard
 
-On first launch, the setup wizard will guide you through granting permissions and entering your API key.
-
-### Build from source
-
-```bash
-git clone <repo-url> && cd Stubble
-
-# Build both targets
-swift build -c release
-
-# Create the .app bundle
-bash scripts/build-app.sh 1.0.0
-
-# Run
-open build/Stubble.app
-```
-
-### Grant permissions
-
-Stubble needs two macOS permissions to function. The setup wizard will walk you through this, or you can grant them ahead of time:
-
-**System Settings > Privacy & Security > Accessibility**
-Add `Stubble.app`. Required for reading window titles.
-
-**System Settings > Privacy & Security > Screen Recording**
-Add `Stubble.app`. Required for screenshot capture. If not granted, the monitor still tracks app/window activity but can't capture screen content.
+The wizard guides you through granting permissions (Accessibility and Screen Recording) and signing in with Google.
 
 ## Features
 
-### Activity tracking
-- Detects app switches and window title changes
-- Tracks active vs idle time (mouse/keyboard/scroll input)
-- Periodic screenshots with local OCR (Apple Vision framework)
-- Pause/resume monitoring from the dashboard (with timed pause options)
-
-### AI task summaries
-- Groups raw activity into high-level tasks (e.g. "Developing auth flow in Xcode")
-- Generates a natural-language day summary
-- Configurable granularity (low/medium/high) to control task detail level
-- Persistent memory -- the AI learns your projects, tools, and patterns across sessions
-- Custom instructions to tailor output (e.g. "ignore YouTube, focus on coding")
-- Regenerate on demand from the dashboard
+### Intelligent task grouping
+Raw activity is clustered into meaningful tasks like "Reviewing PR #342 in GitHub" or "Writing API documentation in Notion." Tasks include time ranges, apps used, and relevant links extracted from your screen.
 
 ### Project activities
-- Clusters related tasks into higher-level project groupings using AI
-- Persisted to the database -- only regenerated when explicitly requested
-- Automatically regenerated when tasks are regenerated
-- Fallback to one-project-per-task when AI is unavailable
+Related tasks are grouped into higher-level projects. Stubble tracks time across projects and shows your work distribution at a glance.
 
-### Hotlinks
-- Clickable links extracted from window titles and OCR text
-- Opens documents, websites, repositories, and file paths directly
-- AI-extracted relevant URLs included in task data
-- Supports VS Code, Terminal, browser, and editor file path patterns
+### Day timeline
+A visual timeline of your day with tasks, away periods, and project context. Expand any task to see constituent activities and screenshots.
 
-### Chat
-- Ask questions about your day's activity in natural language
-- Context-aware -- the AI sees your tasks, time ranges, and apps used
-- Conversational with multi-turn history
+### AI chat
+Ask questions about your work in natural language:
+- "What did I work on this morning?"
+- "How much time did I spend on the API this week?"
+- "Summarize my meetings from yesterday"
 
-### Dashboard
-- Day selector with 30-day history
-- Three tabs: task timeline, project activities, and screenshot browser
-- Task timeline with expand/collapse, inline editing, swipe-to-delete, and link chips
-- Project activity cards with colour-coded bars, app icons, and constituent task drill-down
-- Screenshot browser with detail view, metadata sidebar, and bulk delete
-- CSV export of tasks
-- Light and dark mode with adaptive colour palette
+### Personalized recommendations
+Based on your recent activity and interests, Stubble suggests relevant articles, tools, and learning resources. Recommendations appear in the Chat tab when you're not in a conversation.
+
+### Persistent memory
+Stubble learns about you over time — your role, projects, technologies, and interests. This context personalizes AI responses and recommendations across sessions.
+
+### Meeting integration
+Automatically pulls meeting notes and transcripts from [Granola](https://granola.ai) for richer context in summaries and chat.
+
+### Privacy-first
+- All data stays on your machine
+- Screenshots are never uploaded
+- Only activity metadata (titles, OCR text) is sent to the AI for summarization
+- Optional analytics can be disabled in Settings
 
 ## Data storage
 
-Everything lives in `~/Library/Application Support/Stubble/`:
+All data is stored locally in `~/Library/Application Support/Stubble/`:
 
 | File | Contents |
 |---|---|
-| `stubble.db` | SQLite database (activities, screenshots, tasks, project activities) |
-| `screenshots/` | JPEG files organised by date |
-| `settings.json` | Gemini API key, custom prompt, granularity, and preferences |
-| `memory.json` | AI-learned facts about your projects and workflows |
+| `stubble.db` | SQLite database (activities, tasks, projects) |
+| `screenshots/` | JPEG files organized by date |
+| `settings.json` | Preferences and configuration |
+| `memory.json` | Learned context about your work |
 
-The database uses WAL mode so the monitor and dashboard can access it concurrently.
+Screenshots are automatically pruned (images after 100, full records after 30 days).
 
-Screenshots older than 7 days are automatically cleaned up by the monitor.
+## Support
 
-## Privacy
-
-- **All data stays on your machine.** Screenshots, OCR text, and activity logs are stored locally.
-- **Screenshots are never uploaded.** Only window titles and OCR text are sent to Google Gemini for summarisation (if you provide an API key).
-- **No analytics or telemetry.** Stubble makes no network requests except to the Gemini API and Sparkle update feed.
+- **Issues**: [github.com/anthropics/claude-code/issues](https://github.com/anthropics/claude-code/issues)
+- **Website**: [stubble.ai](https://stubble.ai)
 
 ## License
 
-MIT
+Proprietary. See [LICENSE](LICENSE) for details.

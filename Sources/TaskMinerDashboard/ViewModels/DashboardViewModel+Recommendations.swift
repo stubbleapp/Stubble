@@ -103,7 +103,7 @@ extension DashboardViewModel {
                 // Task was cancelled (e.g. user navigated away) — don't set error
                 self.isGeneratingRecommendations = false
             } catch {
-                self.recommendationsError = error.localizedDescription
+                self.recommendationsError = Self.friendlyRecommendationsError(error)
                 self.isGeneratingRecommendations = false
                 Logger.error("Stubs generation failed: \(error.localizedDescription)")
             }
@@ -473,6 +473,26 @@ extension DashboardViewModel {
         } catch {
             Logger.error("Failed to auto-generate summary for \(dateStr): \(error.localizedDescription)")
         }
+    }
+
+    // MARK: - Error Formatting
+
+    /// Convert errors into user-friendly messages for recommendations/stubs generation.
+    private static func friendlyRecommendationsError(_ error: Error) -> String {
+        if let gemini = error as? GeminiError {
+            switch gemini {
+            case .trialExpired:
+                return "Your free trial has ended. Open Settings → Account to upgrade to Pro."
+            case .sessionExpired:
+                return "Your session has expired. Open Settings → Account to sign in again."
+            case .rateLimited:
+                return "You've reached today's request limit. Upgrade to Pro for more requests."
+            default:
+                return gemini.localizedDescription
+            }
+        }
+        // Use friendly message for network errors (URLError)
+        return GeminiError.friendlyNetworkError(error)
     }
 }
 

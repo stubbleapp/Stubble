@@ -122,6 +122,9 @@ public final class UserMemoryStore: @unchecked Sendable {
 
         FileManager.default.createFile(atPath: lockPath.path, contents: nil)
         guard let lockFd = FileHandle(forWritingAtPath: lockPath.path) else {
+            // File lock acquisition failed — log warning and proceed with in-process lock only.
+            // This is a degraded state that could allow concurrent writes from daemon + dashboard.
+            Logger.warning("UserMemoryStore: failed to acquire file lock, proceeding with in-process lock only")
             return body()
         }
         flock(lockFd.fileDescriptor, LOCK_EX)

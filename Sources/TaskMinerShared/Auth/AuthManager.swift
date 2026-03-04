@@ -540,7 +540,9 @@ public final class AuthManager: @unchecked Sendable {
         if let createdAtStr = dict["user_created_at"] as? String {
             userCreatedAt = Self.iso8601Formatter.date(from: createdAtStr)
         }
-        if let avatarStr = dict["avatar_url"] as? String {
+        // Validate HTTPS to prevent MITM attacks from crafted auth.json
+        if let avatarStr = dict["avatar_url"] as? String,
+           avatarStr.hasPrefix("https://") {
             _userAvatarURL = URL(string: avatarStr)
         }
 

@@ -86,7 +86,31 @@ public final class TaskSummarizer: Sendable {
 
         let userRules: String
         if let custom = customPrompt?.trimmingCharacters(in: .whitespacesAndNewlines), !custom.isEmpty {
-            userRules = "\nAdditional user instructions (always obey these): \(custom)"
+            // Sanitize and length-limit custom prompts to prevent prompt injection attacks
+            let maxLength = 2000
+            var sanitized = String(custom.prefix(maxLength))
+            // Remove common prompt injection patterns
+            let injectionPatterns = [
+                "ignore previous instructions",
+                "ignore all instructions",
+                "disregard previous",
+                "disregard all",
+                "you are now",
+                "new instructions:",
+                "system:",
+                "assistant:",
+                "</screen_content>",
+                "<screen_content>",
+            ]
+            for pattern in injectionPatterns {
+                sanitized = sanitized.replacingOccurrences(of: pattern, with: "", options: .caseInsensitive)
+            }
+            sanitized = sanitized.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !sanitized.isEmpty {
+                userRules = "\nAdditional user instructions (always obey these): \(sanitized)"
+            } else {
+                userRules = ""
+            }
         } else {
             userRules = ""
         }
@@ -672,7 +696,7 @@ public final class TaskSummarizer: Sendable {
           "projects": [
             {
               "name": "Authentication System",
-              "summary": "Built and tested the login flow with input validation.",
+              "summary": "Implementing OAuth2 login flow for the mobile app. Added input validation and error handling for the sign-in form. Working toward the Q1 release milestone.",
               "task_indices": [0, 2],
               "apps": ["Xcode", "Terminal"]
             }
@@ -702,7 +726,7 @@ public final class TaskSummarizer: Sendable {
         - Order projects by total time spent (most time first)
         - Project names MUST be noun phrases (2-5 words) — like project titles or folder labels. Good: "Stubble Development", "API Integration", "Email & Comms". Bad: "Developing the API", "Working on auth".
         - If today's tasks relate to a previously used project name, REUSE that exact name for consistent color coding across days
-        - Summaries describe what was accomplished, not just list task titles
+        - Summaries must be COMPREHENSIVE (2-3 sentences): explain WHAT the project/deliverable is, WHO it's for (if visible from meetings/calendar/window titles), and WHAT was accomplished. Extract specific context from window titles, meeting notes, and document names. Example: "Building a quarterly sales presentation for the executive team. Created slides covering revenue metrics and market analysis. Incorporated feedback from the marketing review meeting."
         - A single task that doesn't relate to others can be its own project
         - apps should be the union of apps from constituent tasks
         - If there's not enough information, return {"tasks": [], "day_summary": null, "projects": []}
