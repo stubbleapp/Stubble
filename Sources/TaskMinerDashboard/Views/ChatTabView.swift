@@ -19,15 +19,8 @@ struct ChatTabView: View {
     var body: some View {
         VStack(spacing: 0) {
             if viewModel.isGeneratingRecommendations && !hasRecommendations {
-                Spacer()
-                VStack(spacing: 16) {
-                    ProgressView()
-                        .scaleEffect(0.8)
-                    Text("Analyzing your recent activity\u{2026}")
-                        .font(.system(size: 13, weight: .regular))
-                        .foregroundStyle(Theme.textMuted)
-                }
-                Spacer()
+                // Skeleton loading state
+                skeletonContent
             } else if !hasRecommendations {
                 Spacer()
                 VStack(spacing: 14) {
@@ -201,13 +194,9 @@ struct ChatTabView: View {
                         }
                         .padding(.horizontal, 12)
                         .padding(.vertical, 8)
-                        .background(Theme.primaryBackground.opacity(0.5))
-                        .background(.ultraThinMaterial)
+                        .background(Color.white)
                         .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                                .strokeBorder(Color.white.opacity(0.08), lineWidth: 0.5)
-                        )
+                        .shadow(color: Color.black.opacity(0.06), radius: 2, x: 0, y: 1)
                     }
                     .buttonStyle(.plain)
                 }
@@ -231,6 +220,108 @@ struct ChatTabView: View {
         let formatter = RelativeDateTimeFormatter()
         formatter.unitsStyle = .short
         return formatter.localizedString(for: thread.updatedAt, relativeTo: Date())
+    }
+
+    // MARK: - Skeleton Loading
+
+    private var skeletonContent: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 0) {
+                // Skeleton greeting
+                skeletonGreeting
+                    .padding(.horizontal, 24)
+                    .padding(.top, 20)
+                    .padding(.bottom, 16)
+
+                // Skeleton recommendation cards
+                skeletonRecommendations
+                    .padding(.bottom, 16)
+
+                // Skeleton past chats
+                skeletonPastChats
+
+                Spacer().frame(height: 100)
+            }
+        }
+        .redacted(reason: .placeholder)
+        .shimmer(active: true)
+        .allowsHitTesting(false)
+    }
+
+    private var skeletonGreeting: some View {
+        HStack(alignment: .top) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Hey, \(firstName)")
+                    .font(Theme.headerFont(size: 24))
+                    .foregroundStyle(Theme.textPrimary)
+
+                Text("Here's what I noticed about your day so far and some suggestions.")
+                    .font(.system(size: 13))
+                    .foregroundStyle(Theme.textPrimary)
+                    .lineSpacing(2)
+            }
+
+            Spacer()
+
+            Circle()
+                .fill(Theme.accent.opacity(0.08))
+                .frame(width: 32, height: 32)
+        }
+    }
+
+    private var skeletonRecommendations: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Recommended")
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(Theme.textPrimary)
+                .padding(.horizontal, 24)
+
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 12) {
+                    ForEach(0..<3, id: \.self) { _ in
+                        SkeletonRecommendationCard()
+                    }
+                }
+                .padding(.horizontal, 24)
+            }
+            .scrollClipDisabled(true)
+        }
+    }
+
+    private var skeletonPastChats: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Recent Chats")
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(Theme.textPrimary)
+                .padding(.horizontal, 24)
+
+            VStack(spacing: 6) {
+                ForEach(0..<3, id: \.self) { _ in
+                    HStack(spacing: 10) {
+                        Circle()
+                            .fill(Theme.accent)
+                            .frame(width: 10, height: 10)
+
+                        Text("Previous conversation topic")
+                            .font(.system(size: 13, weight: .regular))
+                            .foregroundStyle(Theme.textPrimary)
+                            .lineLimit(1)
+
+                        Spacer()
+
+                        Text("2h ago")
+                            .font(.system(size: 11))
+                            .foregroundStyle(Theme.textQuaternary)
+                    }
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 8)
+                    .background(Color.white)
+                    .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                    .shadow(color: Color.black.opacity(0.06), radius: 2, x: 0, y: 1)
+                }
+            }
+            .padding(.horizontal, 24)
+        }
     }
 
     // MARK: - Error Banner
@@ -258,5 +349,46 @@ struct ChatTabView: View {
             RoundedRectangle(cornerRadius: 8, style: .continuous)
                 .stroke(Theme.statusError.opacity(0.2), lineWidth: 0.5)
         )
+    }
+}
+
+// MARK: - Skeleton Recommendation Card
+
+private struct SkeletonRecommendationCard: View {
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            // Icon placeholder
+            Circle()
+                .fill(Theme.accent.opacity(0.1))
+                .frame(width: 32, height: 32)
+
+            // Title placeholder
+            Text("Recommendation title here")
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundStyle(Theme.textPrimary)
+                .lineLimit(2)
+
+            // Description placeholder
+            VStack(alignment: .leading, spacing: 4) {
+                Text("This is a placeholder for the recommendation")
+                    .font(.system(size: 12))
+                    .foregroundStyle(Theme.textSecondary)
+                Text("description text that spans multiple lines.")
+                    .font(.system(size: 12))
+                    .foregroundStyle(Theme.textSecondary)
+            }
+
+            Spacer()
+
+            // Action button placeholder
+            Text("Learn more")
+                .font(.system(size: 12, weight: .medium))
+                .foregroundStyle(Theme.accent)
+        }
+        .padding(14)
+        .frame(width: 200, height: 160)
+        .background(Color.white)
+        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .shadow(color: Color.black.opacity(0.08), radius: 4, x: 0, y: 2)
     }
 }

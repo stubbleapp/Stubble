@@ -639,6 +639,7 @@ public final class TaskSummarizer: Sendable {
         if !granolaMeetings.isEmpty {
             lines.append("")
             lines.append("## Meeting Notes (from Granola)")
+            lines.append("Each meeting has a deep link (granola://note/UUID) — include this in relevant_links for tasks related to that meeting.")
             let timeFormatter = DateFormatter()
             timeFormatter.dateFormat = "HH:mm"
             timeFormatter.locale = Locale(identifier: "en_US_POSIX")
@@ -648,6 +649,7 @@ public final class TaskSummarizer: Sendable {
                 let durMins = Int(meeting.duration / 60)
                 lines.append("")
                 lines.append("### \(DataSanitizer.sanitize(meeting.title)) [\(start)-\(end)] (\(durMins)m)")
+                lines.append("Granola link: \(meeting.granolaDeepLink)")
                 if meeting.attendeeCount > 0 {
                     let names = meeting.attendeeNames.map { DataSanitizer.sanitize($0) }
                     lines.append("Attendees: \(names.joined(separator: ", "))")
@@ -712,13 +714,13 @@ public final class TaskSummarizer: Sendable {
         - Only split into separate tasks when the TOPIC genuinely changes (e.g., switching from coding to email to video watching)
         - Every task title MUST be unique — never produce two tasks with the same or near-identical title
         - Titles MUST start with a present participle verb (e.g., Developing, Browsing, Watching, Reviewing, Debugging)
-        - Descriptions must be impersonal — never write "the user", "you", or "they". Describe the activity directly.
+        - Descriptions MUST be 2-3 sentences long. Include: what was being worked on, specific details from window titles/OCR (file names, function names, features), and any notable context (meeting attendees, document names, error messages being debugged). Never write "the user", "you", or "they" — describe the activity directly.
         - day_summary should be written in a direct, impersonal style — describe what was worked on and where the bulk of time went. Never say "the user" or "you".
         - confidence should be 0.0-1.0 based on how certain you are
         - start_time/end_time: use the earliest start and latest end from the constituent activity blocks
         - active_seconds: the SUM of the durations (in seconds) shown in parentheses for each constituent activity block. Do NOT use end_time minus start_time — that would incorrectly include idle gaps between blocks. For example, if a task merges a 300s block and a 180s block separated by a break, active_seconds should be 480, not the full time span.
         - Idle periods are marked with BREAK lines in the activity log — respect them as session boundaries
-        - relevant_links: extract any URLs (https://...) or local file paths (/Users/...) visible in the OCR text or window titles that relate to this task. Include website URLs, document links, repository URLs, and file paths. Return [] if none found. Only include real URLs/paths seen in the data, never fabricate them.
+        - relevant_links: extract any URLs (https://...) or local file paths (/Users/...) visible in the OCR text or window titles that relate to this task. IMPORTANT: If a task overlaps with or relates to a Granola meeting, include that meeting's granola:// deep link. Include website URLs, document links, repository URLs, file paths, and Granola meeting links. Return [] if none found. Only include real URLs/paths seen in the data, never fabricate them.
         - websites: list the DOMAIN NAMES (not full URLs) of websites where significant time was spent during this task. Extract domains from the Browser URLs section. Only include domains that were meaningfully used (not fleeting visits). Use bare domain without protocol (e.g. "github.com" not "https://github.com"). Return [] if no websites were relevant. Maximum 5 domains per task.
 
         Project rules:

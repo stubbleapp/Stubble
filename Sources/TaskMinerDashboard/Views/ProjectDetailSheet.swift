@@ -12,6 +12,10 @@ struct ProjectDetailSheet: View {
         viewModel.cachedProjectAnalysis(for: project)
     }
 
+    private var summary: String {
+        viewModel.projectSummary(for: project)
+    }
+
     var body: some View {
         VStack(spacing: 0) {
             // Header
@@ -23,7 +27,7 @@ struct ProjectDetailSheet: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 20) {
                     // Summary
-                    if !project.summary.isEmpty {
+                    if !summary.isEmpty {
                         summarySection
                     }
 
@@ -104,7 +108,7 @@ struct ProjectDetailSheet: View {
                 .font(.system(size: 12, weight: .semibold))
                 .foregroundStyle(Theme.textMuted)
 
-            Text(project.summary)
+            Text(summary)
                 .font(.system(size: 13))
                 .foregroundStyle(Theme.textSecondary)
                 .lineSpacing(3)
@@ -261,20 +265,10 @@ struct ProjectDetailSheet: View {
                 .font(.system(size: 12, weight: .semibold))
                 .foregroundStyle(Theme.textMuted)
 
-            LazyVGrid(columns: [GridItem(.adaptive(minimum: 100, maximum: 150))], spacing: 8) {
+            FlowLayout(spacing: 8) {
                 ForEach(project.appNames.sorted(), id: \.self) { appName in
-                    HStack(spacing: 6) {
-                        AppIconView(bundleId: viewModel.bundleId(forAppName: appName), appName: appName, size: 18)
-
-                        Text(appName)
-                            .font(.system(size: 11))
-                            .foregroundStyle(Theme.textSecondary)
-                            .lineLimit(1)
-                    }
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 6)
-                    .background(Theme.surfaceElevated)
-                    .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+                    AppIconView(bundleId: viewModel.bundleId(forAppName: appName), appName: appName, size: 24)
+                        .help(appName)
                 }
             }
         }

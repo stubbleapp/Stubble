@@ -20,6 +20,7 @@ public struct ExtractedLink: Hashable, Sendable {
     }
 
     /// Returns an openable URL — for file paths, wraps in file://
+    /// For app-specific URLs (granola://, etc.), returns as-is for the system to handle.
     public var openableURL: URL? {
         switch kind {
         case .url:
@@ -112,6 +113,9 @@ public enum LinkExtractor {
 
             if trimmed.hasPrefix("http://") || trimmed.hasPrefix("https://") {
                 return ExtractedLink(kind: .url, value: trimmed, label: shortLabel(for: trimmed), source: "ai")
+            } else if trimmed.hasPrefix("granola://") {
+                // Granola deep links to meeting notes
+                return ExtractedLink(kind: .url, value: trimmed, label: "Granola Meeting", source: "ai")
             } else if trimmed.hasPrefix("/") || trimmed.hasPrefix("~") {
                 let filename = (trimmed as NSString).lastPathComponent
                 return ExtractedLink(kind: .filePath, value: trimmed, label: filename, source: "ai")

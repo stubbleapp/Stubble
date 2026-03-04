@@ -20,23 +20,26 @@ extension DashboardViewModel {
         isGeneratingRecommendations = true
         recommendationsError = nil
 
-        // Gather context — wide window for richer recommendations
-        let recentTasks = loadRecentTasksForSelectedDate(days: 7)
+        // Capture lightweight values synchronously
         let currentProjectActivities = projectActivities
-        let appsUsed = buildAppUsageMap(from: recentTasks)
-        let activityLog = buildActivityLog()
-        let weeklyTrends = buildWeeklyTrends(from: recentTasks)
-        let ocrDigest = loadOrBuildOCRDigest()
         let viewingToday = isViewingToday
         let dateLabel = SharedFormatters.headerDateFormatter.string(from: selectedDate)
         let dateString = SharedFormatters.dayFormatter.string(from: selectedDate)
-
-        // Capture the task fingerprint at generation time so we can track staleness
         let fingerprintAtGeneration = currentTaskFingerprint
 
         recommendationsTask?.cancel()
         recommendationsTask = Task {
             do {
+                // Gather context asynchronously to avoid blocking UI
+                // These operations load data from DB and process it
+                let recentTasks = self.loadRecentTasksForSelectedDate(days: 7)
+                let appsUsed = self.buildAppUsageMap(from: recentTasks)
+                let activityLog = self.buildActivityLog()
+                let weeklyTrends = self.buildWeeklyTrends(from: recentTasks)
+                let ocrDigest = self.loadOrBuildOCRDigest()
+
+                guard !Task.isCancelled else { return }
+
                 // Ensure user profile is fresh before generating recommendations
                 if let client = self.geminiClient {
                     let synth = ProfileSynthesizer(geminiClient: client)
@@ -113,6 +116,46 @@ extension DashboardViewModel {
     /// Remove a single recommendation from the list.
     func dismissRecommendation(id: UUID) {
         recommendations.removeAll { $0.id == id }
+    }
+
+    /// Refresh only the suggested questions (lightweight call, doesn't regenerate recommendations).
+    func refreshSuggestedQuestions() {
+        guard let generator = recommendationGenerator else { return }
+        guard !isGeneratingSuggestedQuestions else { return }
+
+        isGeneratingSuggestedQuestions = true
+
+        let currentProjectActivities = projectActivities
+
+        Task {
+            do {
+                let recentTasks = self.loadRecentTasksForSelectedDate(days: 3)
+                let memoryContext = self.memoryStore.contextString()
+
+                guard !Task.isCancelled else {
+                    await MainActor.run { self.isGeneratingSuggestedQuestions = false }
+                    return
+                }
+
+                let questions = try await generator.generateSuggestedQuestions(
+                    recentTasks: recentTasks,
+                    projectActivities: currentProjectActivities,
+                    memoryContext: memoryContext
+                )
+
+                await MainActor.run {
+                    if !questions.isEmpty {
+                        self.suggestedQuestions = questions
+                    }
+                    self.isGeneratingSuggestedQuestions = false
+                }
+            } catch {
+                await MainActor.run {
+                    self.isGeneratingSuggestedQuestions = false
+                }
+                Logger.warning("Failed to refresh suggested questions: \(error.localizedDescription)")
+            }
+        }
     }
 
     // MARK: - Auto-Refresh Staleness Check

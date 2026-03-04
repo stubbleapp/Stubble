@@ -12,12 +12,19 @@ final class ProjectRecommendationGenerator: Sendable {
     // MARK: - Public API
 
     /// Generate analysis and recommendations for a specific project.
+    /// - Parameters:
+    ///   - project: The aggregated project data
+    ///   - memoryContext: User memory context for personalization
+    ///   - timePeriod: The time period being analyzed
+    ///   - synthesizedSummary: A synthesized summary describing what the project IS (optional)
     func generate(
         project: AggregatedProject,
         memoryContext: String?,
-        timePeriod: ProjectTimePeriod
+        timePeriod: ProjectTimePeriod,
+        synthesizedSummary: String? = nil
     ) async throws -> ProjectAnalysis {
-        let prompt = buildPrompt(project: project, memoryContext: memoryContext, timePeriod: timePeriod)
+        let effectiveSummary = synthesizedSummary ?? project.summary
+        let prompt = buildPrompt(project: project, memoryContext: memoryContext, timePeriod: timePeriod, summary: effectiveSummary)
 
         let systemInstruction = """
         You are a knowledgeable assistant analyzing a user's work patterns on a specific project. \
@@ -82,7 +89,8 @@ final class ProjectRecommendationGenerator: Sendable {
     private func buildPrompt(
         project: AggregatedProject,
         memoryContext: String?,
-        timePeriod: ProjectTimePeriod
+        timePeriod: ProjectTimePeriod,
+        summary: String
     ) -> String {
         var lines: [String] = []
 
@@ -98,7 +106,7 @@ final class ProjectRecommendationGenerator: Sendable {
         lines.append("")
 
         lines.append("### Summary")
-        lines.append(project.summary.isEmpty ? "(No summary available)" : project.summary)
+        lines.append(summary.isEmpty ? "(No summary available)" : summary)
         lines.append("")
 
         // Time metrics

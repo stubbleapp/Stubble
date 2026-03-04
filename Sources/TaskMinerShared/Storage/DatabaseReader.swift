@@ -318,7 +318,8 @@ public class DatabaseReader {
             let fallbackThreadSql = """
             INSERT INTO chat_threads (title, summary, context_date, created_at, updated_at, last_message_at, message_count, is_archived)
             SELECT 'Legacy Chat', '', NULL, datetime('now'), datetime('now'), datetime('now'), 0, 0
-            WHERE NOT EXISTS (SELECT 1 FROM chat_threads WHERE title = 'Legacy Chat')
+            WHERE EXISTS (SELECT 1 FROM chat_messages WHERE thread_id = 0)
+              AND NOT EXISTS (SELECT 1 FROM chat_threads WHERE title = 'Legacy Chat')
             """
             guard execMigration(fallbackThreadSql, label: "13e: ensure fallback legacy chat thread") else {
                 Logger.error("Migration 13e failed — stopping migrations")

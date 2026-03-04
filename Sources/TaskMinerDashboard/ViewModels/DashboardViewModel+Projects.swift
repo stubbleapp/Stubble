@@ -19,15 +19,95 @@ extension DashboardViewModel {
 
         let aggregator = ProjectsDataAggregator(dbReader: db)
         aggregatedProjects = aggregator.aggregate(period: projectsTimePeriod)
+
+        // Synthesize summaries for multi-day periods in background
+        if projectsTimePeriod != .day && hasGeminiKey {
+            Task {
+                await synthesizeProjectSummaries()
+            }
+        }
+
         isLoadingProjects = false
+    }
+
+    /// Synthesize comprehensive summaries for projects that need them.
+    private func synthesizeProjectSummaries() async {
+        guard let client = geminiClient else { return }
+        guard !aggregatedProjects.isEmpty else { return }
+
+        // Find projects that need better summaries
+        let projectsNeedingSummary = aggregatedProjects.filter { project in
+            // Skip if we already have a synthesized summary cached
+            if synthesizedProjectSummaries[project.id] != nil { return false }
+            // Check if existing summary is good enough
+            return !hasGoodSummary(project.summary)
+        }
+
+        guard !projectsNeedingSummary.isEmpty else { return }
+
+        let synthesizer = ProjectSummarySynthesizer(geminiClient: client)
+        let memoryContext = memoryStore.contextString()
+
+        let summaries = await synthesizer.synthesizeBatch(
+            projects: projectsNeedingSummary,
+            memoryContext: memoryContext
+        )
+
+        // Merge into cache
+        await MainActor.run {
+            for (id, summary) in summaries {
+                synthesizedProjectSummaries[id] = summary
+            }
+        }
+    }
+
+    /// Get the best available summary for a project.
+    /// Returns synthesized summary if available, otherwise the original.
+    func projectSummary(for project: AggregatedProject) -> String {
+        if let synthesized = synthesizedProjectSummaries[project.id] {
+            return synthesized
+        }
+        return project.summary
+    }
+
+    /// Check if a summary is already good (describes what the project IS).
+    private func hasGoodSummary(_ summary: String) -> Bool {
+        let trimmed = summary.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.count < 20 { return false }
+
+        let lowercased = trimmed.lowercased()
+
+        // Good summaries describe what something IS
+        let projectIndicators = [
+            "app for", "tool for", "system for", "platform for",
+            "built with", "using swift", "using react",
+            "macOS app", "iOS app", "web app"
+        ]
+
+        for indicator in projectIndicators {
+            if lowercased.contains(indicator) { return true }
+        }
+
+        // Activity-focused summaries need improvement
+        let activityStarters = [
+            "working on", "developing", "building", "implementing",
+            "debugging", "testing", "reviewing"
+        ]
+
+        for starter in activityStarters {
+            if lowercased.hasPrefix(starter) { return false }
+        }
+
+        return trimmed.count >= 50
     }
 
     /// Change the time period and reload projects.
     func setProjectsTimePeriod(_ period: ProjectTimePeriod) {
         guard period != projectsTimePeriod else { return }
         projectsTimePeriod = period
-        // Clear any cached analysis when period changes
+        // Clear caches when period changes
         projectAnalysisCache.removeAll()
+        synthesizedProjectSummaries.removeAll()
         loadProjects()
     }
 
@@ -55,9 +135,12 @@ extension DashboardViewModel {
             let analysis = try await generator.generate(
                 project: project,
                 memoryContext: memoryContext,
-                timePeriod: projectsTimePeriod
+                timePeriod: projectsTimePeriod,
+                synthesizedSummary: synthesizedProjectSummaries[project.id]
             )
             projectAnalysisCache[project.id] = analysis
+        } catch is CancellationError {
+            // Task was cancelled (e.g. user navigated away) — don't show error
         } catch {
             projectsError = "Failed to generate analysis: \(error.localizedDescription)"
         }

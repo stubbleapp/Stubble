@@ -71,13 +71,12 @@ struct ChatOverlayView: View {
 
             // Unified chat card — suggestion pills persist across states
             VStack(spacing: 0) {
-                // Message panel slides in above the pills when expanded
+                // Message panel revealed when expanded (clipped by container)
                 if isExpanded {
                     messagePanelContent
-                        .transition(.move(edge: .bottom).combined(with: .opacity))
                 }
 
-                // Suggestion pills — always present, never re-rendered
+                // Suggestion pills — always present
                 suggestionPills
 
                 // Input bar
@@ -99,8 +98,8 @@ struct ChatOverlayView: View {
             .shadow(color: .black.opacity(0.10), radius: 20, y: 0)
             .shadow(color: .black.opacity(0.06), radius: 8, y: 2)
             .padding(.horizontal, 20)
+            .padding(.top, isExpanded ? 24 : 0)
             .padding(.bottom, 16)
-            .fixedSize(horizontal: false, vertical: !isExpanded)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
         .animation(.spring(response: 0.35, dampingFraction: 0.85), value: isExpanded)
@@ -120,6 +119,15 @@ struct ChatOverlayView: View {
             viewModel.shouldExpandChatPanel = false
             withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
                 isExpanded = true
+            }
+        }
+        .onChange(of: viewModel.currentScreen) { _, _ in
+            // Collapse chat when switching tabs
+            if isExpanded {
+                withAnimation(.spring(response: 0.3, dampingFraction: 0.85)) {
+                    isExpanded = false
+                }
+                viewModel.notifyChatPanelCollapsed()
             }
         }
     }
@@ -203,8 +211,6 @@ struct ChatOverlayView: View {
         VStack(spacing: 0) {
             // Header: title dropdown + action buttons
             HStack(spacing: 8) {
-                ActivityHaloDot(color: Theme.accent, size: 14)
-
                 // Title as dropdown (thread switcher)
                 if viewModel.chatThreads.isEmpty {
                     Text(conversationTitle)
@@ -316,21 +322,25 @@ struct ChatOverlayView: View {
 
     // MARK: - Suggestion Pills (horizontal scroll with refresh button)
 
+    private var isLoadingSuggestions: Bool {
+        viewModel.isGeneratingSuggestedQuestions
+    }
+
     private var suggestionPills: some View {
         HStack(spacing: 0) {
             // Refresh button — spins while generating
             Button {
-                viewModel.generateRecommendations()
+                viewModel.refreshSuggestedQuestions()
             } label: {
                 Image(systemName: "arrow.clockwise")
                     .font(.system(size: 10, weight: .medium))
-                    .foregroundStyle(viewModel.isGeneratingRecommendations ? Theme.accent : Theme.textMuted)
-                    .rotationEffect(.degrees(viewModel.isGeneratingRecommendations ? 360 : 0))
+                    .foregroundStyle(isLoadingSuggestions ? Theme.accent : Theme.textMuted)
+                    .rotationEffect(.degrees(isLoadingSuggestions ? 360 : 0))
                     .animation(
-                        viewModel.isGeneratingRecommendations
+                        isLoadingSuggestions
                             ? .linear(duration: 1).repeatForever(autoreverses: false)
                             : .default,
-                        value: viewModel.isGeneratingRecommendations
+                        value: isLoadingSuggestions
                     )
                     .frame(width: 22, height: 22)
                     .background(
@@ -340,28 +350,35 @@ struct ChatOverlayView: View {
                     .contentShape(Circle())
             }
             .buttonStyle(.plain)
-            .disabled(viewModel.isGeneratingRecommendations)
-            .help(viewModel.isGeneratingRecommendations ? "Generating…" : "Refresh suggestions")
+            .disabled(isLoadingSuggestions)
+            .help(isLoadingSuggestions ? "Generating…" : "Refresh suggestions")
             .padding(.leading, 14)
 
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 6) {
-                    ForEach(activeSuggestions, id: \.self) { suggestion in
-                        Button {
-                            inputText = suggestion
-                            sendMessage()
-                        } label: {
-                            Text(suggestion)
-                                .font(.system(size: 11, weight: .medium))
-                                .foregroundStyle(Theme.textSecondary)
-                                .padding(.horizontal, 10)
-                                .padding(.vertical, 5)
-                                .background(
-                                    Capsule()
-                                        .strokeBorder(Theme.cardBorder, lineWidth: 0.5)
-                                )
+                    if isLoadingSuggestions {
+                        // Skeleton loading pills
+                        ForEach(0..<4, id: \.self) { _ in
+                            SkeletonSuggestionPill()
                         }
-                        .buttonStyle(.plain)
+                    } else {
+                        ForEach(activeSuggestions, id: \.self) { suggestion in
+                            Button {
+                                inputText = suggestion
+                                sendMessage()
+                            } label: {
+                                Text(suggestion)
+                                    .font(.system(size: 11, weight: .medium))
+                                    .foregroundStyle(Theme.textSecondary)
+                                    .padding(.horizontal, 10)
+                                    .padding(.vertical, 5)
+                                    .background(
+                                        Capsule()
+                                            .strokeBorder(Theme.cardBorder, lineWidth: 0.5)
+                                    )
+                            }
+                            .buttonStyle(.plain)
+                        }
                     }
                 }
                 .padding(.leading, 8)
@@ -376,10 +393,18 @@ struct ChatOverlayView: View {
     private var messagesScrollView: some View {
         ScrollViewReader { proxy in
             ScrollView {
-                LazyVStack(spacing: 16) {
+                // Use a regular VStack instead of LazyVStack to avoid view recycling issues
+                // during rapid scrolling while content is being streamed/mutated.
+                VStack(spacing: 16) {
                     ForEach(viewModel.chatMessages) { message in
-                        MessageBubble(message: message)
-                            .id(message.id)
+                        MessageBubble(
+                            message: message,
+                            onContentChange: {
+                                // Scroll as streaming content arrives
+                                scrollToBottom(proxy: proxy)
+                            }
+                        )
+                        .id(message.id)
                     }
 
                     if let error = viewModel.chatError {
@@ -399,10 +424,6 @@ struct ChatOverlayView: View {
                 scrollToBottom(proxy: proxy)
             }
             .onChange(of: viewModel.chatMessages.count) { _, _ in
-                scrollToBottom(proxy: proxy)
-            }
-            .onChange(of: viewModel.chatMessages.last?.content) { _, _ in
-                // Scroll as streaming content arrives
                 scrollToBottom(proxy: proxy)
             }
             .onChange(of: viewModel.isChatLoading) { _, loading in
@@ -491,5 +512,23 @@ struct ChatOverlayView: View {
         withAnimation(.easeOut(duration: 0.15)) {
             proxy.scrollTo("bottom", anchor: .bottom)
         }
+    }
+}
+
+// MARK: - Skeleton Suggestion Pill
+
+private struct SkeletonSuggestionPill: View {
+    // Varying widths for visual interest
+    private static let widths: [CGFloat] = [80, 100, 70, 90]
+    @State private var width: CGFloat = 80
+
+    var body: some View {
+        RoundedRectangle(cornerRadius: 12, style: .continuous)
+            .fill(Theme.textMuted.opacity(0.15))
+            .frame(width: width, height: 24)
+            .shimmer(active: true)
+            .onAppear {
+                width = Self.widths.randomElement() ?? 80
+            }
     }
 }

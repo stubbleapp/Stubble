@@ -371,12 +371,16 @@ extension DashboardViewModel {
         }
     }
 
-    /// Build a text block summarizing the current day's tasks, activities, and window titles for chat context.
+    /// Build a text block summarizing multi-day activity data for chat context.
+    /// Includes the selected day's detailed data plus summaries from the past 7 days.
     func buildChatTaskContext() -> String {
-        guard !activities.isEmpty || !tasks.isEmpty else { return "No activity recorded for this day." }
+        guard let db = dbReader else { return "No activity data available." }
 
         var lines: [String] = []
-        lines.append("Date: \(SharedFormatters.longDateFormatter.string(from: selectedDate))")
+        let cal = Calendar.current
+
+        // === SELECTED DAY (detailed) ===
+        lines.append("## Selected Date: \(SharedFormatters.longDateFormatter.string(from: selectedDate))")
 
         if let summary = daySummaryText {
             lines.append("Day summary: \(summary)")
@@ -387,7 +391,7 @@ extension DashboardViewModel {
         let mins = (totalActive % 3600) / 60
         lines.append("Total active time: \(hours)h \(mins)m")
 
-        // Detailed activity log — this is the most granular data, with exact window titles and durations
+        // Detailed activity log for selected day
         if !groupedActivities.isEmpty {
             lines.append("")
             lines.append("Activity log (chronological — each entry is a continuous session in one app):")
@@ -396,7 +400,6 @@ extension DashboardViewModel {
                 let end = group.endTime.map { SharedFormatters.timeFormatter.string(from: $0) } ?? "?"
                 let durMins = Int(group.totalDuration) / 60
                 lines.append("- [\(start)–\(end)] \(group.appName) (\(durMins)m)")
-                // Include window titles — sanitized to strip sensitive patterns (emails, tokens, etc.)
                 let titles = DataSanitizer.sanitizeAll(Array(group.windowTitles.prefix(5)))
                 for title in titles {
                     lines.append("  · \(title)")
@@ -404,7 +407,7 @@ extension DashboardViewModel {
             }
         }
 
-        // Project activities (higher-level grouping)
+        // Project activities for selected day
         if !projectActivities.isEmpty {
             lines.append("")
             lines.append("Project Activities (\(projectActivities.count) projects):")
@@ -422,15 +425,14 @@ extension DashboardViewModel {
             }
         }
 
-        // AI-generated tasks (higher-level interpretation)
+        // Tasks for selected day
         if !tasks.isEmpty {
             lines.append("")
             lines.append("Tasks:")
             for task in tasks {
                 let start = SharedFormatters.timeFormatter.string(from: task.startTime)
                 let end = SharedFormatters.timeFormatter.string(from: task.endTime)
-                let duration = Int(task.duration)
-                let durMins = duration / 60
+                let durMins = Int(task.duration) / 60
                 let apps = task.appNamesList.joined(separator: ", ")
                 lines.append("- [\(start)–\(end)] (\(durMins)m) \(task.title)")
                 if !task.description.isEmpty {
@@ -442,7 +444,7 @@ extension DashboardViewModel {
             }
         }
 
-        // Granola meetings (sanitized — untrusted external data)
+        // Granola meetings for selected day
         if !granolaMeetings.isEmpty {
             lines.append("")
             lines.append("Meetings (from Granola):")
@@ -450,6 +452,7 @@ extension DashboardViewModel {
                 let start = SharedFormatters.timeFormatter.string(from: meeting.startTime)
                 let end = SharedFormatters.timeFormatter.string(from: meeting.endTime)
                 lines.append("- [\(start)–\(end)] \(DataSanitizer.sanitize(meeting.title)) (\(meeting.formattedDuration))")
+                lines.append("  Link: \(meeting.granolaDeepLink)")
                 if meeting.attendeeCount > 0 {
                     let names = meeting.attendeeNames.map { DataSanitizer.sanitize($0) }
                     lines.append("  Attendees: \(names.joined(separator: ", "))")
@@ -463,11 +466,74 @@ extension DashboardViewModel {
             }
         }
 
-        // OCR-derived screen content (what was actually visible on screen)
+        // OCR digest for selected day
         if let digest = loadOrBuildOCRDigest(), !digest.isEmpty {
             lines.append("")
-            lines.append("Screen content analysis (extracted from screenshots — URLs visited, code written, documents open):")
+            lines.append("Screen content analysis (extracted from screenshots):")
             lines.append(digest)
+        }
+
+        // === RECENT DAYS (summaries) ===
+        lines.append("")
+        lines.append("## Recent Activity (past 7 days)")
+
+        let selectedDayStart = cal.startOfDay(for: selectedDate)
+        for offset in 1...7 {
+            guard let date = cal.date(byAdding: .day, value: -offset, to: selectedDayStart) else { continue }
+
+            let dayTasks = db.tasks(for: date)
+            let dayMeetings = db.granolaMeetings(for: date)
+            let dayProjects = db.projectActivities(for: date)
+
+            // Skip empty days
+            guard !dayTasks.isEmpty || !dayMeetings.isEmpty else { continue }
+
+            let dateLabel = SharedFormatters.longDateFormatter.string(from: date)
+            lines.append("")
+            lines.append("### \(dateLabel)")
+
+            // Load persisted day summary if available
+            if let stubsContent = db.stubsContent(for: date),
+               let daySummary = stubsContent.daySummary, !daySummary.isEmpty {
+                lines.append("Summary: \(daySummary)")
+            }
+
+            // Tasks summary (titles and durations)
+            if !dayTasks.isEmpty {
+                let totalMins = dayTasks.reduce(0) { $0 + Int($1.duration) } / 60
+                lines.append("Tasks (\(dayTasks.count), \(totalMins)m total):")
+                for task in dayTasks.prefix(10) {
+                    let durMins = Int(task.duration) / 60
+                    lines.append("- \(task.title) (\(durMins)m)")
+                    if !task.description.isEmpty {
+                        lines.append("  \(task.description)")
+                    }
+                }
+            }
+
+            // Projects summary
+            if !dayProjects.isEmpty {
+                let projectNames = dayProjects.prefix(5).map { $0.name }
+                lines.append("Projects: \(projectNames.joined(separator: ", "))")
+            }
+
+            // Meetings summary
+            if !dayMeetings.isEmpty {
+                lines.append("Meetings (\(dayMeetings.count)):")
+                for meeting in dayMeetings.prefix(5) {
+                    let start = SharedFormatters.timeFormatter.string(from: meeting.startTime)
+                    lines.append("- [\(start)] \(DataSanitizer.sanitize(meeting.title)) (\(meeting.formattedDuration))")
+                    lines.append("  Link: \(meeting.granolaDeepLink)")
+                    if let summary = meeting.summary, !summary.isEmpty {
+                        lines.append("  \(DataSanitizer.sanitize(String(summary.prefix(200))))")
+                    }
+                }
+            }
+        }
+
+        if lines.last == "## Recent Activity (past 7 days)" {
+            // No recent activity found, remove the empty section header
+            lines.removeLast(2)
         }
 
         return lines.joined(separator: "\n")

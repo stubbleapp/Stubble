@@ -83,4 +83,9 @@ public struct GranolaMeetingRecord: Identifiable, Hashable, Sendable {
         if text.count <= maxChars { return text }
         return String(text.prefix(maxChars)) + "\n[...notes truncated]"
     }
+
+    /// Deep link URL to open this meeting in Granola app.
+    public var granolaDeepLink: String {
+        "granola://note/\(granolaId)"
+    }
 }

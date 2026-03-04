@@ -22,7 +22,7 @@ struct StreamingMarkdownView: View {
                     .markdownTheme(chatTheme)
                     .markdownBlockStyle(\.paragraph) { configuration in
                         configuration.label
-                            .lineSpacing(4)
+                            .lineSpacing(6)
                     }
             }
         }
@@ -80,11 +80,11 @@ struct StreamingMarkdownView: View {
             }
             .listItem { configuration in
                 configuration.label
-                    .markdownMargin(top: 6, bottom: 6)
+                    .markdownMargin(top: 8, bottom: 8)
             }
             .paragraph { configuration in
                 configuration.label
-                    .markdownMargin(top: 0, bottom: 12)
+                    .markdownMargin(top: 0, bottom: 16)
             }
             .codeBlock { configuration in
                 configuration.label

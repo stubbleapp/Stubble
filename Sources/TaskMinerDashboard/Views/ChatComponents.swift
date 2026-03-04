@@ -66,6 +66,8 @@ struct ChatTextField: NSViewRepresentable {
 
 struct MessageBubble: View {
     let message: ChatMessage
+    /// Called when streaming content changes (for scroll tracking).
+    var onContentChange: (() -> Void)?
     @State private var showCopied = false
 
     var body: some View {
@@ -139,7 +141,8 @@ struct MessageBubble: View {
     private var assistantContent: some View {
         StreamingMarkdownView(
             content: message.content,
-            isStreaming: message.isStreaming
+            isStreaming: message.isStreaming,
+            onContentRevealed: onContentChange
         )
         .padding(.vertical, 8)
     }

@@ -9,6 +9,10 @@ struct ProjectCard: View {
     @Environment(DashboardViewModel.self) var viewModel
     @State private var isHovering = false
 
+    private var summary: String {
+        viewModel.projectSummary(for: project)
+    }
+
     var body: some View {
         Button(action: onTap) {
             HStack(spacing: 12) {
@@ -16,11 +20,19 @@ struct ProjectCard: View {
                 ActivityHaloDot(color: project.color, size: 16)
 
                 // Project info
-                VStack(alignment: .leading, spacing: 2) {
+                VStack(alignment: .leading, spacing: 3) {
                     Text(project.name)
                         .font(.system(size: 13, weight: .semibold))
                         .foregroundStyle(Theme.textPrimary)
                         .lineLimit(1)
+
+                    // Summary line (what is this project)
+                    if !summary.isEmpty {
+                        Text(summary)
+                            .font(.system(size: 11))
+                            .foregroundStyle(Theme.textSecondary)
+                            .lineLimit(1)
+                    }
 
                     HStack(spacing: 6) {
                         // Days active badge

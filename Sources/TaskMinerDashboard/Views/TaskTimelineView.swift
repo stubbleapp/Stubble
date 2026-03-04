@@ -201,33 +201,47 @@ struct TaskTimelineView: View {
             } else {
                 // Task list — keep visible during regeneration
                 ScrollView {
-                    // Day summary card
-                    DaySummaryCardView(
-                        tasks: viewModel.tasks,
-                        aiSummary: viewModel.daySummaryText,
-                        daySummaryContent: viewModel.daySummaryContent,
-                        projectActivities: viewModel.projectActivities
-                    )
-                    .redacted(reason: viewModel.isGeneratingSummary ? .placeholder : [])
-                    .shimmer(active: viewModel.isGeneratingSummary)
-                    .padding(.horizontal, 24)
-                    .padding(.bottom, 16)
+                    // Day summary card - use DayWrapCard for completed days
+                    if viewModel.shouldShowDayWrap {
+                        DayWrapCard(
+                            date: viewModel.selectedDate,
+                            focusTime: viewModel.totalFocusTime,
+                            projectCount: viewModel.projectActivities.count,
+                            meetingTime: viewModel.totalMeetingTime,
+                            summaryText: viewModel.daySummaryContent ?? viewModel.daySummaryText,
+                            topApps: viewModel.topAppsByDuration
+                        )
+                        .redacted(reason: viewModel.isGeneratingSummary ? .placeholder : [])
+                        .shimmer(active: viewModel.isGeneratingSummary)
+                        .padding(.horizontal, 24)
+                        .padding(.bottom, 16)
+                    } else {
+                        DaySummaryCardView(
+                            tasks: viewModel.tasks,
+                            aiSummary: viewModel.daySummaryText,
+                            daySummaryContent: viewModel.daySummaryContent,
+                            projectActivities: viewModel.projectActivities
+                        )
+                        .redacted(reason: viewModel.isGeneratingSummary ? .placeholder : [])
+                        .shimmer(active: viewModel.isGeneratingSummary)
+                        .padding(.horizontal, 24)
+                        .padding(.bottom, 16)
+                    }
 
-                    let timelineItems = TimelineItem.build(from: viewModel.tasks, idleActivities: viewModel.activities, minIdleDuration: TimelineItem.settingsMinIdleDuration)
                     LazyVStack(spacing: 0) {
-                        ForEach(Array(timelineItems.enumerated()), id: \.element.id) { index, item in
+                        ForEach(Array(viewModel.timelineItems.enumerated()), id: \.element.id) { index, item in
                             switch item {
                             case .task(let task, _, _):
                                 TaskCardView(
                                     task: task,
-                                    activityColumns: timelineItems.activityColumns(at: index, viewModel: viewModel)
+                                    activityColumns: viewModel.timelineItems.activityColumns(at: index, viewModel: viewModel)
                                 )
                             case .gap(_, let startTime, let endTime, let duration):
                                 IdleGapView(
                                     startTime: startTime,
                                     endTime: endTime,
                                     duration: duration,
-                                    gapColumns: timelineItems.gapColumns(at: index, viewModel: viewModel)
+                                    gapColumns: viewModel.timelineItems.gapColumns(at: index, viewModel: viewModel)
                                 )
                             }
                         }

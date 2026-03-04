@@ -55,6 +55,83 @@ final class RecommendationGenerator: Sendable {
         )
     }
 
+    /// Generate only suggested questions (lightweight call for refreshing just the prompts).
+    func generateSuggestedQuestions(
+        recentTasks: [String: [TaskRecord]],
+        projectActivities: [ProjectActivity],
+        memoryContext: String?
+    ) async throws -> [String] {
+        let prompt = buildSuggestedQuestionsPrompt(
+            recentTasks: recentTasks,
+            projectActivities: projectActivities,
+            memoryContext: memoryContext
+        )
+
+        let systemInstruction = """
+        You are a helpful assistant generating conversation starters based on a user's recent work. \
+        Generate 4-5 short prompts (max 8 words each) that the user might want to ask about their work. \
+        Mix questions ("Best approach for X?") and action requests ("Help me debug Y", "Explain Z"). \
+        At least one should be exploratory or interest-driven. \
+        Respond with a JSON object: { "questions": ["...", "...", ...] }
+        """
+
+        let response = try await geminiClient.generateContent(
+            prompt: prompt,
+            systemInstruction: systemInstruction
+        )
+
+        return parseSuggestedQuestionsResponse(response)
+    }
+
+    private func buildSuggestedQuestionsPrompt(
+        recentTasks: [String: [TaskRecord]],
+        projectActivities: [ProjectActivity],
+        memoryContext: String?
+    ) -> String {
+        var lines: [String] = []
+
+        // User context
+        if let memory = memoryContext, !memory.isEmpty {
+            lines.append("## User Profile")
+            lines.append(memory)
+            lines.append("")
+        }
+
+        // Today's tasks (primary focus)
+        let todayStr = SharedFormatters.dayFormatter.string(from: Date())
+        if let todayTasks = recentTasks[todayStr], !todayTasks.isEmpty {
+            lines.append("## Today's Work")
+            for task in todayTasks.prefix(10) {
+                let duration = Int(task.duration / 60)
+                lines.append("- \(task.title) (\(duration)m)")
+            }
+            lines.append("")
+        }
+
+        // Current projects
+        if !projectActivities.isEmpty {
+            lines.append("## Active Projects")
+            for pa in projectActivities.prefix(5) {
+                lines.append("- \(pa.name)")
+            }
+            lines.append("")
+        }
+
+        lines.append("Generate 4-5 short prompts the user might ask about their work today.")
+
+        return lines.joined(separator: "\n")
+    }
+
+    private func parseSuggestedQuestionsResponse(_ response: String) -> [String] {
+        guard let parsed = JSONSanitizer.parse(response) as? [String: Any],
+              let questions = parsed["questions"] as? [String]
+        else {
+            Logger.error("RecommendationGenerator: failed to parse suggested questions. Preview: \(String(response.prefix(200)))")
+            return []
+        }
+        return questions
+    }
+
     // MARK: - Two-Stage Generation
 
     /// Stage 1: Generate 6-8 candidate recommendations with full context.

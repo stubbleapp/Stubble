@@ -41,10 +41,10 @@ struct ProjectsView: View {
                                 .padding(.bottom, 12)
                         }
 
-                        // Stats row
-                        statsRow
+                        // Total time header (right-aligned above project durations)
+                        totalTimeHeader
                             .padding(.horizontal, 24)
-                            .padding(.bottom, 16)
+                            .padding(.bottom, 8)
 
                         // Project list
                         LazyVStack(spacing: 4) {
@@ -75,7 +75,7 @@ struct ProjectsView: View {
     // MARK: - Header Section
 
     private var headerSection: some View {
-        HStack(alignment: .center) {
+        HStack(alignment: .top) {
             VStack(alignment: .leading, spacing: 2) {
                 Text("Projects")
                     .font(Theme.headerFont(size: 20))
@@ -113,41 +113,36 @@ struct ProjectsView: View {
                 let isSelected = viewModel.projectsTimePeriod == period
 
                 Button {
-                    viewModel.setProjectsTimePeriod(period)
+                    withAnimation(.easeInOut(duration: 0.15)) {
+                        viewModel.setProjectsTimePeriod(period)
+                    }
                 } label: {
                     Text(period.displayName)
-                        .font(.system(size: 11, weight: isSelected ? .semibold : .regular))
+                        .font(.system(size: 12, weight: isSelected ? .semibold : .regular))
                         .foregroundStyle(isSelected ? Theme.accent : Theme.textSecondary)
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 5)
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 6)
+                        .contentShape(Capsule())
                         .background(
-                            isSelected ? Theme.accent.opacity(0.1) : Color.clear
+                            Capsule()
+                                .fill(isSelected ? Theme.selectedSurface : Color.clear)
                         )
-                        .clipShape(Capsule())
                 }
                 .buttonStyle(.plain)
             }
         }
-        .padding(3)
-        .background(Theme.surfaceElevated)
-        .clipShape(Capsule())
+        .padding(4)
+        .modifier(TimePeriodPickerGlassModifier())
     }
 
-    // MARK: - Stats Row
+    // MARK: - Total Time Header
 
-    private var statsRow: some View {
-        HStack(spacing: 16) {
-            StatPill(
-                icon: "clock",
-                label: "Total",
-                value: formatDuration(viewModel.totalProjectsTime)
-            )
-
-            StatPill(
-                icon: "folder",
-                label: "Projects",
-                value: "\(viewModel.aggregatedProjects.count)"
-            )
+    private var totalTimeHeader: some View {
+        HStack {
+            Spacer()
+            Text("Total: \(formatDuration(viewModel.totalProjectsTime))")
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(Theme.textMuted)
         }
     }
 
@@ -199,33 +194,27 @@ struct ProjectsView: View {
     }
 }
 
-// MARK: - Stat Pill
+// MARK: - Time Period Picker Glass Modifier
 
-private struct StatPill: View {
-    let icon: String
-    let label: String
-    let value: String
-    var color: Color = Theme.accent
-
-    var body: some View {
-        HStack(spacing: 6) {
-            Image(systemName: icon)
-                .font(.system(size: 10, weight: .medium))
-                .foregroundStyle(color)
-
-            Text("\(label):")
-                .font(.system(size: 11))
-                .foregroundStyle(Theme.textMuted)
-
-            Text(value)
-                .font(.system(size: 11, weight: .medium))
-                .foregroundStyle(Theme.textPrimary)
-                .lineLimit(1)
+private struct TimePeriodPickerGlassModifier: ViewModifier {
+    func body(content: Content) -> some View {
+        if #available(macOS 26, *) {
+            content
+                .background(
+                    Capsule()
+                        .fill(Theme.primaryBackground.opacity(0.55))
+                )
+                .compositingGroup()
+                .glassEffect(.regular, in: .capsule)
+        } else {
+            content
+                .background(.ultraThinMaterial)
+                .clipShape(Capsule())
+                .overlay(
+                    Capsule()
+                        .strokeBorder(Theme.cardBorder, lineWidth: 0.5)
+                )
         }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 6)
-        .background(Theme.surfaceElevated)
-        .clipShape(Capsule())
     }
 }
 

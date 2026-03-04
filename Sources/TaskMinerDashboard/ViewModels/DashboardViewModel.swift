@@ -36,6 +36,9 @@ final class DashboardViewModel {
     var tasks: [TaskRecord] = []
     var isGeneratingSummary = false
     var summaryError: String?
+
+    // Cached timeline items (tasks + gaps) — rebuilt when tasks/activities change
+    var timelineItems: [TimelineItem] = []
     /// Whether a Gemini API key is configured (cosmetic — used for status indicators in Settings).
     var hasGeminiKey: Bool
 
@@ -54,6 +57,7 @@ final class DashboardViewModel {
     var daySummaryContent: String?
     var suggestedQuestions: [String] = []
     var isGeneratingRecommendations = false
+    var isGeneratingSuggestedQuestions = false
     var recommendationsError: String?
     var recommendationGenerator: RecommendationGenerator?
     /// Tracks whether we've already attempted to auto-generate stubs for this date,
@@ -83,6 +87,44 @@ final class DashboardViewModel {
         Calendar.current.isDateInToday(selectedDate)
     }
 
+    // MARK: - Day Wrap Metrics
+
+    /// Whether to show the Day Wrap card instead of the regular summary.
+    /// True for past days, or today after 6pm.
+    var shouldShowDayWrap: Bool {
+        if !isViewingToday { return true }
+        let hour = Calendar.current.component(.hour, from: Date())
+        return hour >= 18
+    }
+
+    /// Total focus time (non-idle task duration).
+    var totalFocusTime: TimeInterval {
+        tasks.reduce(0) { $0 + $1.duration }
+    }
+
+    /// Total meeting time from Granola meetings for the selected date.
+    var totalMeetingTime: TimeInterval {
+        granolaMeetings.reduce(0) { $0 + $1.duration }
+    }
+
+    /// Top apps by duration for the selected date.
+    var topAppsByDuration: [(app: String, duration: TimeInterval, bundleId: String?)] {
+        var appDurations: [String: (duration: TimeInterval, bundleId: String?)] = [:]
+
+        for task in tasks {
+            for appName in task.appNamesList {
+                let existing = appDurations[appName] ?? (duration: 0, bundleId: nil)
+                // Try to get bundleId from activities
+                let bundleId = existing.bundleId ?? activities.first { $0.appName == appName }?.bundleId
+                appDurations[appName] = (duration: existing.duration + task.duration / Double(task.appNamesList.count), bundleId: bundleId)
+            }
+        }
+
+        return appDurations
+            .map { (app: $0.key, duration: $0.value.duration, bundleId: $0.value.bundleId) }
+            .sorted { $0.duration > $1.duration }
+    }
+
     // Expand state — only one item expanded at a time across the whole screen.
     // Setting one to a value automatically means the others are collapsed.
     var expandedTaskId: Int64?
@@ -108,6 +150,10 @@ final class DashboardViewModel {
 
     /// Cache of AI-generated project analyses (keyed by project ID).
     var projectAnalysisCache: [UUID: ProjectAnalysis] = [:]
+
+    /// Cache of synthesized project summaries (keyed by project ID).
+    /// These describe WHAT the project IS, not just what was done recently.
+    var synthesizedProjectSummaries: [UUID: String] = [:]
 
     // MARK: - Sub-ViewModels (Domain-Specific State)
 
@@ -504,6 +550,7 @@ final class DashboardViewModel {
         do {
             try writer.updateTask(id: id, title: title, description: description)
             tasks = dbReader?.tasks(for: selectedDate) ?? []
+            rebuildTimelineItems()
             reloadProjectActivities()
         } catch {
             summaryError = "Failed to update task: \(error.localizedDescription)"
@@ -516,6 +563,7 @@ final class DashboardViewModel {
         do {
             try writer.deleteTask(id: id)
             tasks = dbReader?.tasks(for: selectedDate) ?? []
+            rebuildTimelineItems()
             reloadProjectActivities()
         } catch {
             summaryError = "Failed to delete task: \(error.localizedDescription)"
@@ -744,6 +792,16 @@ final class DashboardViewModel {
 
         // Load persisted stubs content (if previously generated for this date)
         loadPersistedStubs(from: db)
+
+        // Rebuild cached timeline items
+        rebuildTimelineItems()
+    }
+
+    /// Rebuild the cached timeline items from current tasks and activities.
+    /// Call this after tasks/activities change or when minAwayMinutes setting changes.
+    func rebuildTimelineItems() {
+        let minIdleDuration = TimeInterval(SettingsManager.shared.minAwayMinutes * 60)
+        timelineItems = TimelineItem.build(from: tasks, idleActivities: activities, minIdleDuration: minIdleDuration)
     }
 
     /// Attempt to load stubs content from the database for the selected date.
@@ -844,6 +902,7 @@ final class DashboardViewModel {
         fileEvents = []
         granolaMeetings = []
         projectActivities = []
+        timelineItems = []
         recommendations = []
         greetingContext = nil
         daySummaryContent = nil
