@@ -584,7 +584,7 @@ struct SettingsView: View {
 
     private var tierActionsView: some View {
         VStack(alignment: .leading, spacing: 12) {
-            // Upgrade to Pro
+            // Upgrade to Pro (for non-Pro users)
             if AuthManager.shared.currentState != .pro {
                 Button {
                     openPaddleCheckout()
@@ -600,6 +600,27 @@ struct SettingsView: View {
                     .padding(.vertical, 8)
                     .background(Theme.accent)
                     .clipShape(Capsule())
+                }
+                .buttonStyle(.plain)
+            }
+
+            // Manage Subscription (for Pro users)
+            if AuthManager.shared.currentState == .pro {
+                Button {
+                    // Open email to manage subscription - Paddle sends portal links in receipts
+                    if let url = URL(string: "mailto:info@stubble.ai?subject=Manage%20Subscription&body=Please%20help%20me%20manage%20my%20Stubble%20Pro%20subscription.%0A%0AAccount%20email%3A%20\(AuthManager.shared.userEmail ?? "")") {
+                        NSWorkspace.shared.open(url)
+                    }
+                } label: {
+                    HStack(spacing: 4) {
+                        Image(systemName: "creditcard")
+                            .font(.system(size: 10))
+                        Text("Manage Subscription")
+                            .font(.system(size: 12, weight: .medium))
+                        Image(systemName: "arrow.up.right")
+                            .font(.system(size: 9))
+                    }
+                    .foregroundStyle(Theme.textSecondary)
                 }
                 .buttonStyle(.plain)
             }
