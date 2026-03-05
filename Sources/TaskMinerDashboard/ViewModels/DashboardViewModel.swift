@@ -17,17 +17,24 @@ final class DashboardViewModel {
     var selectedDate: Date = Date()
     var availableDates: [String] = []
 
-    // Activity data
+    // Activity data (lazy-loaded for Log view)
     var activities: [ActivityRecord] = []
     var groupedActivities: [ActivityGroup] = []
+    private var activitiesLoaded = false
+
+    // Idle activities only (for timeline gap detection - much smaller subset)
+    private var idleActivitiesForTimeline: [ActivityRecord] = []
+
     var activeSeconds: Double = 0
     var idleSeconds: Double = 0
 
-    // Screenshots
+    // Screenshots (lazy-loaded for Log view only)
     var screenshots: [ScreenshotRecord] = []
+    private var screenshotsLoaded = false
 
-    // File events (filesystem monitoring)
+    // File events (lazy-loaded for Log view only)
     var fileEvents: [FileEventRecord] = []
+    private var fileEventsLoaded = false
 
     // Granola meetings (imported from Granola cache)
     var granolaMeetings: [GranolaMeetingRecord] = []
@@ -112,19 +119,17 @@ final class DashboardViewModel {
 
     /// Top apps by duration for the selected date.
     var topAppsByDuration: [(app: String, duration: TimeInterval, bundleId: String?)] {
-        var appDurations: [String: (duration: TimeInterval, bundleId: String?)] = [:]
+        var appDurations: [String: TimeInterval] = [:]
 
         for task in tasks {
             for appName in task.appNamesList {
-                let existing = appDurations[appName] ?? (duration: 0, bundleId: nil)
-                // Try to get bundleId from activities
-                let bundleId = existing.bundleId ?? activities.first { $0.appName == appName }?.bundleId
-                appDurations[appName] = (duration: existing.duration + task.duration / Double(task.appNamesList.count), bundleId: bundleId)
+                let existing = appDurations[appName] ?? 0
+                appDurations[appName] = existing + task.duration / Double(task.appNamesList.count)
             }
         }
 
         return appDurations
-            .map { (app: $0.key, duration: $0.value.duration, bundleId: $0.value.bundleId) }
+            .map { (app: $0.key, duration: $0.value, bundleId: appNameBundleMap[$0.key]) }
             .sorted { $0.duration > $1.duration }
     }
 
@@ -354,6 +359,7 @@ final class DashboardViewModel {
         persistedFocusTime = nil
         persistedMeetingTime = nil
         persistedProjectCount = nil
+
         loadDataForSelectedDate()
 
         // Auto-generate stubs if no persisted content was loaded and we have data.
@@ -814,11 +820,19 @@ final class DashboardViewModel {
     func loadDataForSelectedDate() {
         guard let db = dbReader else { return }
 
-        activities = db.activities(for: selectedDate)
-        groupedActivities = ActivityGroup.group(activities)
-        screenshots = db.screenshots(for: selectedDate)
+        // Load only idle activities for timeline (much smaller subset than full activities)
+        idleActivitiesForTimeline = db.idleActivities(for: selectedDate)
+
+        // Full activities, screenshots, and fileEvents are lazy-loaded only when Log view is accessed
+        activities = []
+        groupedActivities = []
+        activitiesLoaded = false
+        screenshots = []
+        screenshotsLoaded = false
+        fileEvents = []
+        fileEventsLoaded = false
+
         tasks = db.tasks(for: selectedDate)
-        fileEvents = db.fileEvents(for: selectedDate)
         granolaMeetings = db.granolaMeetings(for: selectedDate)
 
         let summary = db.computeSummary(for: selectedDate)
@@ -840,7 +854,29 @@ final class DashboardViewModel {
     /// Call this after tasks/activities change or when minAwayMinutes setting changes.
     func rebuildTimelineItems() {
         let minIdleDuration = TimeInterval(SettingsManager.shared.minAwayMinutes * 60)
-        timelineItems = TimelineItem.build(from: tasks, idleActivities: activities, minIdleDuration: minIdleDuration)
+        timelineItems = TimelineItem.build(from: tasks, idleActivities: idleActivitiesForTimeline, minIdleDuration: minIdleDuration)
+    }
+
+    /// Lazy-load activities, screenshots, and file events for the Log view.
+    /// Only loads if not already loaded for this date.
+    func loadLogViewDataIfNeeded() {
+        guard let db = dbReader else { return }
+
+        if !activitiesLoaded {
+            activities = db.activities(for: selectedDate)
+            groupedActivities = ActivityGroup.group(activities)
+            activitiesLoaded = true
+        }
+
+        if !screenshotsLoaded {
+            screenshots = db.screenshots(for: selectedDate)
+            screenshotsLoaded = true
+        }
+
+        if !fileEventsLoaded {
+            fileEvents = db.fileEvents(for: selectedDate)
+            fileEventsLoaded = true
+        }
     }
 
     /// Attempt to load stubs content from the database for the selected date.

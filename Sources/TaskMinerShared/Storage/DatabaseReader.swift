@@ -496,6 +496,43 @@ public class DatabaseReader {
         return results
     }
 
+    /// Fetch only idle activities for a date (optimized for timeline gap detection).
+    public func idleActivities(for date: Date) -> [ActivityRecord] {
+        let range = dateRange(for: date)
+        let sql = """
+        SELECT id, timestamp, end_time, app_name, bundle_id, window_title, duration, is_idle,
+               browser_url, document_path, focused_element_role
+        FROM activities
+        WHERE timestamp >= ? AND timestamp < ? AND is_idle = 1
+        ORDER BY timestamp ASC
+        """
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return [] }
+        defer { sqlite3_finalize(stmt) }
+
+        sqliteBindText(stmt, 1, range.start)
+        sqliteBindText(stmt, 2, range.end)
+
+        var results: [ActivityRecord] = []
+        while sqlite3_step(stmt) == SQLITE_ROW {
+            let record = ActivityRecord(
+                id: sqlite3_column_int64(stmt, 0),
+                timestamp: sqlite3_column_text(stmt, 1).flatMap({ SharedFormatters.iso8601.date(from: String(cString: $0)) }) ?? Date(),
+                endTime: sqlite3_column_text(stmt, 2).flatMap({ SharedFormatters.iso8601.date(from: String(cString: $0)) }),
+                appName: sqlite3_column_text(stmt, 3).map({ String(cString: $0) }) ?? "Unknown",
+                bundleId: sqlite3_column_text(stmt, 4).map({ String(cString: $0) }),
+                windowTitle: sqlite3_column_text(stmt, 5).map({ String(cString: $0) }),
+                duration: sqlite3_column_type(stmt, 6) != SQLITE_NULL ? sqlite3_column_double(stmt, 6) : nil,
+                isIdle: true, // Always true in this query
+                browserURL: sqlite3_column_text(stmt, 8).map({ String(cString: $0) }),
+                documentPath: sqlite3_column_text(stmt, 9).map({ String(cString: $0) }),
+                focusedElementRole: sqlite3_column_text(stmt, 10).map({ String(cString: $0) })
+            )
+            results.append(record)
+        }
+        return results
+    }
+
     // MARK: - Screenshots
 
     public func screenshots(for date: Date) -> [ScreenshotRecord] {

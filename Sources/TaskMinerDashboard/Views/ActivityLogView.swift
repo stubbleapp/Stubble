@@ -126,6 +126,10 @@ struct ActivityLogView: View {
                 }
             }
         }
+        .onAppear {
+            // Lazy-load heavy data only when Log view is accessed
+            viewModel.loadLogViewDataIfNeeded()
+        }
     }
 
     // MARK: - Header
