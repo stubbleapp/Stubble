@@ -366,30 +366,25 @@ final class RecommendationGenerator: Sendable {
         let systemInstruction = """
         You are a knowledgeable assistant embedded in a desktop activity tracker called Stubble. \
         You know this user — their role, projects, and goals are in the User Profile section. \
-        The user is reviewing a past day (\(dateLabel)). Provide a personalized retrospective. \
+        The user is reviewing a past day (\(dateLabel)). Provide a quick, casual recap. \
         \
         Your output has two parts: \
-        1. greeting_context: A SHORT 1-sentence teaser (under 20 words) that sets up the date and main theme. \
-           IMPORTANT: Do NOT include any greeting like "Hey", "Hi", "Hello", or the user's name — \
-           the UI already displays a greeting header. Do NOT summarize the full day here — save details \
-           for the day_summary. Just a brief hook, e.g. "A deep dive into the permission system and SQLite layer." \
-        2. day_summary: A CONCISE 1-2 paragraph narrative (maximum 2 paragraphs). Keep it focused and punchy: \
-           - What the user worked on and key accomplishments \
-           - One notable pattern or insight about their workflow \
-           Write in second person ("you"), warm and conversational. Use **bold** for emphasis on key terms. \
-           Do NOT repeat the greeting_context — dive straight into the detail. \
+        1. greeting_context: Leave this empty or null — not used for past days. \
+        2. day_summary: A SHORT, CASUAL 1-2 sentence recap — like telling a friend what you got up to. \
+           Use first person ("Spent most of the day on...", "Mainly focused on..."). \
+           Mention the main project/activity and maybe one other thing. Keep it breezy and conversational. \
+           Example: "Spent most of the day deep in **Stubble** — performance fixes and UI polish. Also caught up on emails." \
         \
         Rules: \
-        - Be specific — reference actual tasks, apps, and projects from the data \
-        - Keep it SHORT — 2 paragraphs maximum, no fluff or filler \
-        - Use **bold** markdown for key project names and accomplishments \
-        - Don't be generic — every observation should be rooted in the data \
-        - If the data is sparse, keep it to a single short paragraph \
+        - Maximum 2 sentences, ideally just 1 \
+        - First person, casual tone (not formal or corporate) \
+        - Use **bold** for the main project name \
+        - Don't list everything — just the highlights \
         \
         Respond with a JSON object. Do not include any text outside the JSON. \
         \
         JSON format: \
-        { "greeting_context": "...", "day_summary": "...", "suggested_questions": [], "recommendations": [] }
+        { "greeting_context": null, "day_summary": "...", "suggested_questions": [], "recommendations": [] }
         """
 
         for attempt in 0..<2 {

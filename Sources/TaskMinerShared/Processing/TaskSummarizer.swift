@@ -681,7 +681,7 @@ public final class TaskSummarizer: Sendable {
         ## Output Format
         Respond with a JSON object containing "tasks", "day_summary", and "projects":
         {
-          "day_summary": "A concise 2–3 sentence overview of the day, emphasising where most time was spent and the main focus areas.",
+          "day_summary": "A casual, friendly 1-2 sentence recap of the day — like telling a friend what you got up to.",
           "tasks": [
             {
               "title": "Developing auth flow in Xcode",
@@ -715,7 +715,7 @@ public final class TaskSummarizer: Sendable {
         - Every task title MUST be unique — never produce two tasks with the same or near-identical title
         - Titles MUST start with a present participle verb (e.g., Developing, Browsing, Watching, Reviewing, Debugging)
         - Descriptions MUST be 2-3 sentences long. Include: what was being worked on, specific details from window titles/OCR (file names, function names, features), and any notable context (meeting attendees, document names, error messages being debugged). Never write "the user", "you", or "they" — describe the activity directly.
-        - day_summary should be written in a direct, impersonal style — describe what was worked on and where the bulk of time went. Never say "the user" or "you".
+        - day_summary should be casual and friendly (1-2 sentences max), like a quick recap to a friend. Use first person ("Spent most of the day on...", "Mainly focused on..."). Keep it short and conversational, not formal.
         - confidence should be 0.0-1.0 based on how certain you are
         - start_time/end_time: use the earliest start and latest end from the constituent activity blocks
         - active_seconds: the SUM of the durations (in seconds) shown in parentheses for each constituent activity block. Do NOT use end_time minus start_time — that would incorrectly include idle gaps between blocks. For example, if a task merges a 300s block and a 180s block separated by a break, active_seconds should be 480, not the full time span.

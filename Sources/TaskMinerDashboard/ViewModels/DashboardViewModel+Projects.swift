@@ -141,7 +141,12 @@ extension DashboardViewModel {
             projectAnalysisCache[project.id] = analysis
         } catch is CancellationError {
             // Task was cancelled (e.g. user navigated away) — don't show error
+        } catch let urlError as URLError where urlError.code == .cancelled {
+            // Network request cancelled — don't show error
         } catch {
+            // Skip showing "cancelled" errors from other sources
+            let desc = error.localizedDescription.lowercased()
+            if desc.contains("cancel") { return }
             projectsError = "Failed to generate analysis: \(error.localizedDescription)"
         }
 
