@@ -749,6 +749,40 @@ public class DatabaseReader {
         return results
     }
 
+    /// Returns all unique project activities across all dates (one per unique name, most recent wins).
+    public func allUniqueProjectActivities() -> [ProjectActivityRecord] {
+        // Get the most recent record for each unique project name
+        let sql = """
+        SELECT id, date, name, summary, total_duration, app_names, task_titles, start_time, end_time, color_index
+        FROM project_activities
+        WHERE id IN (
+            SELECT MAX(id) FROM project_activities GROUP BY name
+        )
+        ORDER BY name
+        """
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return [] }
+        defer { sqlite3_finalize(stmt) }
+
+        var results: [ProjectActivityRecord] = []
+        while sqlite3_step(stmt) == SQLITE_ROW {
+            let record = ProjectActivityRecord(
+                id: sqlite3_column_int64(stmt, 0),
+                date: sqlite3_column_text(stmt, 1).map({ String(cString: $0) }) ?? "",
+                name: sqlite3_column_text(stmt, 2).map({ String(cString: $0) }) ?? "",
+                summary: sqlite3_column_text(stmt, 3).map({ String(cString: $0) }) ?? "",
+                totalDuration: sqlite3_column_double(stmt, 4),
+                appNames: sqlite3_column_text(stmt, 5).map({ String(cString: $0) }) ?? "[]",
+                taskTitles: sqlite3_column_text(stmt, 6).map({ String(cString: $0) }) ?? "[]",
+                startTime: sqlite3_column_text(stmt, 7).flatMap({ SharedFormatters.iso8601.date(from: String(cString: $0)) }) ?? Date(),
+                endTime: sqlite3_column_text(stmt, 8).flatMap({ SharedFormatters.iso8601.date(from: String(cString: $0)) }) ?? Date(),
+                colorIndex: Int(sqlite3_column_int(stmt, 9))
+            )
+            results.append(record)
+        }
+        return results
+    }
+
     // MARK: - Activity by ID
 
     public func activity(byId activityId: Int64) -> ActivityRecord? {

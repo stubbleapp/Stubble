@@ -5,6 +5,15 @@ import TaskMinerShared
 
 extension DashboardViewModel {
 
+    /// Force regenerate the day summary for a past day.
+    /// Clears cached content and triggers fresh AI generation.
+    func regenerateDaySummary() {
+        daySummaryContent = nil
+        hasAttemptedStubsGeneration = false
+        lastStubsTaskFingerprint = ""
+        generateRecommendations()
+    }
+
     /// Generate AI-powered stubs content based on recent work activity.
     /// For today: forward-looking recommendations. For past days: retrospective day summary.
     func generateRecommendations() {

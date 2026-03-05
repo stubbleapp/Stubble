@@ -2,7 +2,7 @@ import SwiftUI
 import TaskMinerShared
 
 /// A summary view shown for completed days (past days or today after wrap hour).
-/// Shows: title, stats, AI summary, and all projects worked on.
+/// Shows: title, stats, and interactive summary with embedded project chips.
 struct DayWrapCard: View {
     let focusTime: TimeInterval
     let projectCount: Int
@@ -34,14 +34,9 @@ struct DayWrapCard: View {
                 statsCard
             }
 
-            // Summary section
+            // Interactive summary with inline project chips
             if let summary = summaryText, !summary.isEmpty {
                 summarySection(summary)
-            }
-
-            // Projects section
-            if !sortedProjects.isEmpty {
-                projectsSection
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -98,72 +93,18 @@ struct DayWrapCard: View {
         )
     }
 
-    // MARK: - Summary Section
+    // MARK: - Summary Section (with inline project chips)
 
     @ViewBuilder
     private func summarySection(_ summary: String) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            if let attributed = MarkdownHelper.renderMarkdown(summary) {
-                Text(attributed)
-                    .font(.system(size: 13))
-                    .foregroundStyle(Theme.textPrimary)
-                    .lineSpacing(4)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .textSelection(.enabled)
-            } else {
-                Text(summary)
-                    .font(.system(size: 13))
-                    .foregroundStyle(Theme.textPrimary)
-                    .lineSpacing(4)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .textSelection(.enabled)
+        InteractiveSummaryText(
+            summaryText: summary,
+            projects: sortedProjects,
+            onProjectTap: { project in
+                selectedProject = project
             }
-        }
-    }
-
-    // MARK: - Projects Section
-
-    private var projectsSection: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            // Section header
-            HStack {
-                Text("Projects")
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(Theme.textMuted)
-                    .textCase(.uppercase)
-                    .tracking(0.5)
-
-                Spacer()
-            }
-
-            // Project rows in a card
-            VStack(spacing: 0) {
-                ForEach(Array(sortedProjects.enumerated()), id: \.element.id) { index, activity in
-                    ProjectWrapRow(
-                        activity: activity,
-                        color: viewModel.resolvedColor(for: activity),
-                        scale: viewModel.activityDurationScale
-                    ) {
-                        selectedProject = activity.toAggregatedProject()
-                    }
-
-                    if index < sortedProjects.count - 1 {
-                        Divider()
-                            .padding(.leading, 32)
-                            .opacity(0.5)
-                    }
-                }
-            }
-            .padding(.vertical, 4)
-            .background(
-                RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .fill(Theme.cardBackground)
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .strokeBorder(Theme.cardBorder, lineWidth: 0.5)
-            )
-        }
+        )
+        .fixedSize(horizontal: false, vertical: true)
     }
 }
 
@@ -191,56 +132,5 @@ private struct StatBlock: View {
                 .foregroundStyle(Theme.textMuted)
         }
         .frame(maxWidth: .infinity)
-    }
-}
-
-// MARK: - Project Wrap Row
-
-private struct ProjectWrapRow: View {
-    let activity: ProjectActivity
-    let color: Color
-    let scale: Double
-    let onTap: () -> Void
-
-    @State private var isHovering = false
-
-    var body: some View {
-        Button(action: onTap) {
-            HStack(spacing: 10) {
-                // Color indicator
-                ActivityHaloDot(color: color, size: 14)
-
-                // Project name
-                Text(activity.name)
-                    .font(.system(size: 13, weight: .medium))
-                    .foregroundStyle(Theme.textPrimary)
-                    .lineLimit(1)
-
-                Spacer(minLength: 4)
-
-                // Duration
-                Text(formatDuration(activity.totalDuration * scale))
-                    .font(.system(size: 12, weight: .medium).monospacedDigit())
-                    .foregroundStyle(Theme.textSecondary)
-
-                // Chevron
-                Image(systemName: "chevron.right")
-                    .font(.system(size: 9, weight: .medium))
-                    .foregroundStyle(Theme.textQuaternary)
-            }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 10)
-            .background(
-                RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .fill(isHovering ? Theme.surfaceElevated : Color.clear)
-            )
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .onHover { hovering in
-            withAnimation(.easeInOut(duration: 0.12)) {
-                isHovering = hovering
-            }
-        }
     }
 }

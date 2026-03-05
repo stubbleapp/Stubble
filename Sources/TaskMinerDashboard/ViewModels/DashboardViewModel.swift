@@ -54,6 +54,15 @@ final class DashboardViewModel {
 
     // Project activities (AI-clustered from tasks)
     var projectActivities: [ProjectActivity] = []
+    /// All unique projects from the database (for matching project names in summaries)
+    private var _allKnownProjects: [ProjectActivity] = []
+    var allKnownProjects: [ProjectActivity] {
+        if _allKnownProjects.isEmpty, let db = dbReader {
+            let records = db.allUniqueProjectActivities()
+            _allKnownProjects = records.map { ProjectActivity(from: $0) }
+        }
+        return _allKnownProjects
+    }
     var isGeneratingActivities = false
     var activitiesError: String?
     var activityGenerator: ProjectActivityGenerator?
@@ -335,6 +344,7 @@ final class DashboardViewModel {
         loadDataForSelectedDate()
         loadChatThreads()
         loadAppNameMap()
+        loadAllKnownProjects()
         startPausePolling()
         startPeriodicRefresh()
         observeSystemWake()
@@ -817,6 +827,12 @@ final class DashboardViewModel {
         appNameBundleMap = dbReader?.appNameToBundleIdMap() ?? [:]
     }
 
+    private func loadAllKnownProjects() {
+        guard let db = dbReader else { return }
+        let records = db.allUniqueProjectActivities()
+        _allKnownProjects = records.map { ProjectActivity(from: $0) }
+    }
+
     func loadDataForSelectedDate() {
         guard let db = dbReader else { return }
 
@@ -838,6 +854,9 @@ final class DashboardViewModel {
         let summary = db.computeSummary(for: selectedDate)
         activeSeconds = summary.activeSeconds
         idleSeconds = summary.idleSeconds
+
+        // Refresh all known projects (picks up any new ones created by daemon)
+        loadAllKnownProjects()
 
         // Load persisted project activities
         let paRecords = db.projectActivities(for: selectedDate)

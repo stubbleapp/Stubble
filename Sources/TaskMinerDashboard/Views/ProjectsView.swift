@@ -90,25 +90,11 @@ struct ProjectsView: View {
 
             // Time period picker
             timePeriodPicker
-
-            // Refresh button
-            Button(action: { viewModel.loadProjects() }) {
-                Image(systemName: "arrow.clockwise")
-                    .font(.system(size: 14, weight: .medium))
-                    .foregroundStyle(Theme.accent)
-                    .symbolEffect(.bounce, value: viewModel.isLoadingProjects)
-                    .frame(width: 32, height: 32)
-                    .background(Theme.accent.opacity(0.08))
-                    .clipShape(Circle())
-            }
-            .buttonStyle(.plain)
-            .disabled(viewModel.isLoadingProjects)
-            .help("Refresh projects")
         }
     }
 
     private var timePeriodPicker: some View {
-        HStack(spacing: 0) {
+        HStack(spacing: 16) {
             ForEach(ProjectTimePeriod.allCases, id: \.self) { period in
                 let isSelected = viewModel.projectsTimePeriod == period
 
@@ -118,21 +104,12 @@ struct ProjectsView: View {
                     }
                 } label: {
                     Text(period.displayName)
-                        .font(.system(size: 12, weight: isSelected ? .semibold : .regular))
-                        .foregroundStyle(isSelected ? Theme.accent : Theme.textSecondary)
-                        .padding(.horizontal, 14)
-                        .padding(.vertical, 6)
-                        .contentShape(Capsule())
-                        .background(
-                            Capsule()
-                                .fill(isSelected ? Theme.selectedSurface : Color.clear)
-                        )
+                        .font(.system(size: 12, weight: isSelected ? .medium : .regular))
+                        .foregroundStyle(isSelected ? Theme.textPrimary : Theme.textMuted)
                 }
                 .buttonStyle(.plain)
             }
         }
-        .padding(4)
-        .modifier(TimePeriodPickerGlassModifier())
     }
 
     // MARK: - Total Time Header
@@ -194,27 +171,4 @@ struct ProjectsView: View {
     }
 }
 
-// MARK: - Time Period Picker Glass Modifier
-
-private struct TimePeriodPickerGlassModifier: ViewModifier {
-    func body(content: Content) -> some View {
-        if #available(macOS 26, *) {
-            content
-                .background(
-                    Capsule()
-                        .fill(Theme.primaryBackground.opacity(0.55))
-                )
-                .compositingGroup()
-                .glassEffect(.regular, in: .capsule)
-        } else {
-            content
-                .background(.ultraThinMaterial)
-                .clipShape(Capsule())
-                .overlay(
-                    Capsule()
-                        .strokeBorder(Theme.cardBorder, lineWidth: 0.5)
-                )
-        }
-    }
-}
 

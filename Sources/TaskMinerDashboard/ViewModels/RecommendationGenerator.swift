@@ -70,8 +70,10 @@ final class RecommendationGenerator: Sendable {
         let systemInstruction = """
         You are a helpful assistant generating conversation starters based on a user's recent work. \
         Generate 4-5 short prompts (max 8 words each) that the user might want to ask about their work. \
-        Mix questions ("Best approach for X?") and action requests ("Help me debug Y", "Explain Z"). \
-        At least one should be exploratory or interest-driven. \
+        Mix question-style and action-style prompts: \
+        - Question-style end with "?": "Best approach for X?" \
+        - Action-style have NO punctuation: "Help me debug Y", "Explain how Z works" \
+        At least 2 should be action-style (no question mark). At least one should be exploratory. \
         Respond with a JSON object: { "questions": ["...", "...", ...] }
         """
 
@@ -172,11 +174,11 @@ final class RecommendationGenerator: Sendable {
            the UI already displays a greeting header. Just jump straight into the context \
            (e.g. "You've been deep into the permission system this week..." not "Hey Sam, you've been..."). \
         2. suggested_questions: 3-4 SHORT prompts (max 6-8 words each) the user might send about their \
-           CURRENT work, interests, or areas of curiosity. These can be questions OR action requests. \
-           Mix it up — include both question-style ("Best WAL checkpoint strategy?") and ask-style \
-           ("Help me optimize the SQLite queries", "Explain the TCC permission model"). \
-           At least one should be exploratory or interest-driven. Keep them punchy and concise. \
-           Reference their actual projects, technologies, and interests but stay brief. \
+           CURRENT work, interests, or areas of curiosity. Mix question-style and action-style: \
+           - Question-style end with "?": "Best WAL checkpoint strategy?" \
+           - Action-style have NO punctuation: "Help me optimize the SQLite queries", "Explain TCC permissions" \
+           At least 2 should be action-style (no question mark). At least one should be exploratory. \
+           Keep them punchy and concise. Reference their actual projects, technologies, and interests. \
         3. recommendations: Generate 6-8 candidate recommendations (see categories below). \
            These will be refined in a second pass, so include a mix of categories and depths. \
         \
@@ -353,6 +355,10 @@ final class RecommendationGenerator: Sendable {
         ocrDigest: String? = nil,
         dateLabel: String
     ) async throws -> StubsContent {
+        let projectNamesList = projectActivities.map(\.name)
+        let projectNamesFormatted = projectNamesList.map { "  - \($0)" }.joined(separator: "\n")
+        Logger.info("generateDaySummary: \(dateLabel) with \(projectActivities.count) projects: \(projectNamesList.joined(separator: ", "))")
+
         let prompt = buildPrompt(
             recentTasks: recentTasks,
             projectActivities: projectActivities,
@@ -366,20 +372,40 @@ final class RecommendationGenerator: Sendable {
         let systemInstruction = """
         You are a knowledgeable assistant embedded in a desktop activity tracker called Stubble. \
         You know this user — their role, projects, and goals are in the User Profile section. \
-        The user is reviewing a past day (\(dateLabel)). Provide a quick, casual recap. \
+        The user is reviewing a past day (\(dateLabel)). Provide a comprehensive professional summary. \
+        \
+        ALLOWED PROJECT NAMES (use ONLY these exact names): \
+        \(projectNamesFormatted) \
         \
         Your output has two parts: \
         1. greeting_context: Leave this empty or null — not used for past days. \
-        2. day_summary: A SHORT, CASUAL 1-2 sentence recap — like telling a friend what you got up to. \
-           Use first person ("Spent most of the day on...", "Mainly focused on..."). \
-           Mention the main project/activity and maybe one other thing. Keep it breezy and conversational. \
-           Example: "Spent most of the day deep in **Stubble** — performance fixes and UI polish. Also caught up on emails." \
+        2. day_summary: A professional narrative recap across 2-3 paragraphs covering EVERY project listed above. \
+           Write in THIRD PERSON (e.g., "The day focused on...", "Work continued on...", "Time was also spent on..."). \
+           Each project MUST be referenced using {{project:ExactName}} format — no exceptions. \
+           \
+           CRITICAL RULES FOR PROJECT NAMES: \
+           - You MUST use the EXACT project names from the ALLOWED list above \
+           - DO NOT invent, abbreviate, or modify project names \
+           - DO NOT use generic names like "Other", "Personal Management", "Website Development" \
+           - If unsure, copy-paste the exact name from the ALLOWED list \
+           \
+           Structure: \
+           - Paragraph 1: Primary focus and main accomplishments \
+           - Paragraph 2: Secondary projects and additional work \
+           - Paragraph 3 (if needed): Remaining projects and activities \
+           \
+           Example (assuming allowed projects are "App Development", "Research", "Media"): \
+           "The primary focus was {{project:App Development}}, with significant progress on UI improvements.\\n\\n\
+           Additional work included {{project:Research}} with competitive analysis and planning.\\n\\n\
+           The day also included {{project:Media}} for content consumption and learning." \
         \
         Rules: \
-        - Maximum 2 sentences, ideally just 1 \
-        - First person, casual tone (not formal or corporate) \
-        - Use **bold** for the main project name \
-        - Don't list everything — just the highlights \
+        - MANDATORY: Use ONLY project names from the ALLOWED list above \
+        - Copy the exact project name character-for-character \
+        - Write 2-3 paragraphs (use \\n\\n between paragraphs) \
+        - Third person, professional tone \
+        - DO NOT use markdown bold (**text**) — only use {{project:Name}} markers \
+        - Add context about what was accomplished, not just project names \
         \
         Respond with a JSON object. Do not include any text outside the JSON. \
         \
@@ -398,7 +424,12 @@ final class RecommendationGenerator: Sendable {
                 throw error
             }
 
+            Logger.info("RecommendationGenerator: day summary raw response: \(response.prefix(500))")
+
             let content = parseDaySummaryResponse(response)
+            if let summary = content.daySummary {
+                Logger.info("RecommendationGenerator: parsed day summary: \(summary.prefix(300))")
+            }
             if content.daySummary != nil || attempt == 1 {
                 return content
             }
@@ -571,9 +602,9 @@ final class RecommendationGenerator: Sendable {
         {
           "greeting_context": "Deep into the Stubble permission system and SQLite layer this week — here are some things that might help.",
           "suggested_questions": [
-            "Handle TCC after rebuild?",
+            "Best TCC strategy after rebuild?",
             "Help me optimize the SQLite queries",
-            "Explain the WAL checkpoint strategy"
+            "Explain the WAL checkpoint logic"
           ],
           "recommendations": [
             {
@@ -589,7 +620,7 @@ final class RecommendationGenerator: Sendable {
 
         Top-level fields:
         - greeting_context: 1-2 warm, personal sentences (NO greeting/name — UI shows that) that reference the user's CURRENT projects by name
-        - suggested_questions: 3-4 SHORT prompts (max 6-8 words each) tied to their CURRENT work. Mix questions ("Best approach for X?") and action requests ("Help me debug Y", "Explain Z"). At least one should be exploratory/interest-driven.
+        - suggested_questions: 3-4 SHORT prompts (max 6-8 words each) tied to their CURRENT work. Mix question-style (ends with "?") and action-style (NO punctuation, e.g. "Help me debug Y", "Explain how Z works"). At least 2 should be action-style. At least one exploratory.
 
         Recommendation fields:
         - category: one of "article", "tool", "best_practice", "workflow", "learning", "exploration"

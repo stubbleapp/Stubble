@@ -16,8 +16,8 @@ struct ChatOverlayView: View {
         return [
             "Describe my day",
             "What did I work on?",
-            "How much time on each project?",
-            "What apps did I use most?",
+            "Summarize my projects",
+            "Show time by app",
             "Any tips for tomorrow?"
         ]
     }
