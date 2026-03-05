@@ -175,7 +175,9 @@ struct ChatTabView: View {
             VStack(spacing: 6) {
                 ForEach(viewModel.chatThreads.prefix(5)) { thread in
                     Button {
-                        viewModel.switchToThread(thread.id)
+                        // Start a fresh chat instead of switching to existing thread
+                        viewModel.activeThreadId = nil
+                        viewModel.chatMessages = []
                         viewModel.shouldExpandChatPanel = true
                     } label: {
                         HStack(spacing: 10) {
@@ -194,9 +196,12 @@ struct ChatTabView: View {
                         }
                         .padding(.horizontal, 12)
                         .padding(.vertical, 8)
-                        .background(Color.white)
+                        .background(Theme.cardBackground)
                         .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
-                        .shadow(color: Color.black.opacity(0.06), radius: 2, x: 0, y: 1)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                .strokeBorder(Theme.cardBorder, lineWidth: 0.5)
+                        )
                     }
                     .buttonStyle(.plain)
                 }
@@ -315,9 +320,12 @@ struct ChatTabView: View {
                     }
                     .padding(.horizontal, 12)
                     .padding(.vertical, 8)
-                    .background(Color.white)
+                    .background(Theme.cardBackground)
                     .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
-                    .shadow(color: Color.black.opacity(0.06), radius: 2, x: 0, y: 1)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 8, style: .continuous)
+                            .strokeBorder(Theme.cardBorder, lineWidth: 0.5)
+                    )
                 }
             }
             .padding(.horizontal, 24)
@@ -387,8 +395,11 @@ private struct SkeletonRecommendationCard: View {
         }
         .padding(14)
         .frame(width: 200, height: 160)
-        .background(Color.white)
+        .background(Theme.cardBackground)
         .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-        .shadow(color: Color.black.opacity(0.08), radius: 4, x: 0, y: 2)
+        .overlay(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .strokeBorder(Theme.cardBorder, lineWidth: 0.5)
+        )
     }
 }

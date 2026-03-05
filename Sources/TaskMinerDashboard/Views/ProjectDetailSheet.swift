@@ -117,7 +117,12 @@ struct ProjectDetailSheet: View {
         }
         .padding(14)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .modifier(LiquidGlassCardModifier())
+        .background(Theme.cardBackground)
+        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .strokeBorder(Theme.cardBorder, lineWidth: 0.5)
+        )
     }
 
     // MARK: - Metrics Section
@@ -169,7 +174,12 @@ struct ProjectDetailSheet: View {
         }
         .padding(14)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .modifier(LiquidGlassCardModifier())
+        .background(Theme.cardBackground)
+        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .strokeBorder(Theme.cardBorder, lineWidth: 0.5)
+        )
     }
 
     private var weekdayChart: some View {
@@ -274,7 +284,12 @@ struct ProjectDetailSheet: View {
         }
         .padding(14)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .modifier(LiquidGlassCardModifier())
+        .background(Theme.cardBackground)
+        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .strokeBorder(Theme.cardBorder, lineWidth: 0.5)
+        )
     }
 
     // MARK: - Recommendations Section
@@ -352,7 +367,12 @@ struct ProjectDetailSheet: View {
         }
         .padding(14)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .modifier(LiquidGlassCardModifier())
+        .background(Theme.cardBackground)
+        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .strokeBorder(Theme.cardBorder, lineWidth: 0.5)
+        )
     }
 
     // MARK: - Helpers
