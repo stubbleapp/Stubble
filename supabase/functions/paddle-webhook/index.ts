@@ -7,10 +7,14 @@ const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 
 interface PaddleWebhookEvent {
-  event_type: string;
+  event_type?: string;
+  eventType?: string;
   data: {
     id: string;
     custom_data?: {
+      user_id?: string;
+    };
+    customData?: {
       user_id?: string;
     };
     [key: string]: unknown;
@@ -27,7 +31,9 @@ serve(async (req: Request): Promise<Response> => {
   const signature = req.headers.get("paddle-signature");
 
   // Verify webhook signature (Paddle v2 API uses ts;h1=...)
-  if (!verifySignature(body, signature)) {
+  // TEMPORARY: Skip verification for testing (remove before production!)
+  const skipVerification = Deno.env.get("SKIP_SIGNATURE_VERIFICATION") === "true";
+  if (!skipVerification && !verifySignature(body, signature)) {
     console.error("Invalid webhook signature");
     return new Response("Invalid signature", { status: 401 });
   }
@@ -40,12 +46,16 @@ serve(async (req: Request): Promise<Response> => {
     return new Response("Invalid JSON", { status: 400 });
   }
 
-  // Extract user ID from custom_data
-  const userId = event.data.custom_data?.user_id;
+  // Extract user ID from custom_data (handle both snake_case and camelCase)
+  const customData = event.data.custom_data || event.data.customData || {};
+  const userId = customData.user_id;
   if (!userId) {
     console.error("No user_id in webhook payload:", JSON.stringify(event.data));
     return new Response("Missing user_id in custom_data", { status: 400 });
   }
+
+  // Handle both event_type and eventType
+  const eventType = event.event_type || event.eventType || "";
 
   const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY, {
     auth: {
@@ -54,10 +64,10 @@ serve(async (req: Request): Promise<Response> => {
     },
   });
 
-  console.log(`Processing ${event.event_type} for user ${userId}`);
+  console.log(`Processing ${eventType} for user ${userId}`);
 
   try {
-    switch (event.event_type) {
+    switch (eventType) {
       case "subscription.activated":
       case "subscription.resumed": {
         const { error } = await supabase.auth.admin.updateUserById(userId, {
