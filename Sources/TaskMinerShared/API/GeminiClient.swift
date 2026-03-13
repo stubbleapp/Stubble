@@ -257,7 +257,12 @@ public final class GeminiClient: Sendable {
                               let firstCandidate = candidates.first,
                               let content = firstCandidate["content"] as? [String: Any],
                               let parts = content["parts"] as? [[String: Any]]
-                        else { continue }
+                        else {
+                            // Log malformed SSE chunks for debugging (may indicate API changes or network issues)
+                            let preview = jsonStr.prefix(100)
+                            Logger.warning("GeminiClient: skipped malformed SSE chunk: \(preview)...")
+                            continue
+                        }
 
                         // Yield only non-thought text parts
                         for part in parts {

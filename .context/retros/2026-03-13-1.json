@@ -1,0 +1,35 @@
+{
+  "date": "2026-03-13",
+  "window": "7d",
+  "metrics": {
+    "commits": 2,
+    "contributors": 1,
+    "prs_merged": 0,
+    "insertions": 1011,
+    "deletions": 492,
+    "net_loc": 519,
+    "test_loc": 0,
+    "test_ratio": 0.0,
+    "active_days": 1,
+    "sessions": 1,
+    "deep_sessions": 0,
+    "avg_session_minutes": 0,
+    "loc_per_session_hour": 519,
+    "feat_pct": 0.0,
+    "fix_pct": 0.0,
+    "peak_hour": 5,
+    "ai_assisted_commits": 0
+  },
+  "authors": {
+    "samattias": {
+      "commits": 2,
+      "insertions": 1011,
+      "deletions": 492,
+      "test_ratio": 0.0,
+      "top_area": "Sources/TaskMinerDashboard/"
+    }
+  },
+  "version_range": ["v1.0-beta", "v1.0-beta"],
+  "streak_days": 1,
+  "tweetable": "Week of Mar 6: 2 commits, +1k/-0.5k LOC, 0% tests, 1 active day, peak: 5am PT | Streak: 1d"
+}
