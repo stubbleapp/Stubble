@@ -110,6 +110,9 @@ struct ChatOverlayView: View {
         }
         .onChange(of: viewModel.pendingChatQuestion) { _, question in
             guard let question, !question.isEmpty else { return }
+            // Always start a new chat when triggered from external sources (e.g. recommendation cards)
+            viewModel.activeThreadId = nil
+            viewModel.chatMessages = []
             inputText = question
             viewModel.pendingChatQuestion = nil
             sendMessage()
@@ -364,6 +367,9 @@ struct ChatOverlayView: View {
                     } else {
                         ForEach(activeSuggestions, id: \.self) { suggestion in
                             Button {
+                                // Always start a new chat when clicking a suggestion
+                                viewModel.activeThreadId = nil
+                                viewModel.chatMessages = []
                                 inputText = suggestion
                                 sendMessage()
                             } label: {

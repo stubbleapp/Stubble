@@ -7,8 +7,28 @@ import TaskMinerShared
 final class RecommendationGenerator: Sendable {
     private let geminiClient: GeminiClient
 
+    // MARK: - Prompt Size Limits (to avoid exceeding model token limits)
+
+    /// Maximum characters for the entire prompt (conservative estimate: ~4 chars per token, 30k token limit)
+    private static let maxPromptChars = 100_000
+    /// Maximum characters for OCR digest section
+    private static let maxOCRDigestChars = 8_000
+    /// Maximum characters for activity log section
+    private static let maxActivityLogChars = 12_000
+    /// Maximum characters for weekly trends section
+    private static let maxWeeklyTrendsChars = 4_000
+    /// Maximum characters per task description
+    private static let maxTaskDescriptionChars = 300
+
     init(geminiClient: GeminiClient) {
         self.geminiClient = geminiClient
+    }
+
+    /// Truncates a string to a maximum character count, appending "..." if truncated.
+    private static func truncate(_ string: String?, maxChars: Int) -> String? {
+        guard let string, !string.isEmpty else { return string }
+        if string.count <= maxChars { return string }
+        return String(string.prefix(maxChars - 3)) + "..."
     }
 
     // MARK: - Public API
@@ -22,7 +42,8 @@ final class RecommendationGenerator: Sendable {
         memoryContext: String?,
         activityLog: String? = nil,
         weeklyTrends: String? = nil,
-        ocrDigest: String? = nil
+        ocrDigest: String? = nil,
+        recentMeetings: [GranolaMeetingRecord] = []
     ) async throws -> StubsContent {
         // Stage 1: Generate candidate recommendations (6-8 items)
         let candidateContent = try await generateCandidates(
@@ -32,7 +53,8 @@ final class RecommendationGenerator: Sendable {
             memoryContext: memoryContext,
             activityLog: activityLog,
             weeklyTrends: weeklyTrends,
-            ocrDigest: ocrDigest
+            ocrDigest: ocrDigest,
+            recentMeetings: recentMeetings
         )
 
         // If we got few recommendations, skip refinement
@@ -44,7 +66,9 @@ final class RecommendationGenerator: Sendable {
         let refinedRecs = try await refineRecommendations(
             candidates: candidateContent.recommendations,
             memoryContext: memoryContext,
-            primaryFocus: extractPrimaryFocus(from: recentTasks, projectActivities: projectActivities)
+            primaryFocus: extractPrimaryFocus(from: recentTasks, projectActivities: projectActivities),
+            weeklyTrends: weeklyTrends,
+            recentMeetings: recentMeetings
         )
 
         return StubsContent(
@@ -144,7 +168,8 @@ final class RecommendationGenerator: Sendable {
         memoryContext: String?,
         activityLog: String?,
         weeklyTrends: String?,
-        ocrDigest: String?
+        ocrDigest: String?,
+        recentMeetings: [GranolaMeetingRecord]
     ) async throws -> StubsContent {
         let prompt = buildPrompt(
             recentTasks: recentTasks,
@@ -153,7 +178,8 @@ final class RecommendationGenerator: Sendable {
             memoryContext: memoryContext,
             activityLog: activityLog,
             weeklyTrends: weeklyTrends,
-            ocrDigest: ocrDigest
+            ocrDigest: ocrDigest,
+            recentMeetings: recentMeetings
         )
 
         let systemInstruction = """
@@ -201,10 +227,9 @@ final class RecommendationGenerator: Sendable {
           what files they're editing — then recommend resources that go deeper on those specific topics. \
         - Every recommendation's "reason" must cite specific projects, tasks, or patterns from the data. \
         - Never recommend tools/apps the user already uses heavily. \
-        - URLs: ONLY use homepage or landing page URLs that you are CERTAIN exist. Examples: \
-          "https://developer.apple.com/documentation/security" (not deep subpages), \
-          "https://www.sqlite.org/wal.html", "https://github.com/user/repo" (real repos only). \
-          If you're not 100% certain a URL exists, use null instead. Better no link than a 404. \
+        - URLs: You have access to Google Search. Use it to find REAL, current URLs for your recommendations. \
+          Search for the specific tool, article, or resource and include the actual URL from search results. \
+          This ensures links are valid and up-to-date. If search doesn't return a relevant result, use null. \
         - Avoid generic advice ("take breaks", "use version control", "back up your data"). \
         \
         Respond with a JSON object. Do not include any text outside the JSON.
@@ -212,11 +237,19 @@ final class RecommendationGenerator: Sendable {
 
         // Attempt up to 2 times — retry once if JSON parsing fails
         for attempt in 0..<2 {
+            // Check for cancellation between retry attempts
+            try Task.checkCancellation()
+
             let response: String
             do {
+                // Enable Google Search grounding for real, up-to-date URLs
+                // Format: [{"google_search": {}}] - snake_case for REST API
+                // Note: JSON mode is auto-disabled when tools are provided (incompatible)
+                let searchTools: [[String: Any]] = [["google_search": [:] as [String: Any]]]
                 response = try await geminiClient.generateContent(
                     prompt: prompt,
-                    systemInstruction: systemInstruction
+                    systemInstruction: systemInstruction,
+                    tools: searchTools
                 )
             } catch {
                 throw error
@@ -234,10 +267,13 @@ final class RecommendationGenerator: Sendable {
     }
 
     /// Stage 2: Refine candidates by scoring for relevance and filtering to top 3-4.
+    /// Enhanced with activity signals for context-aware scoring.
     private func refineRecommendations(
         candidates: [Recommendation],
         memoryContext: String?,
-        primaryFocus: String
+        primaryFocus: String,
+        weeklyTrends: String? = nil,
+        recentMeetings: [GranolaMeetingRecord] = []
     ) async throws -> [Recommendation] {
         // Build a compact representation of candidates for the refinement prompt
         var candidateLines: [String] = []
@@ -249,12 +285,25 @@ final class RecommendationGenerator: Sendable {
             """)
         }
 
+        // Build activity signals section for context-aware scoring
+        var activitySignals: [String] = []
+        if let trends = weeklyTrends, !trends.isEmpty {
+            activitySignals.append("Weekly patterns: \(trends)")
+        }
+        if !recentMeetings.isEmpty {
+            let meetingTitles = recentMeetings.prefix(3).map(\.title).joined(separator: ", ")
+            activitySignals.append("Recent meetings: \(meetingTitles)")
+        }
+
         let refinementPrompt = """
         ## User Context
         \(memoryContext ?? "No profile available")
 
         ## Current Primary Focus
         \(primaryFocus)
+
+        ## Activity Signals
+        \(activitySignals.isEmpty ? "No additional signals" : activitySignals.joined(separator: "\n"))
 
         ## Candidate Recommendations
         \(candidateLines.joined(separator: "\n\n"))
@@ -264,6 +313,12 @@ final class RecommendationGenerator: Sendable {
         1. RELEVANCE: Does this directly help with their PRIMARY focus (not tangential projects)?
         2. ACTIONABILITY: Can they use this TODAY, not someday?
         3. NOVELTY: Is this something they likely DON'T already know?
+
+        Context-aware scoring adjustments:
+        - If weekly patterns show "Deep focus day": deprioritize notification/interruption tools
+        - If file activity shows lots of "created": prioritize scaffolding/generation tools
+        - If tech stack shows specific languages: match recommendations to those technologies
+        - If recent meetings exist: consider action items or follow-ups from those discussions
 
         Select the TOP 3-4 recommendations that score highest overall (minimum 3 on relevance).
         Return ONLY the indices of the selected recommendations, in order of relevance.
@@ -449,7 +504,8 @@ final class RecommendationGenerator: Sendable {
         memoryContext: String?,
         activityLog: String?,
         weeklyTrends: String? = nil,
-        ocrDigest: String? = nil
+        ocrDigest: String? = nil,
+        recentMeetings: [GranolaMeetingRecord] = []
     ) -> String {
         var lines: [String] = []
 
@@ -462,7 +518,7 @@ final class RecommendationGenerator: Sendable {
         }
 
         // 2. OCR-derived screen content — high-signal data about what was actually on screen
-        if let digest = ocrDigest, !digest.isEmpty {
+        if let digest = Self.truncate(ocrDigest, maxChars: Self.maxOCRDigestChars), !digest.isEmpty {
             lines.append("## Screen Content Analysis (extracted from screenshots)")
             lines.append("This is what was actually visible on screen — URLs visited, code being written, documents open, communications. Use this to understand what topics and resources the user is actively engaging with:")
             lines.append(digest)
@@ -470,9 +526,29 @@ final class RecommendationGenerator: Sendable {
         }
 
         // 3. Weekly trends — cross-day patterns
-        if let trends = weeklyTrends, !trends.isEmpty {
+        if let trends = Self.truncate(weeklyTrends, maxChars: Self.maxWeeklyTrendsChars), !trends.isEmpty {
             lines.append("## Weekly Patterns")
             lines.append(trends)
+            lines.append("")
+        }
+
+        // 3.5. Recent meetings from Granola (Phase 2.1)
+        if !recentMeetings.isEmpty {
+            lines.append("## Recent Meetings")
+            lines.append("These are meetings from the past few days. Use this context to recommend follow-up resources, tools related to discussed topics, or action item support:")
+            for meeting in recentMeetings.prefix(5) {
+                let timeStr = SharedFormatters.timeFormatter.string(from: meeting.startTime)
+                let attendeeStr = meeting.attendeeCount > 0 ? " (\(meeting.attendeeCount) attendees)" : ""
+                lines.append("### \(meeting.title)\(attendeeStr)")
+                lines.append("- Date: \(meeting.meetingDate) at \(timeStr), Duration: \(meeting.formattedDuration)")
+                if let summary = meeting.summary, !summary.isEmpty {
+                    let truncated = summary.count > 200 ? String(summary.prefix(200)) + "..." : summary
+                    lines.append("- Summary: \(truncated)")
+                }
+                if let notes = meeting.notesForPrompt(maxChars: 300) {
+                    lines.append("- Notes excerpt: \(notes)")
+                }
+            }
             lines.append("")
         }
 
@@ -516,7 +592,9 @@ final class RecommendationGenerator: Sendable {
                     let apps = task.appNamesList.joined(separator: ", ")
                     lines.append("- \"\(task.title)\" (\(durMins)m) — \(apps)")
                     if !task.description.isEmpty {
-                        lines.append("  \(task.description)")
+                        // Truncate long task descriptions to avoid prompt bloat
+                        let desc = Self.truncate(task.description, maxChars: Self.maxTaskDescriptionChars) ?? ""
+                        lines.append("  \(desc)")
                     }
                     let links = task.linksList.map(\.value)
                     if !links.isEmpty {
@@ -589,7 +667,7 @@ final class RecommendationGenerator: Sendable {
         }
 
         // 7. Detailed activity log — window titles, browser URLs, and document paths
-        if let log = activityLog, !log.isEmpty {
+        if let log = Self.truncate(activityLog, maxChars: Self.maxActivityLogChars), !log.isEmpty {
             lines.append("## Today's Detailed Activity (window titles, URLs visited, files opened)")
             lines.append(log)
             lines.append("")

@@ -109,7 +109,18 @@ public final class GeminiClient: Sendable {
     // MARK: - Public API (unchanged signatures — zero consumer changes needed)
 
     /// Send a text prompt to Gemini and return the response text.
-    public func generateContent(prompt: String, systemInstruction: String? = nil) async throws -> String {
+    /// - Parameters:
+    ///   - prompt: The user prompt
+    ///   - systemInstruction: Optional system instruction
+    ///   - tools: Optional tools array (e.g., `[["google_search": [:]]]` for search grounding)
+    ///
+    /// Note: When tools are provided, JSON response mode is disabled (they're incompatible).
+    /// The response will be plain text that should contain JSON.
+    public func generateContent(
+        prompt: String,
+        systemInstruction: String? = nil,
+        tools: [[String: Any]]? = nil
+    ) async throws -> String {
         let contents: [[String: Any]] = [
             [
                 "role": "user",
@@ -117,17 +128,23 @@ public final class GeminiClient: Sendable {
             ]
         ]
 
-        let generationConfig: [String: Any] = [
+        // Search grounding is incompatible with JSON response mode
+        // When tools are provided, use text mode and rely on prompt to get JSON
+        var generationConfig: [String: Any] = [
             "temperature": 0.3,
             "maxOutputTokens": 65536,
-            "responseMimeType": "application/json",
             "thinkingConfig": ["thinkingBudget": 0]
         ]
+
+        if tools == nil {
+            generationConfig["responseMimeType"] = "application/json"
+        }
 
         return try await sendRequest(
             contents: contents,
             systemInstruction: systemInstruction,
-            generationConfig: generationConfig
+            generationConfig: generationConfig,
+            tools: tools
         )
     }
 
@@ -297,7 +314,8 @@ public final class GeminiClient: Sendable {
     private func sendRequest(
         contents: [[String: Any]],
         systemInstruction: String?,
-        generationConfig: [String: Any]
+        generationConfig: [String: Any],
+        tools: [[String: Any]]? = nil
     ) async throws -> String {
         var components = URLComponents(string: baseURL)
         components?.path += "/\(model):generateContent"
@@ -316,6 +334,11 @@ public final class GeminiClient: Sendable {
         }
 
         body["generationConfig"] = generationConfig
+
+        // Add tools (e.g., google_search for grounding)
+        if let tools {
+            body["tools"] = tools
+        }
 
         let jsonData = try JSONSerialization.data(withJSONObject: body)
 

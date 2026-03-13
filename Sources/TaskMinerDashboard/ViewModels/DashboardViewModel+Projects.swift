@@ -20,6 +20,9 @@ extension DashboardViewModel {
         let aggregator = ProjectsDataAggregator(dbReader: db)
         aggregatedProjects = aggregator.aggregate(period: projectsTimePeriod)
 
+        // Resolve colors for all aggregated projects (collision-free)
+        resolveAggregatedProjectColors()
+
         // Synthesize summaries for multi-day periods in background
         if projectsTimePeriod != .day && hasGeminiKey {
             Task {

@@ -18,17 +18,26 @@ public enum OCRDigestBuilder {
 
         /// Format the digest as a prompt-friendly string (~2-3k chars).
         /// Returns nil if the digest is empty.
+        /// Sections are ordered by signal priority for AI attention:
+        /// 1. Terminal commands (highest signal for workflow state)
+        /// 2. Code symbols (what they're actively working on)
+        /// 3. Files/paths
+        /// 4. Documents/pages
+        /// 5. Communications
+        /// 6. URLs (often just reference browsing)
         public func asPromptSection() -> String? {
             var sections: [String] = []
 
-            if !urls.isEmpty {
-                sections.append("URLs visited: \(urls.joined(separator: ", "))")
+            // Highest signal first: terminal commands reveal workflow state
+            if !commands.isEmpty {
+                sections.append("Terminal commands: \(commands.joined(separator: " | "))")
+            }
+            // Code symbols show what they're actively working on
+            if !codeSymbols.isEmpty {
+                sections.append("Code symbols: \(codeSymbols.joined(separator: ", "))")
             }
             if !filePaths.isEmpty {
                 sections.append("Files/paths: \(filePaths.joined(separator: ", "))")
-            }
-            if !codeSymbols.isEmpty {
-                sections.append("Code symbols: \(codeSymbols.joined(separator: ", "))")
             }
             if !docTitles.isEmpty {
                 sections.append("Documents/pages: \(docTitles.joined(separator: " | "))")
@@ -36,8 +45,9 @@ public enum OCRDigestBuilder {
             if !communications.isEmpty {
                 sections.append("Communications: \(communications.joined(separator: ", "))")
             }
-            if !commands.isEmpty {
-                sections.append("Terminal commands: \(commands.joined(separator: " | "))")
+            // URLs last — often just reference browsing
+            if !urls.isEmpty {
+                sections.append("URLs visited: \(urls.joined(separator: ", "))")
             }
 
             guard !sections.isEmpty else { return nil }

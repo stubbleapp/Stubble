@@ -88,13 +88,6 @@ struct ActivitiesView: View {
                     .padding(.top, 4)
                 }
                 Spacer()
-            } else if viewModel.isGeneratingSummary || viewModel.isGeneratingActivities {
-                // Loading
-                Spacer()
-                VStack(spacing: 10) {
-                    ProgressView()
-                }
-                Spacer()
             } else if !viewModel.projectActivities.isEmpty {
                 // Project activity cards
                 ScrollView {

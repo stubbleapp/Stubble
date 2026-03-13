@@ -104,4 +104,55 @@ extension DashboardViewModel {
         let records = db.projectActivities(for: selectedDate)
         projectActivities = records.map { ProjectActivity(from: $0) }
     }
+
+    // MARK: - App Duration Sorting
+
+    /// Returns app names for a task sorted by time spent (most used first).
+    func sortedAppNames(for task: TaskRecord) -> [String] {
+        let taskApps = task.appNamesList
+        guard taskApps.count > 1 else { return taskApps }
+
+        // Load activities for this date if not cached
+        let dateStr = task.date
+        if cachedActivitiesDate != dateStr {
+            cachedActivities = dbReader?.activities(for: selectedDate) ?? []
+            cachedActivitiesDate = dateStr
+        }
+
+        // Filter activities to task's time range
+        let taskStart = task.startTime
+        let taskEnd = task.endTime
+        let relevantActivities = cachedActivities.filter { activity in
+            !activity.isIdle &&
+            activity.timestamp >= taskStart &&
+            activity.timestamp < taskEnd &&
+            taskApps.contains(activity.appName)
+        }
+
+        // Sum duration by app
+        var appDurations: [String: TimeInterval] = [:]
+        for activity in relevantActivities {
+            let duration = activity.duration ?? 0
+            appDurations[activity.appName, default: 0] += duration
+        }
+
+        // Sort by duration descending, preserving original order for apps with no data
+        return taskApps.sorted { app1, app2 in
+            let dur1 = appDurations[app1] ?? 0
+            let dur2 = appDurations[app2] ?? 0
+            if dur1 != dur2 {
+                return dur1 > dur2
+            }
+            // Tie-breaker: preserve original order
+            guard let idx1 = taskApps.firstIndex(of: app1),
+                  let idx2 = taskApps.firstIndex(of: app2) else { return false }
+            return idx1 < idx2
+        }
+    }
+
+    /// Clears the cached activities (call when date changes).
+    func clearAppDurationCache() {
+        cachedActivitiesDate = ""
+        cachedActivities = []
+    }
 }

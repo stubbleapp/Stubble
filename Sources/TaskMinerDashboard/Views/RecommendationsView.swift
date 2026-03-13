@@ -16,20 +16,12 @@ struct RecommendationsView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            if viewModel.isGeneratingRecommendations && !hasContent {
-                Spacer()
-                VStack(spacing: 16) {
-                    ProgressView()
-                        .scaleEffect(0.8)
-                    Text("Analyzing your recent activity\u{2026}")
-                        .font(.system(size: 13, weight: .regular))
-                        .foregroundStyle(Theme.textMuted)
-                }
-                Spacer()
-            } else if !hasContent {
+            if !hasContent {
                 Spacer()
                 VStack(spacing: 14) {
-                    Text("Generate stubs to get personalized\ninsights based on your recent work.")
+                    Text(viewModel.isGeneratingRecommendations
+                         ? "Analyzing your recent activity\u{2026}"
+                         : "Generate stubs to get personalized\ninsights based on your recent work.")
                         .font(.system(size: 13))
                         .foregroundStyle(Theme.textMuted)
                         .multilineTextAlignment(.center)
@@ -46,8 +38,8 @@ struct RecommendationsView: View {
                     }
                     .buttonStyle(.plain)
                     .padding(.top, 4)
-                    .disabled(!viewModel.hasGeminiKey)
-                    .opacity(viewModel.hasGeminiKey ? 1 : 0.4)
+                    .disabled(!viewModel.hasGeminiKey || viewModel.isGeneratingRecommendations)
+                    .opacity(viewModel.hasGeminiKey && !viewModel.isGeneratingRecommendations ? 1 : 0.4)
 
                     if !viewModel.hasGeminiKey {
                         Text("Requires a Gemini API key")
@@ -157,7 +149,7 @@ struct RecommendationsView: View {
         )
     }
 
-    // MARK: - Recommendation Cards (horizontal scroll)
+    // MARK: - Recommendation List
 
     private var recommendationCardsSection: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -166,17 +158,14 @@ struct RecommendationsView: View {
                 .foregroundStyle(Theme.textPrimary)
                 .padding(.horizontal, 24)
 
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 12) {
-                    ForEach(viewModel.recommendations) { tip in
-                        RecommendationCard(tip: tip, onDismiss: {
-                            viewModel.dismissRecommendation(id: tip.id)
-                        })
-                    }
+            VStack(spacing: 8) {
+                ForEach(viewModel.recommendations) { tip in
+                    RecommendationRow(tip: tip, onDismiss: {
+                        viewModel.dismissRecommendation(id: tip.id)
+                    })
                 }
-                .padding(.horizontal, 24)
             }
-            .scrollClipDisabled(true)
+            .padding(.horizontal, 24)
         }
     }
 
@@ -262,70 +251,97 @@ struct ProjectRow: View {
     }
 }
 
-// MARK: - Recommendation Card (horizontal scroll item)
+// MARK: - Recommendation Row (list item)
 
-struct RecommendationCard: View {
+struct RecommendationRow: View {
     let tip: Recommendation
     let onDismiss: () -> Void
     @State private var isHovering = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 6) {
-                Image(systemName: tip.iconName)
-                    .font(.system(size: 11, weight: .medium))
-                    .foregroundStyle(Theme.accent)
+        HStack(alignment: .top, spacing: 12) {
+            // Icon
+            Image(systemName: tip.iconName)
+                .font(.system(size: 14, weight: .medium))
+                .foregroundStyle(Theme.accent)
+                .frame(width: 28, height: 28)
+                .background(Theme.accent.opacity(0.1))
+                .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
 
+            // Content
+            VStack(alignment: .leading, spacing: 4) {
+                // Category label
                 Text(tip.category.displayName.uppercased())
-                    .font(.system(size: 10, weight: .semibold))
+                    .font(.system(size: 9, weight: .semibold))
                     .foregroundStyle(Theme.textMuted)
                     .tracking(0.5)
 
-                Spacer()
+                // Title
+                Text(tip.title)
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(Theme.textPrimary)
+                    .lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
 
-                if isHovering {
-                    Button(action: onDismiss) {
-                        Image(systemName: "xmark")
-                            .font(.system(size: 9, weight: .medium))
-                            .foregroundStyle(Theme.textMuted.opacity(0.6))
+                // Description
+                Text(tip.description)
+                    .font(.system(size: 12))
+                    .foregroundStyle(Theme.textSecondary)
+                    .lineLimit(3)
+                    .lineSpacing(1)
+
+                // Reason
+                if !tip.reason.isEmpty {
+                    HStack(spacing: 4) {
+                        Image(systemName: "lightbulb.fill")
+                            .font(.system(size: 9))
+                            .foregroundStyle(Theme.accent.opacity(0.7))
+                        Text(tip.reason)
+                            .font(.system(size: 11))
+                            .foregroundStyle(Theme.textMuted)
+                            .lineLimit(2)
+                    }
+                    .padding(.top, 2)
+                }
+
+                // Action button
+                if let urlStr = tip.actionURL, let url = URL(string: urlStr) {
+                    Button {
+                        NSWorkspace.shared.open(url)
+                    } label: {
+                        HStack(spacing: 3) {
+                            Text(tip.actionLabel)
+                                .font(.system(size: 11, weight: .medium))
+                            Image(systemName: "arrow.up.right")
+                                .font(.system(size: 8, weight: .semibold))
+                        }
+                        .foregroundStyle(Theme.accent)
                     }
                     .buttonStyle(.plain)
-                    .transition(.opacity)
+                    .padding(.top, 4)
                 }
             }
-
-            Text(tip.title)
-                .font(.system(size: 13, weight: .semibold))
-                .foregroundStyle(Theme.textPrimary)
-                .lineLimit(2)
-                .fixedSize(horizontal: false, vertical: true)
-
-            Text(tip.description)
-                .font(.system(size: 12))
-                .foregroundStyle(Theme.textSecondary)
-                .lineLimit(3)
-                .lineSpacing(1)
 
             Spacer(minLength: 0)
 
-            if let urlStr = tip.actionURL, let url = URL(string: urlStr) {
-                Button {
-                    NSWorkspace.shared.open(url)
-                } label: {
-                    HStack(spacing: 3) {
-                        Text(tip.actionLabel)
-                            .font(.system(size: 11, weight: .medium))
-                        Image(systemName: "arrow.up.right")
-                            .font(.system(size: 8, weight: .semibold))
-                    }
-                    .foregroundStyle(Theme.accent)
-                }
-                .buttonStyle(.plain)
+            // Dismiss button (always rendered, opacity controlled by hover)
+            Button(action: onDismiss) {
+                Image(systemName: "xmark")
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundStyle(Theme.textMuted.opacity(0.6))
             }
+            .buttonStyle(.plain)
+            .opacity(isHovering ? 1 : 0)
         }
-        .padding(14)
-        .frame(width: 220, height: 170, alignment: .topLeading)
-        .modifier(LiquidGlassCardModifier())
+        .padding(12)
+        .background(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .fill(Theme.cardBackground)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .strokeBorder(Theme.cardBorder, lineWidth: 0.5)
+        )
         .onHover { hovering in
             withAnimation(.easeInOut(duration: 0.15)) {
                 isHovering = hovering

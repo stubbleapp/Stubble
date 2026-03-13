@@ -8,18 +8,7 @@ struct ProjectsView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            if viewModel.isLoadingProjects && viewModel.aggregatedProjects.isEmpty {
-                // Loading state
-                Spacer()
-                VStack(spacing: 16) {
-                    ProgressView()
-                        .scaleEffect(0.8)
-                    Text("Loading projects\u{2026}")
-                        .font(.system(size: 13, weight: .regular))
-                        .foregroundStyle(Theme.textMuted)
-                }
-                Spacer()
-            } else if !viewModel.hasProjectData {
+            if !viewModel.hasProjectData && !viewModel.isLoadingProjects {
                 // Empty state
                 Spacer()
                 emptyState

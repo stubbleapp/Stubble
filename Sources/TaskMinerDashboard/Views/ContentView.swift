@@ -9,9 +9,31 @@ private enum ToolbarLayout {
     static let minTouchTarget: CGFloat = 28
 }
 
+/// Tab identifiers to avoid hardcoded indices drifting out of sync.
+private enum Tab: Int, CaseIterable {
+    case day = 0
+    case forYou = 1
+    case projects = 2
+    case log = 3
+
+    var title: String {
+        switch self {
+        case .day: return "Day"
+        case .forYou: return "For You"
+        case .projects: return "Projects"
+        case .log: return "Log"
+        }
+    }
+
+    /// Visible tabs (excludes debug tabs unless requested).
+    static func visibleTabs(includeDebug: Bool) -> [Tab] {
+        includeDebug ? Tab.allCases : [.day, .forYou, .projects]
+    }
+}
+
 struct ContentView: View {
     @Environment(DashboardViewModel.self) var viewModel
-    @State private var selectedTab = 0
+    @State private var selectedTab: Tab = .day
 
     /// Tracks whether the Option (⌥) key is currently held down.
     @State private var optionKeyHeld = false
@@ -20,16 +42,8 @@ struct ContentView: View {
     /// NSEvent monitor reference so we can remove it on disappear.
     @State private var flagsMonitor: Any?
 
-    private let chatTabIndex = 1
-    private let projectsTabIndex = 2
-    private let logTabIndex = 3
-
     private var tabItems: [String] {
-        var items = ["Day", "Chat", "Projects"]
-        if showDebugTabs {
-            items.append("Log")
-        }
-        return items
+        Tab.visibleTabs(includeDebug: showDebugTabs).map(\.title)
     }
 
     var body: some View {
@@ -47,8 +61,8 @@ struct ContentView: View {
                 .background(Theme.statusError.opacity(0.12))
             }
 
-            // Hide date selector on Chat and Projects (cross-day views)
-            if selectedTab != chatTabIndex && selectedTab != projectsTabIndex {
+            // Hide date selector on For You and Projects (cross-day views)
+            if selectedTab != .forYou && selectedTab != .projects {
                 DaySelectorView()
                     .background(Theme.secondaryBackground)
 
@@ -59,18 +73,18 @@ struct ContentView: View {
 
             ZStack(alignment: .bottom) {
                 switch selectedTab {
-                case 0:
+                case .day:
                     TaskTimelineView()
-                case 1:
+                case .forYou:
                     ChatTabView()
-                case 2:
+                case .projects:
                     ProjectsView()
-                default:
+                case .log:
                     ActivityLogView()
                 }
 
                 // Chat overlay shared across all tabs (except Log)
-                if selectedTab < logTabIndex {
+                if selectedTab != .log {
                     ChatOverlayView()
                 }
             }
@@ -81,16 +95,15 @@ struct ContentView: View {
             ToolbarItem(placement: .principal) {
                 SegmentedPicker(
                     items: tabItems,
-                    selection: $selectedTab
+                    selection: Binding(
+                        get: { Tab.visibleTabs(includeDebug: showDebugTabs).firstIndex(of: selectedTab) ?? 0 },
+                        set: { selectedTab = Tab.visibleTabs(includeDebug: showDebugTabs)[$0] }
+                    )
                 )
                 .frame(maxWidth: 500)
                 .accessibilityIdentifier("content-tab-picker")
             }
 
-            ToolbarItem(placement: .primaryAction) {
-                PauseControlView()
-                    .accessibilityIdentifier("toolbar-pause-control")
-            }
         }
         .onAppear {
             // Monitor Option key press/release to reveal the hidden Log tab
@@ -103,7 +116,7 @@ struct ContentView: View {
                         withAnimation(.easeInOut(duration: 0.15)) {
                             showDebugTabs = true
                         }
-                    } else if selectedTab != logTabIndex {
+                    } else if selectedTab != .log {
                         // Option released while NOT on the debug tab → hide it
                         withAnimation(.easeInOut(duration: 0.15)) {
                             showDebugTabs = false
@@ -121,23 +134,22 @@ struct ContentView: View {
         }
         .onChange(of: selectedTab) { _, newTab in
             // User navigated away from the debug tab → hide it (unless Option still held)
-            if newTab != logTabIndex && !optionKeyHeld {
+            if newTab != .log && !optionKeyHeld {
                 withAnimation(.easeInOut(duration: 0.15)) {
                     showDebugTabs = false
                 }
             }
-            // Chat is day-agnostic — always show today's recommendations
-            if newTab == chatTabIndex && !viewModel.isViewingToday {
+            // For You is day-agnostic — always show today's recommendations
+            if newTab == .forYou && !viewModel.isViewingToday {
                 viewModel.selectDate(Date())
             }
             // Keep ViewModel's currentScreen in sync so chat context knows which tab is active
-            let screenNames = ["Day", "Chat", "Projects", "Log"]
-            viewModel.currentScreen = newTab < screenNames.count ? screenNames[newTab] : "Chat"
+            viewModel.currentScreen = newTab.title
         }
         .onReceive(NotificationCenter.default.publisher(for: .switchToChatTab)) { _ in
-            // Deep link from notification requested switching to Chat tab
+            // Deep link from notification requested switching to For You tab
             withAnimation(.easeInOut(duration: 0.15)) {
-                selectedTab = chatTabIndex
+                selectedTab = .forYou
             }
         }
     }

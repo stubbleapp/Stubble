@@ -1,7 +1,7 @@
 import SwiftUI
 import TaskMinerShared
 
-/// A card displaying an aggregated project with duration, days active, and apps used.
+/// A card displaying an aggregated project with duration and sparkline.
 struct ProjectCard: View {
     let project: AggregatedProject
     let onTap: () -> Void
@@ -13,11 +13,21 @@ struct ProjectCard: View {
         viewModel.projectSummary(for: project)
     }
 
+    /// Comprehensive description built from task titles.
+    private var description: String {
+        // Take up to 3 unique task titles, truncated
+        let uniqueTitles = Array(Set(project.taskTitles)).prefix(3)
+        guard !uniqueTitles.isEmpty else { return "" }
+        return uniqueTitles.map { title in
+            title.count > 40 ? String(title.prefix(37)) + "..." : title
+        }.joined(separator: " · ")
+    }
+
     var body: some View {
         Button(action: onTap) {
             HStack(spacing: 12) {
                 // Color halo dot
-                ActivityHaloDot(color: project.color, size: 16)
+                ActivityHaloDot(color: viewModel.resolvedAggregatedColor(for: project), size: 16)
 
                 // Project info
                 VStack(alignment: .leading, spacing: 3) {
@@ -31,21 +41,15 @@ struct ProjectCard: View {
                         Text(summary)
                             .font(.system(size: 11))
                             .foregroundStyle(Theme.textSecondary)
-                            .lineLimit(1)
+                            .lineLimit(2)
                     }
 
-                    HStack(spacing: 6) {
-                        // Days active badge
-                        Text("\(project.daysActive) day\(project.daysActive == 1 ? "" : "s")")
-                            .font(.system(size: 10, weight: .medium))
+                    // Comprehensive description (task highlights)
+                    if !description.isEmpty {
+                        Text(description)
+                            .font(.system(size: 10))
                             .foregroundStyle(Theme.textMuted)
-
-                        Circle()
-                            .fill(Theme.textQuaternary)
-                            .frame(width: 3, height: 3)
-
-                        // App icons (first 4)
-                        appIconsRow
+                            .lineLimit(2)
                     }
                 }
 
@@ -60,7 +64,7 @@ struct ProjectCard: View {
                     // Mini sparkline
                     MiniSparkline(
                         data: sparklineData,
-                        color: project.color
+                        color: viewModel.resolvedAggregatedColor(for: project)
                     )
                     .frame(width: 40, height: 12)
                 }
@@ -82,26 +86,6 @@ struct ProjectCard: View {
         .onHover { hovering in
             withAnimation(.easeInOut(duration: 0.15)) {
                 isHovering = hovering
-            }
-        }
-    }
-
-    // MARK: - App Icons Row
-
-    private var appIconsRow: some View {
-        let apps = Array(project.appNames.prefix(4))
-        let overflow = project.appNames.count - 4
-
-        return HStack(spacing: 4) {
-            ForEach(apps.sorted(), id: \.self) { appName in
-                AppIconView(bundleId: viewModel.bundleId(forAppName: appName), appName: appName, size: 14)
-                    .help(appName)
-            }
-
-            if overflow > 0 {
-                Text("+\(overflow)")
-                    .font(.system(size: 9, weight: .medium))
-                    .foregroundStyle(Theme.textMuted)
             }
         }
     }

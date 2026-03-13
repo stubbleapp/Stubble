@@ -21,6 +21,8 @@ struct TaskCardView: View {
     @State private var editDescription = ""
     @State private var swipeOffset: CGFloat = 0
     @State private var showDeleteConfirmation = false
+    /// Debounce task for commit-on-blur to avoid race conditions with rapid focus changes.
+    @State private var commitDebounceTask: Task<Void, Never>?
     @FocusState private var titleFocused: Bool
     @FocusState private var descriptionFocused: Bool
     @Environment(DashboardViewModel.self) var viewModel
@@ -70,22 +72,10 @@ struct TaskCardView: View {
             }
         }
         .onChange(of: titleFocused) { _, focused in
-            if !focused && !descriptionFocused && isEditing {
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
-                    if !titleFocused && !descriptionFocused && isEditing {
-                        commitEdit()
-                    }
-                }
-            }
+            handleFocusChange(focused)
         }
         .onChange(of: descriptionFocused) { _, focused in
-            if !focused && !titleFocused && isEditing {
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
-                    if !titleFocused && !descriptionFocused && isEditing {
-                        commitEdit()
-                    }
-                }
-            }
+            handleFocusChange(focused)
         }
         .alert("Delete Task?", isPresented: $showDeleteConfirmation) {
             Button("Delete", role: .destructive) {
@@ -225,10 +215,10 @@ struct TaskCardView: View {
 
             Spacer(minLength: 4)
 
-            // Collapsed: app icons + favicons
+            // Collapsed: app icons + favicons (sorted by time spent)
             if !isExpanded && !isEditing && (!task.appNamesList.isEmpty || !task.websitesList.isEmpty) {
                 AppIconStackView(
-                    appNames: task.appNamesList,
+                    appNames: viewModel.sortedAppNames(for: task),
                     websites: task.websitesList,
                     bundleIdResolver: { viewModel.bundleId(forAppName: $0) }
                 )
@@ -304,6 +294,29 @@ struct TaskCardView: View {
                     }
                 }
             }
+    }
+
+    // MARK: - Focus handling
+
+    /// Handles focus changes with debouncing to avoid race conditions.
+    /// Cancels any pending commit if focus returns to a field.
+    private func handleFocusChange(_ focused: Bool) {
+        if focused {
+            // User focused a field — cancel any pending commit
+            commitDebounceTask?.cancel()
+            commitDebounceTask = nil
+        } else if !titleFocused && !descriptionFocused && isEditing {
+            // Both fields lost focus while editing — debounce the commit
+            commitDebounceTask?.cancel()
+            commitDebounceTask = Task {
+                try? await Task.sleep(for: .milliseconds(150))
+                guard !Task.isCancelled else { return }
+                // Re-check focus state after delay (user may have clicked another field)
+                if !titleFocused && !descriptionFocused && isEditing {
+                    commitEdit()
+                }
+            }
+        }
     }
 
     // MARK: - Inline editing helpers

@@ -31,7 +31,7 @@ extension DashboardViewModel {
 
         // Capture lightweight values synchronously
         let currentProjectActivities = projectActivities
-        let viewingToday = isViewingToday
+        let isDayWrapped = shouldShowDayWrap  // True for past days OR today after wrap hour
         let dateLabel = SharedFormatters.headerDateFormatter.string(from: selectedDate)
         let dateString = SharedFormatters.dayFormatter.string(from: selectedDate)
         let fingerprintAtGeneration = currentTaskFingerprint
@@ -67,20 +67,11 @@ extension DashboardViewModel {
                 let capturedWeeklyTrends = weeklyTrends
                 let capturedOcrDigest = ocrDigest
                 let capturedDateLabel = dateLabel
-                let capturedViewingToday = viewingToday
+                let capturedIsDayWrapped = isDayWrapped
 
                 let content = try await withThrowingTimeout(seconds: 90) {
-                    if capturedViewingToday {
-                        return try await capturedGenerator.generate(
-                            recentTasks: capturedRecentTasks,
-                            projectActivities: capturedProjectActivities,
-                            appsUsed: capturedAppsUsed,
-                            memoryContext: capturedMemoryContext,
-                            activityLog: capturedActivityLog,
-                            weeklyTrends: capturedWeeklyTrends,
-                            ocrDigest: capturedOcrDigest
-                        )
-                    } else {
+                    if capturedIsDayWrapped {
+                        // Day is wrapped (past day OR today after wrap hour) - generate retrospective summary
                         return try await capturedGenerator.generateDaySummary(
                             recentTasks: capturedRecentTasks,
                             projectActivities: capturedProjectActivities,
@@ -90,6 +81,17 @@ extension DashboardViewModel {
                             weeklyTrends: capturedWeeklyTrends,
                             ocrDigest: capturedOcrDigest,
                             dateLabel: capturedDateLabel
+                        )
+                    } else {
+                        // Today before wrap hour - generate forward-looking recommendations
+                        return try await capturedGenerator.generate(
+                            recentTasks: capturedRecentTasks,
+                            projectActivities: capturedProjectActivities,
+                            appsUsed: capturedAppsUsed,
+                            memoryContext: capturedMemoryContext,
+                            activityLog: capturedActivityLog,
+                            weeklyTrends: capturedWeeklyTrends,
+                            ocrDigest: capturedOcrDigest
                         )
                     }
                 }

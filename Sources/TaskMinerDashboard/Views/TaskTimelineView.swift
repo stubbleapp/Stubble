@@ -169,39 +169,30 @@ struct TaskTimelineView: View {
                 }
             }
 
-            // Content
-            if viewModel.tasks.isEmpty && !viewModel.isGeneratingSummary {
-                // Empty state — no tasks yet
-                Spacer()
-                VStack(spacing: 10) {
-                    Image(systemName: "cup.and.heat.waves")
-                        .font(.system(size: 36))
-                        .foregroundStyle(Theme.textQuaternary)
+            // Content - with transition animation for date switches
+            Group {
+                if viewModel.tasks.isEmpty && !viewModel.isGeneratingSummary && !viewModel.isLoadingDateData {
+                    // Empty state — no tasks yet
+                    Spacer()
+                    VStack(spacing: 10) {
+                        Image(systemName: "cup.and.heat.waves")
+                            .font(.system(size: 36))
+                            .foregroundStyle(Theme.textQuaternary)
 
-                    Text("Your timeline is brewing")
-                        .font(.title3.weight(.medium))
-                        .foregroundStyle(Theme.textSecondary)
+                        Text("Your timeline is brewing")
+                            .font(.title3.weight(.medium))
+                            .foregroundStyle(Theme.textSecondary)
 
-                    Text("Carry on about your day — check back\nin a bit to see what you've been up to.")
-                        .font(.system(size: 13))
-                        .foregroundStyle(Theme.textMuted)
-                        .multilineTextAlignment(.center)
-                }
-                Spacer()
-            } else if viewModel.tasks.isEmpty && viewModel.isGeneratingSummary {
-                // First generation — no existing tasks to show
-                Spacer()
-                VStack(spacing: 10) {
-                    ProgressView()
-                    Text("Analyzing…")
-                        .font(.subheadline)
-                        .foregroundStyle(Theme.textSecondary)
-                }
-                Spacer()
-            } else {
+                        Text("Carry on about your day — check back\nin a bit to see what you've been up to.")
+                            .font(.system(size: 13))
+                            .foregroundStyle(Theme.textMuted)
+                            .multilineTextAlignment(.center)
+                    }
+                    Spacer()
+                } else {
                 // Task list — keep visible during regeneration
                 ScrollView {
-                    // Day summary - use DayWrapCard for completed days (no card styling)
+                    // Day wrapped (past days or today after wrap hour)
                     if viewModel.shouldShowDayWrap {
                         DayWrapCard(
                             focusTime: viewModel.displayFocusTime,
@@ -216,6 +207,7 @@ struct TaskTimelineView: View {
                         .padding(.horizontal, 24)
                         .padding(.bottom, 16)
                     } else if !viewModel.projectActivities.isEmpty {
+                        // Today before wrap hour - simple project list
                         DaySummaryCardView(
                             tasks: viewModel.tasks,
                             aiSummary: viewModel.daySummaryText,
@@ -228,11 +220,19 @@ struct TaskTimelineView: View {
                         .padding(.bottom, 16)
                     }
 
-                    // Timeline - collapsed for past days, expanded for today
+                    // Activity legend (only show when there's no summary card above)
+                    // Skip if DayWrapCard or DaySummaryCardView is shown — they already display project activities
+                    if !viewModel.shouldShowDayWrap && viewModel.projectActivities.isEmpty && !viewModel.top3Activities.isEmpty {
+                        ActivityLegendView(activities: viewModel.top3Activities)
+                            .padding(.horizontal, 24)
+                            .padding(.bottom, 8)
+                    }
+
+                    // Timeline - collapsed when day is wrapped, expanded otherwise
                     TimelineSection(
                         items: viewModel.timelineItems,
                         viewModel: viewModel,
-                        isCollapsedByDefault: !viewModel.isViewingToday
+                        isCollapsedByDefault: viewModel.shouldShowDayWrap
                     )
                     .redacted(reason: viewModel.isGeneratingSummary ? .placeholder : [])
                     .shimmer(active: viewModel.isGeneratingSummary)
@@ -244,7 +244,9 @@ struct TaskTimelineView: View {
                     Spacer()
                         .frame(height: 100)
                 }
+                }
             }
+            .animation(.easeInOut(duration: 0.25), value: viewModel.selectedDate)
         }
     }
 }
@@ -390,5 +392,25 @@ private struct DottedBarSegment: View {
             }
             .stroke(color, style: StrokeStyle(lineWidth: dotStrokeWidth, lineCap: .round, dash: [0.01, 6]))
         }
+    }
+}
+
+/// Legend showing what each colored activity bar represents.
+struct ActivityLegendView: View {
+    let activities: [(name: String, color: Color)]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            ForEach(Array(activities.enumerated()), id: \.offset) { _, activity in
+                HStack(spacing: 8) {
+                    ActivityHaloDot(color: activity.color, size: 16)
+                    Text(activity.name)
+                        .font(.system(size: 12))
+                        .foregroundStyle(Theme.textSecondary)
+                        .lineLimit(1)
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }

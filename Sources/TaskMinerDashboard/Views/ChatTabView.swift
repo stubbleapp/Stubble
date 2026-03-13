@@ -78,12 +78,6 @@ struct ChatTabView: View {
                                 .padding(.bottom, 16)
                         }
 
-                        // Past chats
-                        if !viewModel.chatThreads.isEmpty {
-                            pastChatsSection
-                                .padding(.bottom, 16)
-                        }
-
                         Spacer().frame(height: 100)
                     }
                 }
@@ -140,7 +134,7 @@ struct ChatTabView: View {
         }
     }
 
-    // MARK: - Recommendation Cards
+    // MARK: - Recommendation List
 
     private var recommendationCardsSection: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -149,82 +143,15 @@ struct ChatTabView: View {
                 .foregroundStyle(Theme.textPrimary)
                 .padding(.horizontal, 24)
 
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 12) {
-                    ForEach(viewModel.recommendations) { tip in
-                        RecommendationCard(tip: tip, onDismiss: {
-                            viewModel.dismissRecommendation(id: tip.id)
-                        })
-                    }
-                }
-                .padding(.horizontal, 24)
-            }
-            .scrollClipDisabled(true)
-        }
-    }
-
-    // MARK: - Past Chats
-
-    private var pastChatsSection: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text("Recent Chats")
-                .font(.system(size: 13, weight: .semibold))
-                .foregroundStyle(Theme.textPrimary)
-                .padding(.horizontal, 24)
-
-            VStack(spacing: 6) {
-                ForEach(viewModel.chatThreads.prefix(5)) { thread in
-                    Button {
-                        // Start a fresh chat instead of switching to existing thread
-                        viewModel.activeThreadId = nil
-                        viewModel.chatMessages = []
-                        viewModel.shouldExpandChatPanel = true
-                    } label: {
-                        HStack(spacing: 10) {
-                            ActivityHaloDot(color: Theme.accent, size: 10)
-
-                            Text(threadTitle(thread))
-                                .font(.system(size: 13, weight: .regular))
-                                .foregroundStyle(Theme.textPrimary)
-                                .lineLimit(1)
-
-                            Spacer()
-
-                            Text(threadDate(thread))
-                                .font(.system(size: 11))
-                                .foregroundStyle(Theme.textQuaternary)
-                        }
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 8)
-                        .background(Theme.cardBackground)
-                        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                                .strokeBorder(Theme.cardBorder, lineWidth: 0.5)
-                        )
-                    }
-                    .buttonStyle(.plain)
+            VStack(spacing: 8) {
+                ForEach(viewModel.recommendations) { tip in
+                    RecommendationRow(tip: tip, onDismiss: {
+                        viewModel.dismissRecommendation(id: tip.id)
+                    })
                 }
             }
             .padding(.horizontal, 24)
         }
-    }
-
-    private func threadTitle(_ thread: ChatThread) -> String {
-        let summary = thread.summary.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !summary.isEmpty { return summary }
-
-        let title = thread.title.trimmingCharacters(in: .whitespacesAndNewlines)
-        if title.hasPrefix("Chat ") || title == "New Chat" || title.isEmpty {
-            return "Untitled Chat"
-        }
-        return title
-    }
-
-    private func threadDate(_ thread: ChatThread) -> String {
-        let formatter = RelativeDateTimeFormatter()
-        formatter.unitsStyle = .short
-        return formatter.localizedString(for: thread.updatedAt, relativeTo: Date())
     }
 
     // MARK: - Skeleton Loading
@@ -241,9 +168,6 @@ struct ChatTabView: View {
                 // Skeleton recommendation cards
                 skeletonRecommendations
                     .padding(.bottom, 16)
-
-                // Skeleton past chats
-                skeletonPastChats
 
                 Spacer().frame(height: 100)
             }
@@ -281,51 +205,9 @@ struct ChatTabView: View {
                 .foregroundStyle(Theme.textPrimary)
                 .padding(.horizontal, 24)
 
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 12) {
-                    ForEach(0..<3, id: \.self) { _ in
-                        SkeletonRecommendationCard()
-                    }
-                }
-                .padding(.horizontal, 24)
-            }
-            .scrollClipDisabled(true)
-        }
-    }
-
-    private var skeletonPastChats: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text("Recent Chats")
-                .font(.system(size: 13, weight: .semibold))
-                .foregroundStyle(Theme.textPrimary)
-                .padding(.horizontal, 24)
-
-            VStack(spacing: 6) {
+            VStack(spacing: 8) {
                 ForEach(0..<3, id: \.self) { _ in
-                    HStack(spacing: 10) {
-                        Circle()
-                            .fill(Theme.accent)
-                            .frame(width: 10, height: 10)
-
-                        Text("Previous conversation topic")
-                            .font(.system(size: 13, weight: .regular))
-                            .foregroundStyle(Theme.textPrimary)
-                            .lineLimit(1)
-
-                        Spacer()
-
-                        Text("2h ago")
-                            .font(.system(size: 11))
-                            .foregroundStyle(Theme.textQuaternary)
-                    }
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 8)
-                    .background(Theme.cardBackground)
-                    .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 8, style: .continuous)
-                            .strokeBorder(Theme.cardBorder, lineWidth: 0.5)
-                    )
+                    SkeletonRecommendationRow()
                 }
             }
             .padding(.horizontal, 24)
@@ -360,45 +242,58 @@ struct ChatTabView: View {
     }
 }
 
-// MARK: - Skeleton Recommendation Card
+// MARK: - Skeleton Recommendation Row
 
-private struct SkeletonRecommendationCard: View {
+private struct SkeletonRecommendationRow: View {
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        HStack(alignment: .top, spacing: 12) {
             // Icon placeholder
-            Circle()
+            RoundedRectangle(cornerRadius: 6, style: .continuous)
                 .fill(Theme.accent.opacity(0.1))
-                .frame(width: 32, height: 32)
+                .frame(width: 28, height: 28)
 
-            // Title placeholder
-            Text("Recommendation title here")
-                .font(.system(size: 14, weight: .semibold))
-                .foregroundStyle(Theme.textPrimary)
-                .lineLimit(2)
-
-            // Description placeholder
+            // Content placeholder
             VStack(alignment: .leading, spacing: 4) {
-                Text("This is a placeholder for the recommendation")
+                // Category
+                Text("CATEGORY")
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundStyle(Theme.textMuted)
+
+                // Title
+                Text("Recommendation title placeholder")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(Theme.textPrimary)
+
+                // Description
+                Text("This is placeholder text for the recommendation description.")
                     .font(.system(size: 12))
                     .foregroundStyle(Theme.textSecondary)
-                Text("description text that spans multiple lines.")
-                    .font(.system(size: 12))
-                    .foregroundStyle(Theme.textSecondary)
+
+                // Reason
+                HStack(spacing: 4) {
+                    Circle()
+                        .fill(Theme.accent.opacity(0.3))
+                        .frame(width: 9, height: 9)
+                    Text("Reason placeholder text")
+                        .font(.system(size: 11))
+                        .foregroundStyle(Theme.textMuted)
+                }
+                .padding(.top, 2)
+
+                // Action button
+                Text("Learn more")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(Theme.accent)
+                    .padding(.top, 4)
             }
 
-            Spacer()
-
-            // Action button placeholder
-            Text("Learn more")
-                .font(.system(size: 12, weight: .medium))
-                .foregroundStyle(Theme.accent)
+            Spacer(minLength: 0)
         }
-        .padding(14)
-        .frame(width: 200, height: 160)
+        .padding(12)
         .background(Theme.cardBackground)
-        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
         .overlay(
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
                 .strokeBorder(Theme.cardBorder, lineWidth: 0.5)
         )
     }

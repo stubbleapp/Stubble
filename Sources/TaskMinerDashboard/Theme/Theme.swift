@@ -156,27 +156,30 @@ enum Theme {
     static let statusPaused = Color(red: 0.90, green: 0.70, blue: 0.35)
     static let statusError = Color(red: 0.91, green: 0.36, blue: 0.29)
 
-    // MARK: - Activity bar palette (maximally distinct, evenly spaced hues)
+    // MARK: - Activity bar palette (IBM Design Language accessible 12-color palette)
 
     static let barPalette: [Color] = [
-        Color(red: 0.35, green: 0.55, blue: 0.82),   // 0 — Blue
-        Color(red: 0.90, green: 0.55, blue: 0.30),   // 1 — Orange
-        Color(red: 0.35, green: 0.72, blue: 0.50),   // 2 — Green
-        Color(red: 0.78, green: 0.38, blue: 0.62),   // 3 — Rose
-        Color(red: 0.55, green: 0.45, blue: 0.78),   // 4 — Purple
-        Color(red: 0.85, green: 0.72, blue: 0.30),   // 5 — Gold
-        Color(red: 0.35, green: 0.65, blue: 0.68),   // 6 — Teal
-        Color(red: 0.88, green: 0.42, blue: 0.38),   // 7 — Red
-        Color(red: 0.50, green: 0.68, blue: 0.40),   // 8 — Olive
-        Color(red: 0.65, green: 0.50, blue: 0.70),   // 9 — Lavender
+        Color(red: 0.39, green: 0.58, blue: 0.93),   // 0 — Ultramarine (blue)
+        Color(red: 0.99, green: 0.69, blue: 0.27),   // 1 — Gold (yellow-orange)
+        Color(red: 0.14, green: 0.55, blue: 0.42),   // 2 — Teal (blue-green)
+        Color(red: 0.85, green: 0.29, blue: 0.38),   // 3 — Magenta (red-pink)
+        Color(red: 0.55, green: 0.34, blue: 0.66),   // 4 — Purple
+        Color(red: 0.00, green: 0.62, blue: 0.45),   // 5 — Green (distinct from teal)
+        Color(red: 0.82, green: 0.41, blue: 0.12),   // 6 — Orange
+        Color(red: 0.31, green: 0.51, blue: 0.74),   // 7 — Cerulean (steel blue)
+        Color(red: 0.90, green: 0.49, blue: 0.57),   // 8 — Pink
+        Color(red: 0.40, green: 0.65, blue: 0.40),   // 9 — Olive green
+        Color(red: 0.68, green: 0.47, blue: 0.33),   // 10 — Warm brown
+        Color(red: 0.56, green: 0.56, blue: 0.63),   // 11 — Cool gray
     ]
 
     // MARK: - Chat overlay
 
     /// Chat panel background — solid white for the floating chat pill/overlay.
+    /// Dark mode is slightly lighter than app background (#292929) for contrast.
     static let chatSurface = adaptive(
         light: NSColor(red: 0.995, green: 0.993, blue: 0.988, alpha: 1.0),   // near-white
-        dark: NSColor(red: 0.16, green: 0.16, blue: 0.17, alpha: 1.0)
+        dark: NSColor(red: 0.20, green: 0.20, blue: 0.21, alpha: 1.0)        // ~#333336 — lighter than #292929
     )
 
     /// Chat panel border — solid.

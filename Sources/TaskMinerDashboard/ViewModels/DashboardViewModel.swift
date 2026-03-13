@@ -44,6 +44,9 @@ final class DashboardViewModel {
     var isGeneratingSummary = false
     var summaryError: String?
 
+    /// Brief loading state shown during date changes (data loading)
+    var isLoadingDateData = false
+
     // Cached timeline items (tasks + gaps) — rebuilt when tasks/activities change
     var timelineItems: [TimelineItem] = []
     /// Whether a Gemini API key is configured (cosmetic — used for status indicators in Settings).
@@ -66,6 +69,12 @@ final class DashboardViewModel {
     var isGeneratingActivities = false
     var activitiesError: String?
     var activityGenerator: ProjectActivityGenerator?
+
+    /// Cached color assignments for all project activities (collision-resolved)
+    private var _resolvedProjectColors: [UUID: Color] = [:]
+
+    /// Cached color assignments for all aggregated projects (collision-resolved)
+    private var _resolvedAggregatedColors: [UUID: Color] = [:]
 
     // Stubs page (AI-generated, persisted per day)
     var recommendations: [Recommendation] = []
@@ -257,8 +266,13 @@ final class DashboardViewModel {
     // App name → bundle ID mapping (for icon resolution)
     var appNameBundleMap: [String: String] = [:]
 
+    // Cache of activities for the selected date (for app duration sorting in DashboardViewModel+Activities)
+    var cachedActivitiesDate: String = ""
+    var cachedActivities: [ActivityRecord] = []
+
     // In-flight AI task handles (for cancellation on new request)
     var recommendationsTask: Task<Void, Never>?
+    var summaryTask: Task<Void, Never>?
 
     // Pause
     var pauseState: PauseState?
@@ -353,14 +367,24 @@ final class DashboardViewModel {
         autoGeneratePendingSummaries()
     }
 
+    /// Task handle for cancelling in-flight date loading when user rapidly switches dates
+    private var dateLoadingTask: Task<Void, Never>?
+
     func selectDate(_ date: Date) {
+        // Cancel any in-flight date loading
+        dateLoadingTask?.cancel()
+
+        // Immediate UI update — date pill reflects selection instantly
         selectedDate = date
+
+        // Clear stale state without triggering expensive recomputations
         daySummaryText = nil
-        // Reset stubs state for the new date
+        clearAppDurationCache()
+        // Reset stubs state for the new date (but NOT suggestedQuestions — chat is date-agnostic)
         recommendations = []
         greetingContext = nil
         daySummaryContent = nil
-        suggestedQuestions = []
+        // suggestedQuestions intentionally NOT cleared — chat overlay is constant across all dates
         hasAttemptedStubsGeneration = false
         lastStubsTaskFingerprint = ""
         lastStubsGenerationTime = .distantPast
@@ -370,21 +394,35 @@ final class DashboardViewModel {
         persistedMeetingTime = nil
         persistedProjectCount = nil
 
-        loadDataForSelectedDate()
+        // Clear timeline immediately for snappier feel (will be rebuilt after load)
+        tasks = []
+        projectActivities = []
+        timelineItems = []
+        isLoadingDateData = true
 
-        // Auto-generate stubs if no persisted content was loaded and we have data.
-        // This handles the case where the user changes dates while already on the Stubs tab
-        // (where onAppear won't re-fire).
-        // For past days: also regenerate if day summary is missing (even if recommendations exist,
-        // since the record may have been created when this day was "today" with no day summary).
-        let needsDaySummaryForPastDay = !isViewingToday && daySummaryContent == nil
-        if (recommendations.isEmpty || needsDaySummaryForPastDay)
-            && daySummaryContent == nil
-            && !isGeneratingRecommendations
-            && hasGeminiKey
-            && !tasks.isEmpty {
-            hasAttemptedStubsGeneration = true
-            generateRecommendations()
+        // Load data asynchronously to avoid blocking the main thread
+        dateLoadingTask = Task {
+            // Small yield to let SwiftUI update the date selector first
+            await Task.yield()
+
+            guard !Task.isCancelled else { return }
+
+            loadDataForSelectedDate()
+            isLoadingDateData = false
+
+            guard !Task.isCancelled else { return }
+
+            // Auto-generate stubs if no persisted content was loaded and we have data.
+            // For wrapped days (past days OR today after wrap hour): regenerate if day summary is missing.
+            let needsDaySummaryForWrappedDay = shouldShowDayWrap && daySummaryContent == nil
+            if (recommendations.isEmpty || needsDaySummaryForWrappedDay)
+                && daySummaryContent == nil
+                && !isGeneratingRecommendations
+                && hasGeminiKey
+                && !tasks.isEmpty {
+                hasAttemptedStubsGeneration = true
+                generateRecommendations()
+            }
         }
     }
 
@@ -419,7 +457,9 @@ final class DashboardViewModel {
         let minAwaySeconds = TimeInterval(SettingsManager.shared.minAwayMinutes * 60)
         let significantBreaks = Self.consolidateIdleBreaks(from: activityData, minDuration: minAwaySeconds)
 
-        Task {
+        // Cancel any in-flight summary task before starting a new one
+        summaryTask?.cancel()
+        summaryTask = Task {
             do {
                 let result = try await summarizer.summarize(
                     activities: activityData,
@@ -453,10 +493,17 @@ final class DashboardViewModel {
                     await profileSynth.synthesizeIfNeeded(store: self.memoryStore)
                 }
 
-                // Refresh all data for the day (tasks + project activities appear together)
-                self.loadDataForSelectedDate()
+                // Targeted refresh: only reload what changed (tasks + project activities)
+                // Avoid full loadDataForSelectedDate() which resets many arrays and causes visual disruption
+                self.refreshTasksAndProjects()
                 self.daySummaryText = result.daySummary
                 self.isGeneratingSummary = false
+
+                // For past days, regenerate the long summary using the new project activities
+                if !self.isViewingToday {
+                    self.daySummaryContent = nil
+                    self.generateRecommendations()
+                }
 
                 Analytics.summaryGenerated(taskCount: result.tasks.count)
             } catch {
@@ -749,24 +796,51 @@ final class DashboardViewModel {
 
     // MARK: - Task ↔ Activity Color Mapping
 
-    /// Resolves colors for the top-3 activities, ensuring no two share the same color.
-    /// If a hash collision occurs, the later activity gets the next available palette slot.
-    private var resolvedTop3: [(activity: ProjectActivity, color: Color)] {
-        let sorted = projectActivities.sorted { $0.totalDuration > $1.totalDuration }
+    /// Resolves colors for ALL project activities using linear probing.
+    /// Sorted by duration so most visible projects get their preferred colors.
+    private func resolveAllProjectColors() {
         let palette = Theme.barPalette
         var usedIndices = Set<Int>()
-        var result: [(ProjectActivity, Color)] = []
+        _resolvedProjectColors = [:]
 
-        for activity in sorted.prefix(3) {
+        let sorted = projectActivities.sorted { $0.totalDuration > $1.totalDuration }
+
+        for activity in sorted {
             var idx = activity.colorIndex % palette.count
-            // If this index is already taken, find the next free one
             while usedIndices.contains(idx) {
                 idx = (idx + 1) % palette.count
             }
             usedIndices.insert(idx)
-            result.append((activity, palette[idx]))
+            _resolvedProjectColors[activity.id] = palette[idx]
         }
-        return result
+    }
+
+    /// Resolves colors for ALL aggregated projects using linear probing.
+    /// Sorted by duration so most visible projects get their preferred colors.
+    func resolveAggregatedProjectColors() {
+        let palette = Theme.barPalette
+        var usedIndices = Set<Int>()
+        _resolvedAggregatedColors = [:]
+
+        let sorted = aggregatedProjects.sorted { $0.totalDuration > $1.totalDuration }
+
+        for project in sorted {
+            var idx = project.colorIndex % palette.count
+            while usedIndices.contains(idx) {
+                idx = (idx + 1) % palette.count
+            }
+            usedIndices.insert(idx)
+            _resolvedAggregatedColors[project.id] = palette[idx]
+        }
+    }
+
+    /// Top-3 activities by duration, using resolved colors from the cache.
+    private var resolvedTop3: [(activity: ProjectActivity, color: Color)] {
+        let sorted = projectActivities.sorted { $0.totalDuration > $1.totalDuration }
+        return sorted.prefix(3).compactMap { activity in
+            guard let color = _resolvedProjectColors[activity.id] else { return nil }
+            return (activity, color)
+        }
     }
 
     /// Global top-3 activities ordered by duration (stable column positions).
@@ -798,16 +872,16 @@ final class DashboardViewModel {
         Set(overlappingActivities(for: task).map(\.name))
     }
 
-    /// Returns the resolved color for a given activity.
-    /// If the activity is in the top 3, returns its collision-resolved color.
-    /// Otherwise, returns the raw color from its colorIndex.
+    /// Returns the resolved color for a given project activity.
+    /// Uses the cached collision-resolved color for all projects.
     func resolvedColor(for activity: ProjectActivity) -> Color {
-        // Check if this activity is in the resolved top 3
-        if let match = resolvedTop3.first(where: { $0.activity.id == activity.id }) {
-            return match.color
-        }
-        // Fallback to raw color for activities outside top 3
-        return Theme.barPalette[activity.colorIndex % Theme.barPalette.count]
+        _resolvedProjectColors[activity.id] ?? Theme.barPalette[activity.colorIndex % Theme.barPalette.count]
+    }
+
+    /// Returns the resolved color for a given aggregated project.
+    /// Uses the cached collision-resolved color for all projects.
+    func resolvedAggregatedColor(for project: AggregatedProject) -> Color {
+        _resolvedAggregatedColors[project.id] ?? Theme.barPalette[project.colorIndex % Theme.barPalette.count]
     }
 
     // MARK: - Helpers
@@ -855,12 +929,12 @@ final class DashboardViewModel {
         activeSeconds = summary.activeSeconds
         idleSeconds = summary.idleSeconds
 
-        // Refresh all known projects (picks up any new ones created by daemon)
-        loadAllKnownProjects()
-
         // Load persisted project activities
         let paRecords = db.projectActivities(for: selectedDate)
         projectActivities = paRecords.map { ProjectActivity(from: $0) }
+
+        // Resolve colors for all project activities (collision-free)
+        resolveAllProjectColors()
 
         // Load persisted stubs content (if previously generated for this date)
         loadPersistedStubs(from: db)
@@ -874,6 +948,26 @@ final class DashboardViewModel {
     func rebuildTimelineItems() {
         let minIdleDuration = TimeInterval(SettingsManager.shared.minAwayMinutes * 60)
         timelineItems = TimelineItem.build(from: tasks, idleActivities: idleActivitiesForTimeline, minIdleDuration: minIdleDuration)
+    }
+
+    /// Targeted refresh of tasks and project activities only.
+    /// Use after task regeneration to avoid the broader state changes from loadDataForSelectedDate().
+    private func refreshTasksAndProjects() {
+        guard let db = dbReader else { return }
+
+        // Reload tasks and idle activities
+        tasks = db.tasks(for: selectedDate)
+        idleActivitiesForTimeline = db.idleActivities(for: selectedDate)
+
+        // Reload project activities
+        let paRecords = db.projectActivities(for: selectedDate)
+        projectActivities = paRecords.map { ProjectActivity(from: $0) }
+
+        // Resolve colors for all project activities (collision-free)
+        resolveAllProjectColors()
+
+        // Rebuild timeline
+        rebuildTimelineItems()
     }
 
     /// Lazy-load activities, screenshots, and file events for the Log view.
@@ -899,7 +993,8 @@ final class DashboardViewModel {
     }
 
     /// Attempt to load stubs content from the database for the selected date.
-    /// If found, populates greetingContext, daySummaryContent, suggestedQuestions, and recommendations.
+    /// If found, populates greetingContext, daySummaryContent, and recommendations.
+    /// Note: suggestedQuestions are only loaded for today — chat overlay is date-agnostic.
     private func loadPersistedStubs(from db: DatabaseReader) {
         let dateStr = SharedFormatters.dayFormatter.string(from: selectedDate)
         guard let record = db.stubsContent(for: selectedDate) else {
@@ -911,10 +1006,12 @@ final class DashboardViewModel {
         greetingContext = record.greetingContext.isEmpty ? nil : record.greetingContext
         daySummaryContent = record.daySummary
 
-        // Deserialize questions
-        if let data = record.questionsJson.data(using: .utf8),
-           let questions = try? JSONSerialization.jsonObject(with: data) as? [String] {
-            suggestedQuestions = questions
+        // Only load suggested questions for today — chat overlay should always reflect current context
+        if isViewingToday {
+            if let data = record.questionsJson.data(using: .utf8),
+               let questions = try? JSONSerialization.jsonObject(with: data) as? [String] {
+                suggestedQuestions = questions
+            }
         }
 
         // Deserialize recommendations
