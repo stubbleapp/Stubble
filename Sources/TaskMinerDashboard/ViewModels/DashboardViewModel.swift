@@ -57,15 +57,9 @@ final class DashboardViewModel {
 
     // Project activities (AI-clustered from tasks)
     var projectActivities: [ProjectActivity] = []
-    /// All unique projects from the database (for matching project names in summaries)
-    private var _allKnownProjects: [ProjectActivity] = []
-    var allKnownProjects: [ProjectActivity] {
-        if _allKnownProjects.isEmpty, let db = dbReader {
-            let records = db.allUniqueProjectActivities()
-            _allKnownProjects = records.map { ProjectActivity(from: $0) }
-        }
-        return _allKnownProjects
-    }
+    /// All unique projects from the database (for matching project names in summaries).
+    /// Pre-loaded during init via loadAllKnownProjects() - never query during view rendering.
+    private(set) var allKnownProjects: [ProjectActivity] = []
     var isGeneratingActivities = false
     var activitiesError: String?
     var activityGenerator: ProjectActivityGenerator?
@@ -798,6 +792,7 @@ final class DashboardViewModel {
 
     /// Resolves colors for ALL project activities using linear probing.
     /// Sorted by duration so most visible projects get their preferred colors.
+    /// When more activities than palette colors, colors are reused.
     private func resolveAllProjectColors() {
         let palette = Theme.barPalette
         var usedIndices = Set<Int>()
@@ -807,16 +802,23 @@ final class DashboardViewModel {
 
         for activity in sorted {
             var idx = activity.colorIndex % palette.count
-            while usedIndices.contains(idx) {
-                idx = (idx + 1) % palette.count
+            // Only try to find unused color if we haven't exhausted the palette
+            if usedIndices.count < palette.count {
+                var attempts = 0
+                while usedIndices.contains(idx) && attempts < palette.count {
+                    idx = (idx + 1) % palette.count
+                    attempts += 1
+                }
+                usedIndices.insert(idx)
             }
-            usedIndices.insert(idx)
+            // If palette exhausted, just use the hash-based index (colors will repeat)
             _resolvedProjectColors[activity.id] = palette[idx]
         }
     }
 
     /// Resolves colors for ALL aggregated projects using linear probing.
     /// Sorted by duration so most visible projects get their preferred colors.
+    /// When more projects than palette colors, colors are reused.
     func resolveAggregatedProjectColors() {
         let palette = Theme.barPalette
         var usedIndices = Set<Int>()
@@ -826,10 +828,16 @@ final class DashboardViewModel {
 
         for project in sorted {
             var idx = project.colorIndex % palette.count
-            while usedIndices.contains(idx) {
-                idx = (idx + 1) % palette.count
+            // Only try to find unused color if we haven't exhausted the palette
+            if usedIndices.count < palette.count {
+                var attempts = 0
+                while usedIndices.contains(idx) && attempts < palette.count {
+                    idx = (idx + 1) % palette.count
+                    attempts += 1
+                }
+                usedIndices.insert(idx)
             }
-            usedIndices.insert(idx)
+            // If palette exhausted, just use the hash-based index (colors will repeat)
             _resolvedAggregatedColors[project.id] = palette[idx]
         }
     }
@@ -904,7 +912,7 @@ final class DashboardViewModel {
     private func loadAllKnownProjects() {
         guard let db = dbReader else { return }
         let records = db.allUniqueProjectActivities()
-        _allKnownProjects = records.map { ProjectActivity(from: $0) }
+        allKnownProjects = records.map { ProjectActivity(from: $0) }
     }
 
     func loadDataForSelectedDate() {

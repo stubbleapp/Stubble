@@ -438,9 +438,12 @@ public final class TaskSummarizer: Sendable {
         guard blocks.count > 1 else { return blocks }
         var result = blocks
         var changed = true
+        var iterations = 0
+        let maxIterations = 50  // Prevent runaway loops
 
         // Iterate until stable (usually 1-2 passes)
-        while changed {
+        while changed && iterations < maxIterations {
+            iterations += 1
             changed = false
             var i = 0
             while i < result.count {

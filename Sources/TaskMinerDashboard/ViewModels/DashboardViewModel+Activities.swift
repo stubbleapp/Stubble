@@ -108,15 +108,16 @@ extension DashboardViewModel {
     // MARK: - App Duration Sorting
 
     /// Returns app names for a task sorted by time spent (most used first).
+    /// If activities aren't cached yet, returns unsorted to avoid blocking the main thread.
     func sortedAppNames(for task: TaskRecord) -> [String] {
         let taskApps = task.appNamesList
         guard taskApps.count > 1 else { return taskApps }
 
-        // Load activities for this date if not cached
+        // Only use cache if already loaded — never trigger DB query during view rendering
         let dateStr = task.date
-        if cachedActivitiesDate != dateStr {
-            cachedActivities = dbReader?.activities(for: selectedDate) ?? []
-            cachedActivitiesDate = dateStr
+        guard cachedActivitiesDate == dateStr, !cachedActivities.isEmpty else {
+            // Return unsorted if cache not ready — sorting is nice-to-have, not critical
+            return taskApps
         }
 
         // Filter activities to task's time range
