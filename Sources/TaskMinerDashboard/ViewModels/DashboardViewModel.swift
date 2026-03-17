@@ -49,8 +49,8 @@ final class DashboardViewModel {
 
     // Cached timeline items (tasks + gaps) — rebuilt when tasks/activities change
     var timelineItems: [TimelineItem] = []
-    /// Whether a Gemini API key is configured (cosmetic — used for status indicators in Settings).
-    var hasGeminiKey: Bool
+    /// Whether AI features are available (user is signed in with valid subscription).
+    var hasAIAccess: Bool
 
     // AI day summary (generated alongside tasks)
     var daySummaryText: String?
@@ -130,13 +130,22 @@ final class DashboardViewModel {
     }
 
     /// Top apps by duration for the selected date.
+    /// Uses activity-level data for accurate per-app time attribution.
     var topAppsByDuration: [(app: String, duration: TimeInterval, bundleId: String?)] {
-        var appDurations: [String: TimeInterval] = [:]
+        // Use activity-level data when available (more accurate than task-level)
+        if let db = dbReader {
+            let appDurations = db.appDurationsForDate(selectedDate)
+            return appDurations
+                .map { (app: $0.key, duration: $0.value, bundleId: appNameBundleMap[$0.key]) }
+                .sorted { $0.duration > $1.duration }
+        }
 
+        // Fallback: use task data (less accurate but works for historical data)
+        var appDurations: [String: TimeInterval] = [:]
         for task in tasks {
+            // Give each app full task duration (they overlap in time, so this is "time touching app")
             for appName in task.appNamesList {
-                let existing = appDurations[appName] ?? 0
-                appDurations[appName] = existing + task.duration / Double(task.appNamesList.count)
+                appDurations[appName, default: 0] += task.duration
             }
         }
 
@@ -322,20 +331,20 @@ final class DashboardViewModel {
         }
         self.memoryStore = UserMemoryStore(filePath: config?.memoryPath ?? baseDir.appendingPathComponent("memory.json"))
 
-        // Initialize AI client: proxy mode (signed-in) → BYOK key (settings.json) → env var.
+        // Initialize AI client for signed-in users.
         // Skip if setup wizard hasn't completed yet.
         if SettingsManager.shared.hasCompletedSetup, let client = GeminiClient.resolvedClient() {
             self.geminiClient = client
             self.taskSummarizer = TaskSummarizer(geminiClient: client)
             self.activityGenerator = ProjectActivityGenerator(geminiClient: client)
             self.recommendationGenerator = RecommendationGenerator(geminiClient: client)
-            self.hasGeminiKey = true
+            self.hasAIAccess = true
         } else {
             self.geminiClient = nil
             self.taskSummarizer = nil
             self.activityGenerator = nil
             self.recommendationGenerator = nil
-            self.hasGeminiKey = false
+            self.hasAIAccess = false
         }
 
         // Initialize sub-view-models (must be done before loading data)
@@ -412,7 +421,7 @@ final class DashboardViewModel {
             if (recommendations.isEmpty || needsDaySummaryForWrappedDay)
                 && daySummaryContent == nil
                 && !isGeneratingRecommendations
-                && hasGeminiKey
+                && hasAIAccess
                 && !tasks.isEmpty {
                 hasAttemptedStubsGeneration = true
                 generateRecommendations()
@@ -427,7 +436,7 @@ final class DashboardViewModel {
               let db = dbReader,
               let writer = taskWriter
         else {
-            summaryError = "Gemini API key not configured (set GEMINI_API_KEY)"
+            summaryError = "Sign in required for AI features"
             return
         }
 
@@ -732,7 +741,7 @@ final class DashboardViewModel {
             self.taskSummarizer = TaskSummarizer(geminiClient: client)
             self.activityGenerator = ProjectActivityGenerator(geminiClient: client)
             self.recommendationGenerator = RecommendationGenerator(geminiClient: client)
-            self.hasGeminiKey = true
+            self.hasAIAccess = true
             // Update sub-view-models
             self.chatVM.geminiClient = client
         } else {
@@ -740,31 +749,9 @@ final class DashboardViewModel {
             self.taskSummarizer = nil
             self.activityGenerator = nil
             self.recommendationGenerator = nil
-            self.hasGeminiKey = false
+            self.hasAIAccess = false
             // Clear sub-view-models
             self.chatVM.geminiClient = nil
-        }
-    }
-
-    /// Update the Gemini API key, persist it, and reinitialize the summarizer.
-    /// Falls back to proxy mode if BYOK key is empty but user is signed in.
-    func updateGeminiKey(_ key: String?) {
-        let trimmed = key?.trimmingCharacters(in: .whitespacesAndNewlines)
-        let effectiveKey = (trimmed?.isEmpty == false) ? trimmed : nil
-
-        SettingsManager.shared.geminiApiKey = effectiveKey
-
-        if let apiKey = effectiveKey, let client = GeminiClient.fromAPIKey(apiKey) {
-            self.geminiClient = client
-            self.taskSummarizer = TaskSummarizer(geminiClient: client)
-            self.activityGenerator = ProjectActivityGenerator(geminiClient: client)
-            self.recommendationGenerator = RecommendationGenerator(geminiClient: client)
-            self.hasGeminiKey = true
-            // Update sub-view-models
-            self.chatVM.geminiClient = client
-        } else {
-            // No BYOK key — try proxy mode (signed-in user) before giving up
-            refreshForAuthChange()
         }
     }
 
@@ -1064,7 +1051,7 @@ final class DashboardViewModel {
 
     // MARK: - Clear All Data
 
-    /// Erase all tasks, activities, screenshots, and memory. Keeps settings (API key, etc.).
+    /// Erase all tasks, activities, screenshots, and memory. Keeps settings and auth state.
     func clearAllData() {
         // 1. Clear database tables and get screenshot paths to delete
         let screenshotPaths = dbReader?.clearAllData() ?? []

@@ -3,7 +3,7 @@ import XCTest
 
 final class GeminiClientTests: XCTestCase {
 
-    private let client = GeminiClient(apiKey: "test-key")
+    private let client = GeminiClient()
 
     // MARK: - parseResponseText
 
@@ -118,48 +118,28 @@ final class GeminiClientTests: XCTestCase {
 
     // MARK: - Factory Methods
 
-    func testFromAPIKeyReturnsNilForEmpty() {
-        XCTAssertNil(GeminiClient.fromAPIKey(""))
-    }
+    // MARK: - Client Initialization
 
-    func testFromAPIKeyReturnsClientForValidKey() {
-        XCTAssertNotNil(GeminiClient.fromAPIKey("valid-key"))
-    }
-
-    // MARK: - Client Modes
-
-    func testDirectModeIsNotProxy() {
-        let client = GeminiClient(apiKey: "test-key")
-        XCTAssertFalse(client.isProxyMode)
-        if case .direct(let key) = client.mode {
-            XCTAssertEqual(key, "test-key")
-        } else {
-            XCTFail("Expected direct mode")
-        }
-    }
-
-    func testProxyModeIsProxy() {
-        let client = GeminiClient(proxy: true)
+    func testClientIsAlwaysProxyMode() {
+        let client = GeminiClient()
         XCTAssertTrue(client.isProxyMode)
-        if case .proxy = client.mode {
-            // Expected
-        } else {
-            XCTFail("Expected proxy mode")
-        }
+    }
+
+    func testClientWithCustomModel() {
+        let client = GeminiClient(model: "gemini-pro")
+        XCTAssertTrue(client.isProxyMode)
     }
 
     func testDefaultModelIsFlash() {
-        let direct = GeminiClient(apiKey: "key")
-        let proxy = GeminiClient(proxy: true)
-        // Both should use the same default model — we can't read the private property,
-        // but we can verify they were constructed without error.
-        XCTAssertNotNil(direct)
-        XCTAssertNotNil(proxy)
+        let client = GeminiClient()
+        // Verify it was constructed without error
+        XCTAssertNotNil(client)
+        XCTAssertTrue(client.isProxyMode)
     }
 
     func testCustomModelIsAccepted() {
-        let client = GeminiClient(apiKey: "key", model: "gemini-pro")
-        XCTAssertFalse(client.isProxyMode)
+        let client = GeminiClient(model: "gemini-pro")
+        XCTAssertTrue(client.isProxyMode)
     }
 
     // MARK: - GeminiError Properties

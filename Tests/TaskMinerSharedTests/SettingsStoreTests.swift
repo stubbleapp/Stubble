@@ -30,7 +30,7 @@ final class SettingsStoreTests: XCTestCase {
     func testLoadReturnsDefaultsWhenFileDoesNotExist() {
         let store = makeStore()
         let settings = store.load()
-        XCTAssertNil(settings.geminiApiKey)
+        XCTAssertNil(settings.customPrompt)
         XCTAssertNil(settings.customPrompt)
         XCTAssertNil(settings.granularity)
         XCTAssertNil(settings.showScreensTab)
@@ -41,7 +41,6 @@ final class SettingsStoreTests: XCTestCase {
     func testSaveAndLoadRoundTrip() {
         let store = makeStore()
         let original = AppSettings(
-            geminiApiKey: "AIzaSyABC123",
             customPrompt: "Focus on coding",
             granularity: .high,
             showScreensTab: true,
@@ -61,14 +60,14 @@ final class SettingsStoreTests: XCTestCase {
             .appendingPathComponent("deep/nested/dir")
             .appendingPathComponent("settings.json")
         let store = SettingsStore(filePath: nested)
-        let settings = AppSettings(geminiApiKey: "test")
+        let settings = AppSettings(customPrompt: "test")
         XCTAssertTrue(store.save(settings))
         XCTAssertTrue(FileManager.default.fileExists(atPath: nested.path))
     }
 
     func testSaveSetsRestrictedPermissions() {
         let store = makeStore()
-        store.save(AppSettings(geminiApiKey: "secret"))
+        store.save(AppSettings(customPrompt: "secret"))
         let attrs = try? FileManager.default.attributesOfItem(atPath: makePath().path)
         let posix = attrs?[.posixPermissions] as? Int
         XCTAssertEqual(posix, 0o600, "File should have owner-only permissions")
@@ -78,41 +77,41 @@ final class SettingsStoreTests: XCTestCase {
 
     func testLoadUsesCache() {
         let store = makeStore()
-        let settings = AppSettings(geminiApiKey: "key1")
+        let settings = AppSettings(customPrompt: "key1")
         store.save(settings)
 
         // Overwrite file directly — the store should still return cached value
-        let other = AppSettings(geminiApiKey: "key2")
+        let other = AppSettings(customPrompt: "key2")
         let data = try! JSONEncoder().encode(other)
         try! data.write(to: makePath())
 
         let loaded = store.load()
-        XCTAssertEqual(loaded.geminiApiKey, "key1", "Should return cached value")
+        XCTAssertEqual(loaded.customPrompt, "key1", "Should return cached value")
     }
 
     func testInvalidateCacheForcesReRead() {
         let store = makeStore()
-        store.save(AppSettings(geminiApiKey: "key1"))
+        store.save(AppSettings(customPrompt: "key1"))
 
         // Overwrite file directly
-        let other = AppSettings(geminiApiKey: "key2")
+        let other = AppSettings(customPrompt: "key2")
         let data = try! JSONEncoder().encode(other)
         try! data.write(to: makePath())
 
         store.invalidateCache()
         let loaded = store.load()
-        XCTAssertEqual(loaded.geminiApiKey, "key2", "Should re-read from disk after cache invalidation")
+        XCTAssertEqual(loaded.customPrompt, "key2", "Should re-read from disk after cache invalidation")
     }
 
     // MARK: - Convenience Accessors
 
     func testGeminiApiKeyAccessor() {
         let store = makeStore()
-        XCTAssertNil(store.geminiApiKey)
-        store.geminiApiKey = "AIzaSyABC"
-        XCTAssertEqual(store.geminiApiKey, "AIzaSyABC")
-        store.geminiApiKey = nil
-        XCTAssertNil(store.geminiApiKey)
+        XCTAssertNil(store.customPrompt)
+        store.customPrompt = "AIzaSyABC"
+        XCTAssertEqual(store.customPrompt, "AIzaSyABC")
+        store.customPrompt = nil
+        XCTAssertNil(store.customPrompt)
     }
 
     func testCustomPromptAccessor() {
@@ -157,11 +156,11 @@ final class SettingsStoreTests: XCTestCase {
     func testPersistenceAcrossInstances() {
         let path = makePath("shared.json")
         let store1 = SettingsStore(filePath: path)
-        store1.geminiApiKey = "persistedKey"
+        store1.customPrompt = "persistedPrompt"
         store1.granularity = .high
 
         let store2 = SettingsStore(filePath: path)
-        XCTAssertEqual(store2.geminiApiKey, "persistedKey")
+        XCTAssertEqual(store2.customPrompt, "persistedPrompt")
         XCTAssertEqual(store2.granularity, .high)
     }
 
@@ -171,7 +170,7 @@ final class SettingsStoreTests: XCTestCase {
         // Simulate a settings file with extra keys (forward compatibility)
         let json = """
         {
-            "geminiApiKey": "key123",
+            "customPrompt": "test123",
             "futureFeature": true,
             "anotherNewField": "value"
         }
@@ -179,7 +178,7 @@ final class SettingsStoreTests: XCTestCase {
         try! json.data(using: .utf8)!.write(to: makePath())
         let store = makeStore()
         let settings = store.load()
-        XCTAssertEqual(settings.geminiApiKey, "key123", "Known keys should decode fine")
+        XCTAssertEqual(settings.customPrompt, "test123", "Known keys should decode fine")
     }
 
     func testDecodesEmptyJSON() {
@@ -199,16 +198,15 @@ final class SettingsStoreTests: XCTestCase {
     // MARK: - AppSettings Equatable
 
     func testAppSettingsEquatable() {
-        let a = AppSettings(geminiApiKey: "key", granularity: .high)
-        let b = AppSettings(geminiApiKey: "key", granularity: .high)
-        let c = AppSettings(geminiApiKey: "different", granularity: .high)
+        let a = AppSettings(customPrompt: "test", granularity: .high)
+        let b = AppSettings(customPrompt: "test", granularity: .high)
+        let c = AppSettings(customPrompt: "different", granularity: .high)
         XCTAssertEqual(a, b)
         XCTAssertNotEqual(a, c)
     }
 
     func testAppSettingsDefaultInit() {
         let settings = AppSettings()
-        XCTAssertNil(settings.geminiApiKey)
         XCTAssertNil(settings.customPrompt)
         XCTAssertNil(settings.granularity)
         XCTAssertNil(settings.showScreensTab)
@@ -220,28 +218,28 @@ final class SettingsStoreTests: XCTestCase {
 
     func testMultipleWritesPreserveLatest() {
         let store = makeStore()
-        store.geminiApiKey = "first"
-        store.geminiApiKey = "second"
-        store.geminiApiKey = "third"
-        XCTAssertEqual(store.geminiApiKey, "third")
+        store.customPrompt = "first"
+        store.customPrompt = "second"
+        store.customPrompt = "third"
+        XCTAssertEqual(store.customPrompt, "third")
 
         // Verify on disk too
         store.invalidateCache()
-        XCTAssertEqual(store.geminiApiKey, "third")
+        XCTAssertEqual(store.customPrompt, "third")
     }
 
     func testPartialUpdatesPreserveOtherFields() {
         let store = makeStore()
-        store.geminiApiKey = "mykey"
-        store.granularity = .high
         store.customPrompt = "focus on coding"
+        store.granularity = .high
+        store.minAwayMinutes = 5
 
         // Update only one field
         store.granularity = .low
 
         // Other fields should be unchanged
-        XCTAssertEqual(store.geminiApiKey, "mykey")
         XCTAssertEqual(store.customPrompt, "focus on coding")
+        XCTAssertEqual(store.minAwayMinutes, 5)
         XCTAssertEqual(store.granularity, .low)
     }
 }

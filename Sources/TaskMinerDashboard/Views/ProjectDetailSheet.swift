@@ -361,8 +361,8 @@ struct ProjectDetailSheet: View {
                     .foregroundStyle(Theme.accent)
                 }
                 .buttonStyle(.plain)
-                .disabled(!viewModel.hasGeminiKey)
-                .opacity(viewModel.hasGeminiKey ? 1 : 0.5)
+                .disabled(!viewModel.hasAIAccess)
+                .opacity(viewModel.hasAIAccess ? 1 : 0.5)
             }
         }
         .padding(14)
@@ -379,7 +379,7 @@ struct ProjectDetailSheet: View {
 
     private func loadAnalysisIfNeeded() async {
         guard analysis == nil else { return }
-        guard viewModel.hasGeminiKey else { return }
+        guard viewModel.hasAIAccess else { return }
 
         isLoadingAnalysis = true
         await viewModel.generateProjectAnalysis(for: project)

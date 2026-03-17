@@ -799,7 +799,21 @@ public final class TaskSummarizer: Sendable {
             let websitesJSON = (try? JSONSerialization.data(withJSONObject: websites))
                 .flatMap { String(data: $0, encoding: .utf8) } ?? "[]"
             // AI reports active seconds (sum of constituent block durations, excluding gaps)
-            let activeSeconds = dict["active_seconds"] as? Double
+            var activeSeconds = dict["active_seconds"] as? Double
+
+            // Validate active_seconds: must be positive and not exceed span time
+            let spanTime = endTime.timeIntervalSince(startTime)
+            if let active = activeSeconds {
+                if active <= 0 {
+                    Logger.warning("TaskSummarizer: active_seconds=\(active) invalid for '\(title)', using span time")
+                    activeSeconds = nil
+                } else if active > spanTime * 1.1 { // Allow 10% tolerance
+                    Logger.warning("TaskSummarizer: active_seconds=\(Int(active))s exceeds span=\(Int(spanTime))s for '\(title)', using span time")
+                    activeSeconds = nil
+                }
+            } else {
+                Logger.debug("TaskSummarizer: no active_seconds for '\(title)', will use span time (\(Int(spanTime))s)")
+            }
 
             return TaskRecord(
                 date: dateStr,

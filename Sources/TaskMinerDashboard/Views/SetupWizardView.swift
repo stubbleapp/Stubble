@@ -5,9 +5,8 @@ import TaskMinerShared
 
 /// First-launch setup wizard that guides the user through:
 /// 1. Welcome / data privacy overview
-/// 2. Gemini API key entry
+/// 2. Google sign-in
 /// 3. System permissions (Accessibility + Screen Recording)
-/// 4. Preferences (launch at login) + finish
 struct SetupWizardView: View {
     @Environment(DashboardViewModel.self) var viewModel
     var onComplete: () -> Void
@@ -151,50 +150,10 @@ struct SetupWizardView: View {
             finish()
             return
         }
-        switch flow.handleContinue() {
-        case .advance:
-            break // flow controller already advanced
-        case .validate:
-            validateApiKeyThenAdvance()
-        case .blocked:
-            break
-        }
-    }
-
-    private func validateApiKeyThenAdvance() {
-        if let error = flow.validateApiKeyFormat() {
-            flow.setApiKeyError(error)
-            return
-        }
-
-        let key = flow.apiKey.trimmingCharacters(in: CharacterSet.whitespacesAndNewlines)
-        flow.beginValidation()
-
-        Task {
-            do {
-                guard let client = GeminiClient.fromAPIKey(key) else {
-                    flow.cancelValidation("Invalid key format.")
-                    return
-                }
-                let _ = try await client.generateText(
-                    prompt: "Reply with the single word: ok",
-                    systemInstruction: nil
-                )
-                flow.handleValidationSuccess()
-            } catch {
-                flow.handleValidationFailure(error)
-            }
-        }
+        _ = flow.handleContinue()
     }
 
     private func finish() {
-        // Ensure the API key is persisted before completing setup.
-        // The onChange handler on ApiKeyPage should have already saved it,
-        // but this guards against edge cases (e.g. paste without triggering onChange).
-        let key = flow.apiKey.trimmingCharacters(in: CharacterSet.whitespacesAndNewlines)
-        if !key.isEmpty {
-            SettingsManager.shared.geminiApiKey = key
-        }
         // Enable launch at login by default
         SettingsManager.shared.launchAtLogin = true
         if #available(macOS 13.0, *) {

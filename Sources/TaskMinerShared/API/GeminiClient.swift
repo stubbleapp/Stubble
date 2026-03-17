@@ -2,109 +2,39 @@ import Foundation
 
 /// Lightweight Gemini REST API client using URLSession (text-only, no vision).
 ///
-/// Supports two modes:
-/// - **Direct** (BYOK): requests go directly to Google's Gemini API using a user-provided key.
-/// - **Proxy**: requests go through the Stubble Cloudflare Worker, authenticated with a Supabase JWT.
-///   The Worker adds the Gemini API key and enforces tier/rate limits.
+/// All requests go through the Stubble Cloudflare Worker, authenticated with a Supabase JWT.
+/// The Worker adds the Gemini API key and enforces tier/rate limits.
 public final class GeminiClient: Sendable {
 
-    /// How this client authenticates with the AI backend.
-    public enum ClientMode: Sendable {
-        /// Direct Gemini API access using a user-provided API key (BYOK).
-        case direct(apiKey: String)
-        /// Proxy mode via Cloudflare Worker. JWT is resolved at request time from AuthManager.
-        case proxy
-    }
-
-    public let mode: ClientMode
     private let model: String
-
-    /// Gemini API base URL for direct mode.
-    private static let geminiBaseURL = "https://generativelanguage.googleapis.com/v1beta/models"
 
     /// Maximum number of retry attempts for transient failures.
     private static let maxRetries = 2
     /// Base delay between retries (doubles each attempt).
     private static let retryBaseDelay: TimeInterval = 1.0
 
-    /// Create a direct-mode client with an explicit API key (BYOK).
-    public init(apiKey: String, model: String = "gemini-2.5-flash") {
-        self.mode = .direct(apiKey: apiKey)
-        self.model = model
-    }
-
     /// Create a proxy-mode client that authenticates via Supabase JWT.
-    public init(proxy: Bool, model: String = "gemini-2.5-flash") {
-        self.mode = .proxy
+    public init(model: String = "gemini-2.5-flash") {
         self.model = model
     }
 
-    /// The base URL for API requests, derived from mode.
+    /// The base URL for API requests (proxy).
     private var baseURL: String {
-        switch mode {
-        case .direct:
-            return Self.geminiBaseURL
-        case .proxy:
-            return "\(StubbleAPIConfig.proxyBaseURL)/v1beta/models"
-        }
+        "\(StubbleAPIConfig.proxyBaseURL)/v1beta/models"
     }
 
-    /// Create from GEMINI_API_KEY environment variable. Returns nil if not set.
-    /// Only available in debug builds — env vars are visible to system monitors in production.
-    public static func fromEnvironment() -> GeminiClient? {
-        #if DEBUG
-        guard let key = ProcessInfo.processInfo.environment["GEMINI_API_KEY"],
-              !key.isEmpty else {
+    /// Resolve the client if the user is signed in with a valid session.
+    /// Returns nil if the user needs to sign in.
+    public static func resolvedClient() -> GeminiClient? {
+        let auth = AuthManager.shared
+        guard auth.isSignedIn && StubbleAPIConfig.isConfigured && !auth.isTrialExpired else {
             return nil
         }
-        return GeminiClient(apiKey: key)
-        #else
-        return nil
-        #endif
+        return GeminiClient()
     }
 
-    /// Create from an explicit API key string. Returns nil if the key is empty.
-    public static func fromAPIKey(_ key: String) -> GeminiClient? {
-        guard !key.isEmpty else { return nil }
-        return GeminiClient(apiKey: key)
-    }
-
-    /// Resolve the best available client:
-    /// 1. Proxy mode if signed in with valid session + backend configured
-    /// 2. BYOK from settings.json
-    /// 3. BYOK from GEMINI_API_KEY env var
-    ///
-    /// Both the Dashboard and CLI/daemon share the same resolution logic.
-    public static func resolvedClient() -> GeminiClient? {
-        // 1. Try proxy mode: signed in + backend configured + trial not expired
-        let auth = AuthManager.shared
-        if auth.isSignedIn && StubbleAPIConfig.isConfigured && !auth.isTrialExpired {
-            return GeminiClient(proxy: true)
-        }
-
-        // 2. Fall back to BYOK
-        if let key = readKeyFromSettings(), let client = GeminiClient.fromAPIKey(key) {
-            return client
-        }
-        return GeminiClient.fromEnvironment()
-    }
-
-    /// Whether this client is using proxy mode.
-    public var isProxyMode: Bool {
-        if case .proxy = mode { return true }
-        return false
-    }
-
-    /// Read the Gemini API key from the shared settings.json file.
-    private static func readKeyFromSettings() -> String? {
-        guard let config = try? SharedConfiguration(),
-              let data = try? Data(contentsOf: config.settingsPath),
-              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let key = json["geminiApiKey"] as? String,
-              !key.isEmpty
-        else { return nil }
-        return key
-    }
+    /// Whether this client is using proxy mode (always true now).
+    public var isProxyMode: Bool { true }
 
     // MARK: - Public API (unchanged signatures — zero consumer changes needed)
 
@@ -287,22 +217,15 @@ public final class GeminiClient: Sendable {
 
     // MARK: - Private
 
-    /// Apply authentication headers based on the client mode.
+    /// Apply authentication headers (proxy mode with JWT).
     private func applyAuth(to request: inout URLRequest) async throws {
-        switch mode {
-        case .direct(let apiKey):
-            request.setValue(apiKey, forHTTPHeaderField: "x-goog-api-key")
-        case .proxy:
-            let token = try await AuthManager.shared.validAccessToken()
-            request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-        }
+        let token = try await AuthManager.shared.validAccessToken()
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
     }
 
     /// Check for proxy-specific HTTP error codes and return a user-friendly error.
     /// Returns nil if the status code is not a known proxy error.
     private func checkProxyError(statusCode: Int) -> GeminiError? {
-        guard isProxyMode else { return nil }
-
         switch statusCode {
         case 401:
             return .sessionExpired

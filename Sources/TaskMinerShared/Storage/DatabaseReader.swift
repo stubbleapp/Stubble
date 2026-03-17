@@ -533,6 +533,35 @@ public class DatabaseReader {
         return results
     }
 
+    /// Aggregate app durations for a date from activity records.
+    /// This is more accurate than task-level attribution since it uses actual per-app time.
+    public func appDurationsForDate(_ date: Date) -> [String: TimeInterval] {
+        let range = dateRange(for: date)
+        let sql = """
+        SELECT app_name, SUM(duration) as total_duration
+        FROM activities
+        WHERE timestamp >= ? AND timestamp < ?
+          AND is_idle = 0
+          AND duration IS NOT NULL
+        GROUP BY app_name
+        ORDER BY total_duration DESC
+        """
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return [:] }
+        defer { sqlite3_finalize(stmt) }
+
+        sqliteBindText(stmt, 1, range.start)
+        sqliteBindText(stmt, 2, range.end)
+
+        var results: [String: TimeInterval] = [:]
+        while sqlite3_step(stmt) == SQLITE_ROW {
+            let appName = sqlite3_column_text(stmt, 0).map({ String(cString: $0) }) ?? "Unknown"
+            let duration = sqlite3_column_double(stmt, 1)
+            results[appName] = duration
+        }
+        return results
+    }
+
     // MARK: - Screenshots
 
     public func screenshots(for date: Date) -> [ScreenshotRecord] {

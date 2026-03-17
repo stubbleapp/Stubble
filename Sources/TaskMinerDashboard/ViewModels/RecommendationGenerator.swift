@@ -255,7 +255,9 @@ final class RecommendationGenerator: Sendable {
                 throw error
             }
 
-            let content = parseResponse(response)
+            var content = parseResponse(response)
+            Logger.info("RecommendationGenerator: validating \(content.recommendations.count) recommendation URLs...")
+            content.recommendations = await validateURLs(content.recommendations)
             if !content.recommendations.isEmpty || attempt == 1 {
                 return content
             }
@@ -705,7 +707,7 @@ final class RecommendationGenerator: Sendable {
         - title: concise, specific title that would only make sense for THIS user's CURRENT work
         - description: 2-3 sentences explaining what this is and why it's valuable for their CURRENT situation
         - reason: 1 sentence citing specific tasks from TODAY or this week
-        - action_url: ONLY use URLs you are 100% certain exist (homepages, top-level doc pages). Use null if uncertain — a missing link is better than a 404.
+        - action_url: Use null unless you found a real URL via Google Search. URLs will be validated — invalid ones will be removed.
         - icon: an SF Symbol name (e.g. "doc.text", "wrench.and.screwdriver", "lightbulb", "arrow.triangle.branch", "book", "cpu", "network", "lock.shield", "swift", "terminal")
 
         IMPORTANT: Generate 6-8 recommendations. Prioritize TODAY'S work from the 🎯 CURRENT FOCUS section.
@@ -798,5 +800,114 @@ final class RecommendationGenerator: Sendable {
             suggestedQuestions: suggestedQuestions,
             recommendations: recommendations
         )
+    }
+
+    // MARK: - URL Validation
+
+    /// Validates URLs in recommendations via HTTP requests.
+    /// Uses HEAD first (fast), falls back to GET with body analysis for ambiguous cases.
+    /// Invalid URLs (404, 5xx, timeout, soft 404s) get their `actionURL` set to nil.
+    private func validateURLs(_ recommendations: [Recommendation]) async -> [Recommendation] {
+        let config = URLSessionConfiguration.ephemeral
+        config.timeoutIntervalForRequest = 8
+        config.timeoutIntervalForResource = 10
+        let session = URLSession(configuration: config)
+
+        return await withTaskGroup(of: (Int, Bool).self) { group in
+            for (index, rec) in recommendations.enumerated() {
+                guard let urlString = rec.actionURL, let url = URL(string: urlString) else {
+                    continue
+                }
+                group.addTask {
+                    // Step 1: Try HEAD request first (fast, many servers support it)
+                    var headRequest = URLRequest(url: url)
+                    headRequest.httpMethod = "HEAD"
+                    headRequest.timeoutInterval = 5
+                    headRequest.setValue("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15", forHTTPHeaderField: "User-Agent")
+
+                    do {
+                        let (_, headResponse) = try await session.data(for: headRequest)
+                        if let httpResponse = headResponse as? HTTPURLResponse {
+                            let status = httpResponse.statusCode
+                            // HEAD returned a clear error - trust it
+                            if status >= 400 {
+                                Logger.info("RecommendationGenerator: URL validation failed (HEAD \(status)) for \(urlString)")
+                                return (index, false)
+                            }
+                            // HEAD returned success - URL is likely valid
+                            if (200..<400).contains(status) {
+                                return (index, true)
+                            }
+                        }
+                    } catch {
+                        // HEAD failed - fall through to GET
+                    }
+
+                    // Step 2: Fall back to GET with body analysis for SPA detection
+                    var getRequest = URLRequest(url: url)
+                    getRequest.httpMethod = "GET"
+                    getRequest.setValue("bytes=0-2047", forHTTPHeaderField: "Range")
+                    getRequest.setValue("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15", forHTTPHeaderField: "User-Agent")
+                    getRequest.setValue("text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8", forHTTPHeaderField: "Accept")
+
+                    do {
+                        let (data, response) = try await session.data(for: getRequest)
+                        guard let httpResponse = response as? HTTPURLResponse else {
+                            return (index, false)
+                        }
+
+                        let status = httpResponse.statusCode
+                        if status >= 400 {
+                            Logger.info("RecommendationGenerator: URL validation failed (GET \(status)) for \(urlString)")
+                            return (index, false)
+                        }
+
+                        // Check for soft 404s in response body
+                        let body = String(data: data, encoding: .utf8)?.lowercased() ?? ""
+                        let soft404Patterns = [
+                            "page not found", "404 not found", "page doesn't exist",
+                            "page does not exist", "this page isn't available",
+                            "no longer available", "content not found", "we couldn't find"
+                        ]
+
+                        for pattern in soft404Patterns {
+                            if body.contains(pattern) {
+                                Logger.info("RecommendationGenerator: URL validation - soft 404 for \(urlString)")
+                                return (index, false)
+                            }
+                        }
+
+                        // Detect SPA shells that render 404s client-side
+                        if body.contains("this page requires javascript") {
+                            Logger.info("RecommendationGenerator: URL validation - SPA shell for \(urlString)")
+                            return (index, false)
+                        }
+
+                        return (index, true)
+                    } catch {
+                        Logger.info("RecommendationGenerator: URL validation error for \(urlString): \(error.localizedDescription)")
+                        return (index, false)
+                    }
+                }
+            }
+
+            var invalidIndices = Set<Int>()
+            for await (index, isValid) in group {
+                if !isValid { invalidIndices.insert(index) }
+            }
+
+            let validCount = recommendations.count - invalidIndices.count
+            Logger.info("RecommendationGenerator: URL validation complete - \(validCount)/\(recommendations.count) URLs valid")
+
+            return recommendations.enumerated().map { index, rec in
+                if invalidIndices.contains(index) {
+                    var copy = rec
+                    copy.actionURL = nil
+                    copy.actionLabel = "Noted"
+                    return copy
+                }
+                return rec
+            }
+        }
     }
 }

@@ -1382,38 +1382,61 @@ class DatabaseManager {
         let cutoff = Date().addingTimeInterval(-staleThreshold)
         let cutoffStr = SharedFormatters.iso8601.string(from: cutoff)
 
-        // Find stale activities (no duration, started before cutoff)
+        // Find stale activities (no duration, started before cutoff) with the next activity's timestamp
+        // Using a subquery to get the next activity's start time for smarter duration estimation
         let selectSql = """
-        SELECT id, timestamp FROM activities
-        WHERE duration IS NULL AND timestamp < ?
+        SELECT a.id, a.timestamp,
+               (SELECT MIN(b.timestamp) FROM activities b WHERE b.timestamp > a.timestamp) as next_timestamp
+        FROM activities a
+        WHERE a.duration IS NULL AND a.timestamp < ?
+        ORDER BY a.timestamp ASC
         """
         var selectStmt: OpaquePointer?
         guard sqlite3_prepare_v2(db, selectSql, -1, &selectStmt, nil) == SQLITE_OK else { return 0 }
         defer { sqlite3_finalize(selectStmt) }
         sqliteBindText(selectStmt, 1, cutoffStr)
 
-        var staleActivities: [(id: Int64, timestamp: Date)] = []
+        var staleActivities: [(id: Int64, timestamp: Date, nextTimestamp: Date?)] = []
         while sqlite3_step(selectStmt) == SQLITE_ROW {
             let id = sqlite3_column_int64(selectStmt, 0)
             if let tsStr = sqlite3_column_text(selectStmt, 1),
                let ts = SharedFormatters.iso8601.date(from: String(cString: tsStr)) {
-                staleActivities.append((id: id, timestamp: ts))
+                var nextTs: Date? = nil
+                if sqlite3_column_type(selectStmt, 2) != SQLITE_NULL,
+                   let nextTsStr = sqlite3_column_text(selectStmt, 2) {
+                    nextTs = SharedFormatters.iso8601.date(from: String(cString: nextTsStr))
+                }
+                staleActivities.append((id: id, timestamp: ts, nextTimestamp: nextTs))
             }
         }
 
         guard !staleActivities.isEmpty else { return 0 }
 
-        // Finalize each stale activity with estimated duration (5 minutes or time to next activity)
+        // Finalize each stale activity with estimated duration based on next activity
         let updateSql = "UPDATE activities SET end_time = ?, duration = ? WHERE id = ?"
         var updateStmt: OpaquePointer?
         guard sqlite3_prepare_v2(db, updateSql, -1, &updateStmt, nil) == SQLITE_OK else { return 0 }
         defer { sqlite3_finalize(updateStmt) }
 
+        let maxEstimatedDuration: TimeInterval = 3600 // Cap at 1 hour for safety
+        let defaultDuration: TimeInterval = 300 // 5 minutes if no next activity
+
         var count = 0
         for stale in staleActivities {
-            // Estimate end time as 5 minutes after start (reasonable default for crashed activities)
-            let estimatedDuration: TimeInterval = 300
-            let endTime = stale.timestamp.addingTimeInterval(estimatedDuration)
+            let estimatedDuration: TimeInterval
+            let endTime: Date
+
+            if let nextTs = stale.nextTimestamp {
+                // Use time until next activity, capped at 1 hour
+                let timeToNext = nextTs.timeIntervalSince(stale.timestamp)
+                estimatedDuration = min(timeToNext, maxEstimatedDuration)
+                endTime = stale.timestamp.addingTimeInterval(estimatedDuration)
+            } else {
+                // No next activity — use default 5 minutes
+                estimatedDuration = defaultDuration
+                endTime = stale.timestamp.addingTimeInterval(estimatedDuration)
+            }
+
             let endTimeStr = SharedFormatters.iso8601.string(from: endTime)
 
             sqlite3_reset(updateStmt)
@@ -1423,6 +1446,7 @@ class DatabaseManager {
 
             if sqlite3_step(updateStmt) == SQLITE_DONE {
                 count += 1
+                Logger.debug("Crash recovery: activity \(stale.id) duration=\(Int(estimatedDuration))s")
             }
         }
 

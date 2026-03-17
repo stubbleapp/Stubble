@@ -50,12 +50,8 @@ struct DashboardApp: App {
                         .frame(minWidth: 600, maxWidth: 1200, minHeight: 400, maxHeight: 850)
                 } else {
                     SetupWizardView {
-                        // Re-initialize Gemini client — could be BYOK key or proxy-mode auth
-                        if AuthManager.shared.isSignedIn {
-                            viewModel.refreshForAuthChange()
-                        } else if let key = SettingsManager.shared.geminiApiKey {
-                            viewModel.updateGeminiKey(key)
-                        }
+                        // Re-initialize Gemini client with proxy-mode auth
+                        viewModel.refreshForAuthChange()
                         // Create onboarding task so timeline isn't empty
                         viewModel.createOnboardingTask()
                         viewModel.loadDataForSelectedDate()

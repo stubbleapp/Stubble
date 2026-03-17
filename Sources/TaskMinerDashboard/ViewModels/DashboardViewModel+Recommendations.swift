@@ -18,7 +18,7 @@ extension DashboardViewModel {
     /// For today: forward-looking recommendations. For past days: retrospective day summary.
     func generateRecommendations() {
         guard let generator = recommendationGenerator else {
-            recommendationsError = "Gemini API key not configured"
+            recommendationsError = "Sign in required for AI features"
             return
         }
         guard dbReader != nil else {
@@ -183,8 +183,8 @@ extension DashboardViewModel {
         // Don't interrupt an in-progress generation
         guard !isGeneratingRecommendations else { return }
 
-        // Need an API key and tasks to work with
-        guard hasGeminiKey, !tasks.isEmpty else { return }
+        // Need AI access and tasks to work with
+        guard hasAIAccess, !tasks.isEmpty else { return }
 
         // Enforce minimum interval between auto-refreshes
         let elapsed = Date().timeIntervalSince(lastStubsGenerationTime)

@@ -18,43 +18,31 @@ struct ChatTabView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            if viewModel.isGeneratingRecommendations && !hasRecommendations {
-                // Skeleton loading state
-                skeletonContent
-            } else if !hasRecommendations {
-                Spacer()
-                VStack(spacing: 14) {
-                    Text("Hey, \(firstName)")
-                        .font(Theme.headerFont(size: 24))
-                        .foregroundStyle(Theme.textPrimary)
-
-                    Text("Ask me anything about your day,\nor generate stubs for personalized insights.")
-                        .font(.system(size: 13))
-                        .foregroundStyle(Theme.textMuted)
-                        .multilineTextAlignment(.center)
-                        .lineSpacing(2)
-
-                    Button(action: { viewModel.generateRecommendations() }) {
-                        Text("Generate Stubs")
-                            .font(.system(size: 13, weight: .medium))
-                            .foregroundStyle(.white)
-                            .padding(.horizontal, 20)
-                            .padding(.vertical, 8)
-                            .background(Theme.accent)
-                            .clipShape(Capsule())
-                    }
-                    .buttonStyle(.plain)
-                    .padding(.top, 4)
-                    .disabled(!viewModel.hasGeminiKey)
-                    .opacity(viewModel.hasGeminiKey ? 1 : 0.4)
-
-                    if !viewModel.hasGeminiKey {
-                        Text("Requires a Gemini API key")
-                            .font(.system(size: 11))
+            if !hasRecommendations {
+                // Show error if generation failed, otherwise show skeleton
+                if let error = viewModel.recommendationsError {
+                    Spacer()
+                    VStack(spacing: 12) {
+                        Image(systemName: "exclamationmark.triangle")
+                            .font(.system(size: 24))
                             .foregroundStyle(Theme.textMuted)
+                        Text(error)
+                            .font(.system(size: 13))
+                            .foregroundStyle(Theme.textMuted)
+                            .multilineTextAlignment(.center)
+                        Button("Try Again") {
+                            viewModel.generateRecommendations()
+                        }
+                        .buttonStyle(.plain)
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundStyle(Theme.accent)
+                        .padding(.top, 4)
                     }
+                    .padding(.horizontal, 24)
+                    Spacer()
+                } else {
+                    skeletonContent
                 }
-                Spacer()
             } else {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 0) {
@@ -87,13 +75,8 @@ struct ChatTabView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Theme.chatBackground)
         .onAppear {
-            // Auto-generate stubs on first visit (same logic as RecommendationsView)
-            if !hasRecommendations
-                && !viewModel.isGeneratingRecommendations
-                && !viewModel.hasAttemptedStubsGeneration
-                && viewModel.hasGeminiKey
-                && !viewModel.tasks.isEmpty {
-                viewModel.hasAttemptedStubsGeneration = true
+            // Auto-generate when visiting and none exist
+            if !hasRecommendations && !viewModel.isGeneratingRecommendations {
                 viewModel.generateRecommendations()
             }
         }

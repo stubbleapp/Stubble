@@ -17,13 +17,13 @@ class AppDelegate {
     private let granolaMeetingMonitor: GranolaMeetingMonitor
     private var mediaActivityDetector: MediaActivityDetector?
     /// Lazy-initialized so the daemon defers AI setup until first summarization.
-    /// Resolves proxy mode (signed-in user) → BYOK key (settings.json) → env var.
+    /// Requires signed-in user with valid subscription for proxy mode.
     private lazy var taskSummarizer: TaskSummarizer? = {
         if let geminiClient = GeminiClient.resolvedClient() {
             Logger.info("Gemini AI summarization enabled")
             return TaskSummarizer(geminiClient: geminiClient)
         } else {
-            Logger.info("No Gemini API key — AI summarization disabled (OCR still active)")
+            Logger.info("No AI access — AI summarization disabled (OCR still active)")
             return nil
         }
     }()
@@ -474,14 +474,57 @@ class AppDelegate {
         guard let activity = currentActivity, let id = currentActivityId else { return }
 
         let now = Date()
-        let duration = now.timeIntervalSince(activity.timestamp)
-        do {
-            try db.finalizeActivity(id: id, endTime: now, duration: duration)
-        } catch {
-            Logger.error("Failed to finalize activity \(id): \(error.localizedDescription)")
-        }
+        let cal = Calendar.current
 
-        Logger.debug("Finalized activity \(id): \(activity.appName) (\(Int(duration))s)")
+        // Check if activity spans midnight — if so, split at day boundary
+        let activityStart = activity.timestamp
+        let startOfActivityDay = cal.startOfDay(for: activityStart)
+        let startOfCurrentDay = cal.startOfDay(for: now)
+
+        if startOfActivityDay != startOfCurrentDay {
+            // Activity spans midnight — finalize yesterday's portion, insert today's portion
+            let midnight = startOfCurrentDay
+            let yesterdayDuration = midnight.timeIntervalSince(activityStart)
+
+            // Finalize yesterday's activity up to midnight
+            do {
+                try db.finalizeActivity(id: id, endTime: midnight, duration: yesterdayDuration)
+                Logger.debug("Split activity \(id) at midnight: \(activity.appName) yesterday=\(Int(yesterdayDuration))s")
+            } catch {
+                Logger.error("Failed to finalize yesterday portion of activity \(id): \(error.localizedDescription)")
+            }
+
+            // Insert today's portion as a new activity
+            let todayDuration = now.timeIntervalSince(midnight)
+            if todayDuration > 1 { // Only insert if meaningful duration
+                let todayActivity = ActivityRecord(
+                    timestamp: midnight,
+                    appName: activity.appName,
+                    bundleId: activity.bundleId,
+                    windowTitle: activity.windowTitle,
+                    isIdle: activity.isIdle,
+                    browserURL: activity.browserURL,
+                    documentPath: activity.documentPath,
+                    focusedElementRole: activity.focusedElementRole
+                )
+                do {
+                    let todayId = try db.insertActivity(todayActivity)
+                    try db.finalizeActivity(id: todayId, endTime: now, duration: todayDuration)
+                    Logger.debug("Split activity: today portion \(todayId) = \(Int(todayDuration))s")
+                } catch {
+                    Logger.error("Failed to insert today portion of split activity: \(error.localizedDescription)")
+                }
+            }
+        } else {
+            // Normal case — activity within same day
+            let duration = now.timeIntervalSince(activityStart)
+            do {
+                try db.finalizeActivity(id: id, endTime: now, duration: duration)
+            } catch {
+                Logger.error("Failed to finalize activity \(id): \(error.localizedDescription)")
+            }
+            Logger.debug("Finalized activity \(id): \(activity.appName) (\(Int(duration))s)")
+        }
 
         currentActivity = nil
         currentActivityId = nil

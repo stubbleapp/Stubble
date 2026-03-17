@@ -9,7 +9,7 @@ final class TaskSummarizerParsingTests: XCTestCase {
 
     override func setUp() {
         super.setUp()
-        summarizer = TaskSummarizer(geminiClient: GeminiClient(apiKey: "test-key-unused"))
+        summarizer = TaskSummarizer(geminiClient: GeminiClient())
     }
 
     // MARK: - parseTime

@@ -13,10 +13,6 @@ final class SetupFlowControllerTests: XCTestCase {
         let c = makeController()
         XCTAssertEqual(c.currentPage, 0)
         XCTAssertEqual(c.totalPages, 3)
-        XCTAssertTrue(c.apiKey.isEmpty)
-        XCTAssertFalse(c.isValidating)
-        XCTAssertNil(c.apiKeyError)
-        XCTAssertFalse(c.apiKeyValidated)
         XCTAssertFalse(c.accessibilityGranted)
         XCTAssertFalse(c.screenRecordingGranted)
         XCTAssertFalse(c.isSignedInViaGoogle)
@@ -160,16 +156,14 @@ final class SetupFlowControllerTests: XCTestCase {
 
     func testHandleContinueOnWelcomePage() {
         let c = makeController()
-        let action = c.handleContinue()
-        XCTAssertEqual(action, .advance)
+        XCTAssertTrue(c.handleContinue())
         XCTAssertEqual(c.currentPage, 1)
     }
 
     func testHandleContinueBlockedWhenCannotContinue() {
         let c = makeController()
         c.advance() // page 1, not signed in
-        let action = c.handleContinue()
-        XCTAssertEqual(action, .blocked)
+        XCTAssertFalse(c.handleContinue())
         XCTAssertEqual(c.currentPage, 1, "Should stay on same page")
     }
 
@@ -177,8 +171,7 @@ final class SetupFlowControllerTests: XCTestCase {
         let c = makeController()
         c.advance() // page 1
         c.isSignedInViaGoogle = true
-        let action = c.handleContinue()
-        XCTAssertEqual(action, .advance)
+        XCTAssertTrue(c.handleContinue())
         XCTAssertEqual(c.currentPage, 2)
     }
 
@@ -187,104 +180,9 @@ final class SetupFlowControllerTests: XCTestCase {
         c.setPage(2)
         c.accessibilityGranted = true
         c.screenRecordingGranted = true
-        let action = c.handleContinue()
-        // On last page, canContinue is true so returns .advance (signals wizard should close)
-        XCTAssertEqual(action, .advance)
+        // On last page, handleContinue returns false (no more pages)
+        XCTAssertFalse(c.handleContinue())
         XCTAssertEqual(c.currentPage, 2, "Page doesn't change since already on last")
-    }
-
-    // MARK: - API Key Validation (for BYOK flow, kept for potential future use)
-
-    func testValidateApiKeyFormatEmpty() {
-        let c = makeController()
-        c.apiKey = ""
-        XCTAssertNotNil(c.validateApiKeyFormat())
-    }
-
-    func testValidateApiKeyFormatWhitespace() {
-        let c = makeController()
-        c.apiKey = "   "
-        XCTAssertNotNil(c.validateApiKeyFormat())
-    }
-
-    func testValidateApiKeyFormatValid() {
-        let c = makeController()
-        c.apiKey = "AIzaSyABC123"
-        XCTAssertNil(c.validateApiKeyFormat())
-    }
-
-    func testBeginValidation() {
-        let c = makeController()
-        c.setApiKeyError("previous error")
-        c.beginValidation()
-        XCTAssertTrue(c.isValidating)
-        XCTAssertNil(c.apiKeyError, "Error should be cleared on begin")
-    }
-
-    func testHandleValidationSuccess() {
-        let c = makeController()
-        c.advance() // page 1
-        c.beginValidation()
-        c.handleValidationSuccess()
-        XCTAssertFalse(c.isValidating)
-        XCTAssertTrue(c.apiKeyValidated)
-        XCTAssertNil(c.apiKeyError)
-        XCTAssertEqual(c.currentPage, 2, "Should advance after validation")
-    }
-
-    func testHandleValidationFailureAuthError() {
-        let c = makeController()
-        c.advance()
-        c.beginValidation()
-        let error = NSError(domain: "", code: 0, userInfo: [NSLocalizedDescriptionKey: "HTTP 401 Unauthorized"])
-        c.handleValidationFailure(error)
-        XCTAssertFalse(c.isValidating)
-        XCTAssertFalse(c.apiKeyValidated)
-        XCTAssertTrue(c.apiKeyError?.contains("invalid") ?? false)
-    }
-
-    func testHandleValidationFailureNetworkError() {
-        let c = makeController()
-        c.advance()
-        c.beginValidation()
-        let error = NSError(domain: "", code: 0, userInfo: [NSLocalizedDescriptionKey: "The network connection was lost"])
-        c.handleValidationFailure(error)
-        XCTAssertTrue(c.apiKeyError?.contains("Network") ?? false)
-    }
-
-    func testHandleValidationFailureGenericError() {
-        let c = makeController()
-        c.advance()
-        c.beginValidation()
-        let error = NSError(domain: "", code: 0, userInfo: [NSLocalizedDescriptionKey: "Something unexpected happened"])
-        c.handleValidationFailure(error)
-        XCTAssertTrue(c.apiKeyError?.contains("Could not verify") ?? false)
-    }
-
-    // MARK: - Error Categorization
-
-    func testCategorizeError403() {
-        let error = NSError(domain: "", code: 0, userInfo: [NSLocalizedDescriptionKey: "Gemini API error 403: forbidden"])
-        let msg = SetupFlowController.categorizeError(error)
-        XCTAssertTrue(msg.contains("invalid"))
-    }
-
-    func testCategorizeErrorApiKey() {
-        let error = NSError(domain: "", code: 0, userInfo: [NSLocalizedDescriptionKey: "API key not valid"])
-        let msg = SetupFlowController.categorizeError(error)
-        XCTAssertTrue(msg.contains("invalid"))
-    }
-
-    func testCategorizeErrorTimeout() {
-        let error = NSError(domain: "", code: 0, userInfo: [NSLocalizedDescriptionKey: "Request timed out after 30 timeout seconds"])
-        let msg = SetupFlowController.categorizeError(error)
-        XCTAssertTrue(msg.contains("Network"))
-    }
-
-    func testCategorizeErrorGeneric() {
-        let error = NSError(domain: "", code: 0, userInfo: [NSLocalizedDescriptionKey: "Unknown server error 500"])
-        let msg = SetupFlowController.categorizeError(error)
-        XCTAssertTrue(msg.contains("Could not verify"))
     }
 
     // MARK: - continueButtonLabel
@@ -306,13 +204,6 @@ final class SetupFlowControllerTests: XCTestCase {
         XCTAssertEqual(c.continueButtonLabel, "Open Stubble")
     }
 
-    func testContinueButtonLabelWhileValidating() {
-        let c = makeController()
-        c.advance()
-        c.beginValidation()
-        XCTAssertEqual(c.continueButtonLabel, "Verifying...")
-    }
-
     // MARK: - Full Happy Path
 
     func testFullHappyPathWithGoogleSignIn() {
@@ -321,14 +212,14 @@ final class SetupFlowControllerTests: XCTestCase {
         // Page 0: Welcome
         XCTAssertEqual(c.currentPage, 0)
         XCTAssertTrue(c.canContinue)
-        XCTAssertEqual(c.handleContinue(), .advance)
+        XCTAssertTrue(c.handleContinue())
 
         // Page 1: Sign-In
         XCTAssertEqual(c.currentPage, 1)
         XCTAssertFalse(c.canContinue)
         c.isSignedInViaGoogle = true
         XCTAssertTrue(c.canContinue)
-        XCTAssertEqual(c.handleContinue(), .advance)
+        XCTAssertTrue(c.handleContinue())
 
         // Page 2: Permissions (last page)
         XCTAssertEqual(c.currentPage, 2)
@@ -349,24 +240,6 @@ final class SetupFlowControllerTests: XCTestCase {
         XCTAssertEqual(c.currentPage, 0)
         // Sign-in state persists
         XCTAssertTrue(c.isSignedInViaGoogle)
-    }
-
-    func testSetApiKeyError() {
-        let c = makeController()
-        c.setApiKeyError("Test error")
-        XCTAssertEqual(c.apiKeyError, "Test error")
-        c.setApiKeyError(nil)
-        XCTAssertNil(c.apiKeyError)
-    }
-
-    func testCancelValidation() {
-        let c = makeController()
-        c.advance()
-        c.beginValidation()
-        XCTAssertTrue(c.isValidating)
-        c.cancelValidation("Invalid key format.")
-        XCTAssertFalse(c.isValidating)
-        XCTAssertEqual(c.apiKeyError, "Invalid key format.")
     }
 
     func testGoogleSignInStateDoesNotAffectOtherPages() {

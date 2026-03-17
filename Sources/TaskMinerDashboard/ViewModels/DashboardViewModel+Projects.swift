@@ -24,7 +24,7 @@ extension DashboardViewModel {
         resolveAggregatedProjectColors()
 
         // Synthesize summaries for multi-day periods in background
-        if projectsTimePeriod != .day && hasGeminiKey {
+        if projectsTimePeriod != .day && hasAIAccess {
             Task {
                 await synthesizeProjectSummaries()
             }
@@ -125,7 +125,7 @@ extension DashboardViewModel {
         }
 
         guard let client = geminiClient else {
-            projectsError = "Gemini API key not configured"
+            projectsError = "Sign in required for AI features"
             return
         }
 

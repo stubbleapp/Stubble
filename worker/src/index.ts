@@ -41,7 +41,7 @@ const RATE_LIMITS = {
   pro: 2000,
 };
 
-const TRIAL_DAYS = 30;
+const TRIAL_DAYS = 10;
 
 // Gemini API base URL
 const GEMINI_BASE = "https://generativelanguage.googleapis.com";
@@ -317,9 +317,17 @@ async function getTier(
     }
   }
 
-  // 4. Ultimate fallback: use iat (inaccurate but better than blocking)
+  // 4. Ultimate fallback: use iat and cache it so subsequent requests are consistent.
+  // Without caching, each token refresh would reset the trial start to the new iat,
+  // causing the trial to appear to never expire (or reset unexpectedly).
   if (createdAtEpoch === null) {
+    console.warn(`getTier: no trial_start for user ${payload.sub}, caching iat as fallback`);
+    const kvKey = `created:${payload.sub}`;
     createdAtEpoch = payload.iat;
+    // Cache this permanently so the trial calculation is consistent across refreshes
+    await env.RATE_LIMITS.put(kvKey, String(Math.floor(createdAtEpoch)), {
+      expirationTtl: 7776000, // 90 days
+    });
   }
 
   const now = Date.now() / 1000;

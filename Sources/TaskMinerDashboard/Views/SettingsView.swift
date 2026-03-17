@@ -90,8 +90,6 @@ struct SettingsView: View {
     @State private var authSession: ASWebAuthenticationSession?
 
     // General
-    @State private var apiKey: String = ""
-    @State private var showKey = false
     @State private var customPrompt: String = ""
     @State private var granularity: TaskGranularity = .medium
     @State private var minAwayMinutes: Int = 15
@@ -193,10 +191,6 @@ struct SettingsView: View {
             guard !isLoading else { return }
             SettingsManager.shared.dayWrapHour = dayWrapHour
         }
-        .onChange(of: apiKey) {
-            guard !isLoading else { return }
-            viewModel.updateGeminiKey(apiKey)
-        }
         .onChange(of: customPrompt) {
             guard !isLoading else { return }
             let trimmed = customPrompt.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -217,7 +211,7 @@ struct SettingsView: View {
                 dismiss()
             }
         } message: {
-            Text("This will permanently delete all tasks, activities, screenshots, and learned memory. Your settings and API key will be kept. This cannot be undone.")
+            Text("This will permanently delete all tasks, activities, screenshots, and learned memory. Your settings and sign-in will be kept. This cannot be undone.")
         }
     }
 
@@ -225,7 +219,6 @@ struct SettingsView: View {
 
     private func loadSettings() {
         isLoading = true
-        apiKey = SettingsManager.shared.geminiApiKey ?? ""
         customPrompt = SettingsManager.shared.customPrompt ?? ""
         granularity = SettingsManager.shared.granularity
         minAwayMinutes = SettingsManager.shared.minAwayMinutes
@@ -276,48 +269,6 @@ struct SettingsView: View {
                     RoundedRectangle(cornerRadius: 8, style: .continuous)
                         .fill(Theme.surfaceElevated)
                 )
-            }
-
-            // Advanced: API Key (BYOK)
-            DisclosureGroup {
-                VStack(alignment: .leading, spacing: 8) {
-                    HStack(spacing: 8) {
-                        Group {
-                            if showKey {
-                                TextField("Enter your Gemini API key", text: $apiKey)
-                            } else {
-                                SecureField("Enter your Gemini API key", text: $apiKey)
-                            }
-                        }
-                        .textFieldStyle(.plain)
-                        .font(.system(size: 13, design: .monospaced))
-                        .padding(8)
-                        .background(Theme.surfaceElevated)
-                        .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
-                        .accessibilityIdentifier("settings-api-key")
-
-                        Button {
-                            showKey.toggle()
-                        } label: {
-                            Image(systemName: showKey ? "eye.slash" : "eye")
-                                .font(.system(size: 12))
-                                .foregroundStyle(Theme.textMuted)
-                                .frame(width: 28, height: 28)
-                                .background(Theme.surfaceElevated)
-                                .clipShape(Circle())
-                        }
-                        .buttonStyle(.plain)
-                    }
-
-                    Text("Use your own Gemini API key instead of a Stubble account. Get a key from Google AI Studio.")
-                        .font(.caption2)
-                        .foregroundStyle(Theme.textMuted)
-                }
-                .padding(.top, 4)
-            } label: {
-                Text("Gemini API Key (BYOK)")
-                    .font(.subheadline.weight(.medium))
-                    .foregroundStyle(Theme.textPrimary)
             }
 
             // Task Granularity
@@ -688,24 +639,12 @@ struct SettingsView: View {
                 .foregroundStyle(Theme.statusError)
             }
 
-            Divider()
-
-            // BYOK alternative
-            VStack(alignment: .leading, spacing: 8) {
-                Text("Or use your own API key")
-                    .font(.caption.weight(.medium))
-                    .foregroundStyle(Theme.textSecondary)
-
-                Text("If you prefer to use your own Gemini API key, enter it in the General tab under \"Gemini API Key (BYOK)\".")
-                    .font(.caption2)
-                    .foregroundStyle(Theme.textMuted)
-            }
         }
     }
 
     private func startGoogleSignIn() {
         guard let (url, codeVerifier) = AuthManager.shared.buildGoogleSignInURL() else {
-            signInError = "Backend not configured yet. Use a BYOK API key in General settings."
+            signInError = "Unable to connect to authentication service. Please try again later."
             return
         }
 
@@ -909,7 +848,7 @@ struct SettingsView: View {
                 .buttonStyle(.plain)
                 .accessibilityIdentifier("settings-clear-data")
 
-                Text("Permanently deletes all tasks, activities, screenshots, and memory. Your settings and API key are kept.")
+                Text("Permanently deletes all tasks, activities, screenshots, and memory. Your settings and sign-in are kept.")
                     .font(.caption2)
                     .foregroundStyle(Theme.textMuted)
             }

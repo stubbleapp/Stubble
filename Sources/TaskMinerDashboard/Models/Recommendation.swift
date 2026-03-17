@@ -6,7 +6,7 @@ struct StubsContent {
     let greetingContext: String
     let daySummary: String?
     let suggestedQuestions: [String]
-    let recommendations: [Recommendation]
+    var recommendations: [Recommendation]
 }
 
 /// A single AI-generated recommendation based on the user's recent work activity.
@@ -17,8 +17,8 @@ struct Recommendation: Identifiable {
     let title: String
     let description: String
     let reason: String          // Why this is relevant to the user's recent work
-    let actionLabel: String     // e.g. "Read Article", "Try It", "Learn More"
-    let actionURL: String?      // Optional URL to open
+    var actionLabel: String     // e.g. "Read Article", "Try It", "Learn More"
+    var actionURL: String?      // Optional URL to open
     let iconName: String        // SF Symbol name
 
     enum Category: String, CaseIterable {

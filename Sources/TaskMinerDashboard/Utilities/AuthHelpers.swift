@@ -13,7 +13,7 @@ enum AuthHelpers {
         } else if desc.contains("timeout") || desc.contains("timed out") {
             return "The request timed out. Please try again."
         } else if desc.contains("unsupported_grant_type") || desc.contains("invalid_grant") {
-            return "Authentication configuration error. Please try again or use an API key."
+            return "Authentication configuration error. Please try again."
         } else if desc.contains("server") || desc.contains("500") || desc.contains("503") {
             return "The authentication server is temporarily unavailable. Please try again later."
         } else {

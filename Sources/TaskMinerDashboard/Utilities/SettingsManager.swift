@@ -21,11 +21,6 @@ final class SettingsManager {
 
     // MARK: - Convenience Accessors (delegate to SettingsStore)
 
-    var geminiApiKey: String? {
-        get { store?.geminiApiKey }
-        set { store?.geminiApiKey = newValue }
-    }
-
     var customPrompt: String? {
         get { store?.customPrompt }
         set { store?.customPrompt = newValue }

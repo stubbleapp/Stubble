@@ -17,33 +17,32 @@ struct RecommendationsView: View {
     var body: some View {
         VStack(spacing: 0) {
             if !hasContent {
+                // Show error if generation failed, otherwise show loading spinner
                 Spacer()
-                VStack(spacing: 14) {
-                    Text(viewModel.isGeneratingRecommendations
-                         ? "Analyzing your recent activity\u{2026}"
-                         : "Generate stubs to get personalized\ninsights based on your recent work.")
-                        .font(.system(size: 13))
-                        .foregroundStyle(Theme.textMuted)
-                        .multilineTextAlignment(.center)
-                        .lineSpacing(2)
-
-                    Button(action: { viewModel.generateRecommendations() }) {
-                        Text("Generate Stubs")
-                            .font(.system(size: 13, weight: .medium))
-                            .foregroundStyle(.white)
-                            .padding(.horizontal, 20)
-                            .padding(.vertical, 8)
-                            .background(Theme.accent)
-                            .clipShape(Capsule())
+                if let error = viewModel.recommendationsError {
+                    VStack(spacing: 12) {
+                        Image(systemName: "exclamationmark.triangle")
+                            .font(.system(size: 24))
+                            .foregroundStyle(Theme.textMuted)
+                        Text(error)
+                            .font(.system(size: 13))
+                            .foregroundStyle(Theme.textMuted)
+                            .multilineTextAlignment(.center)
+                        Button("Try Again") {
+                            viewModel.generateRecommendations()
+                        }
+                        .buttonStyle(.plain)
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundStyle(Theme.accent)
+                        .padding(.top, 4)
                     }
-                    .buttonStyle(.plain)
-                    .padding(.top, 4)
-                    .disabled(!viewModel.hasGeminiKey || viewModel.isGeneratingRecommendations)
-                    .opacity(viewModel.hasGeminiKey && !viewModel.isGeneratingRecommendations ? 1 : 0.4)
-
-                    if !viewModel.hasGeminiKey {
-                        Text("Requires a Gemini API key")
-                            .font(.system(size: 11))
+                    .padding(.horizontal, 24)
+                } else {
+                    VStack(spacing: 12) {
+                        ProgressView()
+                            .scaleEffect(0.8)
+                        Text("Generating recommendations…")
+                            .font(.system(size: 13))
                             .foregroundStyle(Theme.textMuted)
                     }
                 }
@@ -75,12 +74,8 @@ struct RecommendationsView: View {
             }
         }
         .onAppear {
-            if !hasContent
-                && !viewModel.isGeneratingRecommendations
-                && !viewModel.hasAttemptedStubsGeneration
-                && viewModel.hasGeminiKey
-                && !viewModel.tasks.isEmpty {
-                viewModel.hasAttemptedStubsGeneration = true
+            // Auto-generate when visiting and none exist
+            if !hasContent && !viewModel.isGeneratingRecommendations {
                 viewModel.generateRecommendations()
             }
         }

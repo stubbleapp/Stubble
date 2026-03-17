@@ -84,11 +84,6 @@ public final class SettingsStore {
 
     // MARK: - Convenience Accessors
 
-    public var geminiApiKey: String? {
-        get { load().geminiApiKey }
-        set { update { $0.geminiApiKey = newValue } }
-    }
-
     public var customPrompt: String? {
         get { load().customPrompt }
         set { update { $0.customPrompt = newValue } }
@@ -210,7 +205,6 @@ public final class SettingsStore {
 /// Codable settings struct shared between SettingsStore and SettingsManager.
 /// Matches the JSON schema of `~/Library/Application Support/Stubble/settings.json`.
 public struct AppSettings: Codable, Equatable {
-    public var geminiApiKey: String?
     public var customPrompt: String?
     public var granularity: TaskGranularity?
     public var showScreensTab: Bool?
@@ -251,7 +245,6 @@ public struct AppSettings: Codable, Equatable {
     public var notificationsLearningEnabled: Bool?
 
     public init(
-        geminiApiKey: String? = nil,
         customPrompt: String? = nil,
         granularity: TaskGranularity? = nil,
         showScreensTab: Bool? = nil,
@@ -274,7 +267,6 @@ public struct AppSettings: Codable, Equatable {
         notificationsMinRelevanceScore: Double? = nil,
         notificationsLearningEnabled: Bool? = nil
     ) {
-        self.geminiApiKey = geminiApiKey
         self.customPrompt = customPrompt
         self.granularity = granularity
         self.showScreensTab = showScreensTab

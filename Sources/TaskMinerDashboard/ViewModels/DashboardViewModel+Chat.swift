@@ -211,7 +211,7 @@ extension DashboardViewModel {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
         guard let client = geminiClient else {
-            chatError = "Gemini API key not configured"
+            chatError = "Sign in required for AI features"
             return
         }
 

@@ -23,7 +23,6 @@ public final class AuthManager: @unchecked Sendable {
         case trial(daysRemaining: Int)
         case pro
         case expired
-        case byok
     }
 
     public enum AuthError: LocalizedError, Sendable {
@@ -348,59 +347,123 @@ public final class AuthManager: @unchecked Sendable {
 
     /// Force refresh the session token. Used after subscription changes to pick up new user_metadata.
     public func refreshSession() async throws {
-        // Coalesce concurrent refresh calls into a single in-flight task.
-        // This prevents the race where two callers both see near-expiry,
-        // both call Supabase, and the second invalidates the first's new token.
-        if let existing = refreshTask {
-            return try await existing.value
+        // Atomically check for existing refresh task OR create and assign a new one.
+        // This prevents the race where two threads both see near-expiry,
+        // both pass the existence check, then both create tasks — the second
+        // would use an already-invalidated refresh token and trigger sign-out.
+        let taskToAwait: Task<Void, Error> = sessionQueue.sync {
+            if let existing = refreshTask {
+                return existing
+            }
+            let newTask = Task<Void, Error> { [self] in
+                defer {
+                    sessionQueue.sync { refreshTask = nil }
+                }
+                try await performRefresh()
+            }
+            refreshTask = newTask
+            return newTask
         }
 
-        let task = Task<Void, Error> {
-            defer { refreshTask = nil }
+        try await taskToAwait.value
+    }
 
-            let currentRefresh = sessionQueue.sync { self.refreshToken }
-            guard let currentRefresh else {
+    /// Internal: performs the actual token refresh. Called from refreshSession().
+    private func performRefresh() async throws {
+        // Re-read auth.json before refreshing — another process (dashboard/daemon)
+        // may have already refreshed and written newer tokens to the file.
+        reloadSessionFromDisk()
+
+        // Check if the reloaded token is still valid (not expiring soon)
+        let needsRefresh = sessionQueue.sync { () -> Bool in
+            guard let expiresAt = self.tokenExpiresAt else { return true }
+            return expiresAt.timeIntervalSinceNow < 60
+        }
+        if !needsRefresh {
+            Logger.info("AuthManager: skipping refresh — another process already refreshed")
+            return
+        }
+
+        let currentRefresh = sessionQueue.sync { self.refreshToken }
+        guard let currentRefresh else {
+            throw AuthError.sessionExpired
+        }
+
+        let url = URL(string: "\(StubbleAPIConfig.supabaseURL)/auth/v1/token?grant_type=refresh_token")!
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue(StubbleAPIConfig.supabaseAnonKey, forHTTPHeaderField: "apikey")
+        request.setValue("Bearer \(StubbleAPIConfig.supabaseAnonKey)", forHTTPHeaderField: "Authorization")
+
+        let body: [String: String] = ["refresh_token": currentRefresh]
+        request.httpBody = try JSONSerialization.data(withJSONObject: body)
+        request.timeoutInterval = 30
+
+        do {
+            let (data, response) = try await URLSession.shared.data(for: request)
+
+            guard let httpResponse = response as? HTTPURLResponse else {
+                throw AuthError.networkError("Invalid response")
+            }
+
+            if httpResponse.statusCode == 200 {
+                try self.parseAndStoreSession(data: data)
+            } else if httpResponse.statusCode == 400 || httpResponse.statusCode == 401 {
+                // Auth error — but check if another process refreshed successfully
+                // before signing out (prevents race condition between dashboard/daemon)
+                reloadSessionFromDisk()
+                let stillValid = sessionQueue.sync { () -> Bool in
+                    guard let expiresAt = self.tokenExpiresAt else { return false }
+                    return expiresAt.timeIntervalSinceNow > 60
+                }
+                if stillValid {
+                    Logger.info("AuthManager: refresh failed but file has valid token — another process refreshed")
+                    return
+                }
+                // Truly expired — sign out
+                Logger.warning("AuthManager: refresh token rejected (status \(httpResponse.statusCode)) — signing out")
+                self.signOut()
                 throw AuthError.sessionExpired
+            } else {
+                // Server error (5xx) — don't sign out, just fail this request
+                let errorBody = String(data: data, encoding: .utf8) ?? "Unknown error"
+                throw AuthError.networkError("Refresh failed (\(httpResponse.statusCode)): \(errorBody)")
             }
-
-            let url = URL(string: "\(StubbleAPIConfig.supabaseURL)/auth/v1/token?grant_type=refresh_token")!
-
-            var request = URLRequest(url: url)
-            request.httpMethod = "POST"
-            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-            request.setValue(StubbleAPIConfig.supabaseAnonKey, forHTTPHeaderField: "apikey")
-            request.setValue("Bearer \(StubbleAPIConfig.supabaseAnonKey)", forHTTPHeaderField: "Authorization")
-
-            let body: [String: String] = ["refresh_token": currentRefresh]
-            request.httpBody = try JSONSerialization.data(withJSONObject: body)
-            request.timeoutInterval = 30
-
-            do {
-                let (data, response) = try await URLSession.shared.data(for: request)
-
-                guard let httpResponse = response as? HTTPURLResponse else {
-                    throw AuthError.networkError("Invalid response")
-                }
-
-                if httpResponse.statusCode == 200 {
-                    try self.parseAndStoreSession(data: data)
-                } else if httpResponse.statusCode == 400 || httpResponse.statusCode == 401 {
-                    // Auth error (invalid/revoked refresh token) — sign out
-                    self.signOut()
-                    throw AuthError.sessionExpired
-                } else {
-                    // Server error (5xx) — don't sign out, just fail this request
-                    let errorBody = String(data: data, encoding: .utf8) ?? "Unknown error"
-                    throw AuthError.networkError("Refresh failed (\(httpResponse.statusCode)): \(errorBody)")
-                }
-            } catch let error as URLError {
-                // Network error (timeout, offline) — don't sign out
-                throw AuthError.networkError(error.localizedDescription)
-            }
+        } catch let error as URLError {
+            // Network error (timeout, offline) — don't sign out
+            throw AuthError.networkError(error.localizedDescription)
         }
+    }
 
-        refreshTask = task
-        try await task.value
+    /// Re-read auth.json from disk to pick up tokens written by another process.
+    private func reloadSessionFromDisk() {
+        guard FileManager.default.fileExists(atPath: authFilePath.path),
+              let data = try? Data(contentsOf: authFilePath),
+              let dict = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+        else { return }
+
+        sessionQueue.sync {
+            if let newAccess = dict["access_token"] as? String {
+                self.accessToken = newAccess
+            }
+            if let newRefresh = dict["refresh_token"] as? String {
+                self.refreshToken = newRefresh
+            }
+            if let expiresAt = dict["expires_at"] as? TimeInterval {
+                self.tokenExpiresAt = Date(timeIntervalSince1970: expiresAt)
+            }
+            // Update other fields too
+            if let id = dict["user_id"] as? String { self.userId = id }
+            if let email = dict["user_email"] as? String { self._userEmail = email }
+            if let name = dict["user_name"] as? String { self._userName = name }
+            if let tier = dict["subscription_tier"] as? String { self._subscriptionTier = tier }
+            if let createdAtStr = dict["user_created_at"] as? String {
+                self.userCreatedAt = Self.iso8601Formatter.date(from: createdAtStr)
+            }
+            self._isSignedIn = (self.accessToken != nil && self.refreshToken != nil)
+        }
     }
 
     // MARK: - Session Parsing
@@ -469,8 +532,6 @@ public final class AuthManager: @unchecked Sendable {
                 } else {
                     _currentState = .expired
                 }
-            } else if hasBYOKKey() {
-                _currentState = .byok
             } else {
                 _currentState = .signedOut
             }
@@ -483,17 +544,6 @@ public final class AuthManager: @unchecked Sendable {
         let daysSinceSignup = Calendar.current.dateComponents([.day], from: createdAt, to: Date()).day ?? 0
         let remaining = StubbleAPIConfig.trialDays - daysSinceSignup
         return max(0, remaining)
-    }
-
-    /// Check if a BYOK API key exists in settings.json (same pattern as GeminiClient).
-    private func hasBYOKKey() -> Bool {
-        guard let config = try? SharedConfiguration(),
-              let data = try? Data(contentsOf: config.settingsPath),
-              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let key = json["geminiApiKey"] as? String,
-              !key.isEmpty
-        else { return false }
-        return true
     }
 
     // MARK: - Persistence (auth.json)

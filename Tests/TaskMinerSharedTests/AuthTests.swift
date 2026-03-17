@@ -43,7 +43,6 @@ final class AuthManagerTests: XCTestCase {
         XCTAssertEqual(AuthManager.AuthState.signedOut, AuthManager.AuthState.signedOut)
         XCTAssertEqual(AuthManager.AuthState.pro, AuthManager.AuthState.pro)
         XCTAssertEqual(AuthManager.AuthState.expired, AuthManager.AuthState.expired)
-        XCTAssertEqual(AuthManager.AuthState.byok, AuthManager.AuthState.byok)
         XCTAssertEqual(AuthManager.AuthState.trial(daysRemaining: 15), AuthManager.AuthState.trial(daysRemaining: 15))
         XCTAssertNotEqual(AuthManager.AuthState.trial(daysRemaining: 15), AuthManager.AuthState.trial(daysRemaining: 10))
         XCTAssertNotEqual(AuthManager.AuthState.signedOut, AuthManager.AuthState.pro)
