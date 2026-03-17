@@ -45,7 +45,7 @@ public enum StubbleAPIConfig {
     public static let enterpriseContactURL = "mailto:hello@stubble.app?subject=Stubble%20Enterprise"
 
     /// Free trial duration in days.
-    public static let trialDays = 10
+    public static let trialDays = 5
 
     /// Whether the backend is configured (placeholder values replaced).
     public static var isConfigured: Bool {

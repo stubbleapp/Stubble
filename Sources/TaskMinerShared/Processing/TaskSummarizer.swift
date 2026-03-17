@@ -815,6 +815,17 @@ public final class TaskSummarizer: Sendable {
                 Logger.debug("TaskSummarizer: no active_seconds for '\(title)', will use span time (\(Int(spanTime))s)")
             }
 
+            // Video call override: HID-based active_seconds underreports video call time
+            // because users don't move the mouse while watching/listening. Use span time instead.
+            if activeSeconds != nil && Self.isVideoCallTask(appNames: appNames, title: title, links: links) {
+                let reportedActive = activeSeconds!
+                // Only override if AI significantly underreported (>25% less than span)
+                if reportedActive < spanTime * 0.75 {
+                    Logger.info("TaskSummarizer: video call task '\(title)' — using span time \(Int(spanTime))s instead of \(Int(reportedActive))s")
+                    activeSeconds = nil
+                }
+            }
+
             return TaskRecord(
                 date: dateStr,
                 startTime: startTime,
@@ -842,6 +853,40 @@ public final class TaskSummarizer: Sendable {
         }
 
         return SummarizationResult(tasks: merged, daySummary: daySummary, newMemoryEntries: [], projects: projects)
+    }
+
+    /// Detects if a task is a video call/meeting based on apps, title, or links.
+    /// Video calls should use span time instead of HID-based active_seconds.
+    private static func isVideoCallTask(appNames: [String], title: String, links: [String]) -> Bool {
+        let titleLower = title.lowercased()
+
+        // Video conferencing app names
+        let videoCallApps = [
+            "google meet", "zoom", "microsoft teams", "facetime", "webex",
+            "slack", "discord", "skype", "tuple", "around", "gather"
+        ]
+        for app in appNames {
+            let appLower = app.lowercased()
+            for videoApp in videoCallApps {
+                if appLower.contains(videoApp) { return true }
+            }
+        }
+
+        // Meeting keywords in title
+        let meetingKeywords = [
+            "meeting", "call", "video call", "sync", "standup", "stand-up",
+            "1:1", "1-on-1", "one-on-one", "conference", "huddle"
+        ]
+        for keyword in meetingKeywords {
+            if titleLower.contains(keyword) { return true }
+        }
+
+        // Granola meeting link indicates this was a tracked meeting
+        for link in links {
+            if link.hasPrefix("granola://") { return true }
+        }
+
+        return false
     }
 
     /// Post-processing: merge tasks that share the same title into a single task

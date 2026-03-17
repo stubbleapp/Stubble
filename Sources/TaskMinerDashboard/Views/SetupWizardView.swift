@@ -238,7 +238,7 @@ private struct WelcomePage: View {
                         Text("You're in Control")
                             .font(.system(size: 13, weight: .semibold))
                             .foregroundStyle(Theme.textPrimary)
-                        Text("Start with a free 10-day trial. Pause monitoring or delete your data at any time.")
+                        Text("Start with a free 5-day trial. Pause monitoring or delete your data at any time.")
                             .font(.system(size: 12))
                             .foregroundStyle(Theme.textSecondary)
                             .fixedSize(horizontal: false, vertical: true)
@@ -299,7 +299,7 @@ private struct SignInPage: View {
                     .foregroundStyle(Theme.textPrimary)
                     .padding(.bottom, 6)
 
-                Text("Sign in to get a 10-day free trial with full AI features.\nNo credit card required.")
+                Text("Sign in to get a 5-day free trial with full AI features.\nNo credit card required.")
                     .font(.system(size: 13))
                     .foregroundStyle(Theme.textSecondary)
                     .multilineTextAlignment(.center)

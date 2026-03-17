@@ -41,7 +41,7 @@ const RATE_LIMITS = {
   pro: 2000,
 };
 
-const TRIAL_DAYS = 10;
+const TRIAL_DAYS = 5;
 
 // Gemini API base URL
 const GEMINI_BASE = "https://generativelanguage.googleapis.com";
