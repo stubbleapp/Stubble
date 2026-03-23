@@ -103,6 +103,15 @@ strip -x "$APP_BUNDLE/Contents/MacOS/$APP_NAME" 2>/dev/null || true
 # bundle at the end with the Developer ID identity.
 codesign --remove-signature "$APP_BUNDLE/Contents/MacOS/$APP_NAME" 2>/dev/null || true
 
+# Copy stubble-mcp binary (MCP server for AI agent access)
+MCP_BINARY="$BUILD_DIR/.build/release/stubble-mcp"
+if [ -f "$MCP_BINARY" ]; then
+    cp "$MCP_BINARY" "$APP_BUNDLE/Contents/MacOS/stubble-mcp"
+    strip -x "$APP_BUNDLE/Contents/MacOS/stubble-mcp" 2>/dev/null || true
+    codesign --remove-signature "$APP_BUNDLE/Contents/MacOS/stubble-mcp" 2>/dev/null || true
+    echo "🔌 MCP server bundled (stubble-mcp)"
+fi
+
 # Copy app icon
 ICON_SRC="$BUILD_DIR/Resources/AppIcon.icns"
 if [ -f "$ICON_SRC" ]; then
@@ -244,7 +253,12 @@ if [ -d "$SPARKLE_FW" ]; then
     codesign --force --sign "$CODESIGN_IDENTITY" --options runtime --timestamp "$SPARKLE_FW" 2>&1 || SIGN_FAILED=1
 fi
 
-# 5) The main app bundle (outermost) — with entitlements
+# 5) Sign stubble-mcp binary (if present)
+if [ -f "$APP_BUNDLE/Contents/MacOS/stubble-mcp" ]; then
+    codesign --force --sign "$CODESIGN_IDENTITY" --options runtime --timestamp "$APP_BUNDLE/Contents/MacOS/stubble-mcp" 2>&1 || SIGN_FAILED=1
+fi
+
+# 6) The main app bundle (outermost) — with entitlements
 ENTITLEMENTS="$BUILD_DIR/Resources/Stubble.entitlements"
 if [ -f "$ENTITLEMENTS" ]; then
     codesign --force --sign "$CODESIGN_IDENTITY" --options runtime --timestamp --entitlements "$ENTITLEMENTS" "$APP_BUNDLE" 2>&1 || SIGN_FAILED=1
