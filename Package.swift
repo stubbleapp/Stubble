@@ -50,6 +50,18 @@ let package = Package(
                 .linkedLibrary("sqlite3")
             ]
         ),
+        // MCP server library (exposes Stubble data to AI agents)
+        .target(
+            name: "TaskMinerMCP",
+            dependencies: ["TaskMinerShared"],
+            path: "Sources/TaskMinerMCP"
+        ),
+        // MCP server executable (stdio transport for AI agents)
+        .executableTarget(
+            name: "stubble-mcp",
+            dependencies: ["TaskMinerMCP"],
+            path: "Sources/StubbleMCP"
+        ),
         // Unit tests for shared library
         .testTarget(
             name: "TaskMinerSharedTests",
