@@ -191,6 +191,13 @@ public final class SettingsStore {
         set { update { $0.notificationsLearningEnabled = newValue } }
     }
 
+    // MARK: - MCP Settings
+
+    public var mcpEnabled: Bool {
+        get { load().mcpEnabled ?? false }
+        set { update { $0.mcpEnabled = newValue } }
+    }
+
     // MARK: - Helpers
 
     private func update(_ mutate: (inout AppSettings) -> Void) {
@@ -244,6 +251,11 @@ public struct AppSettings: Codable, Equatable {
     /// Allow engagement-based learning (default: true).
     public var notificationsLearningEnabled: Bool?
 
+    // MARK: - MCP Settings
+
+    /// Whether MCP (AI agent access) is enabled (default: false).
+    public var mcpEnabled: Bool?
+
     public init(
         customPrompt: String? = nil,
         granularity: TaskGranularity? = nil,
@@ -265,7 +277,8 @@ public struct AppSettings: Codable, Equatable {
         notificationsEnabledCategories: [String]? = nil,
         notificationsPreferChatPrompts: Bool? = nil,
         notificationsMinRelevanceScore: Double? = nil,
-        notificationsLearningEnabled: Bool? = nil
+        notificationsLearningEnabled: Bool? = nil,
+        mcpEnabled: Bool? = nil
     ) {
         self.customPrompt = customPrompt
         self.granularity = granularity
@@ -288,5 +301,6 @@ public struct AppSettings: Codable, Equatable {
         self.notificationsPreferChatPrompts = notificationsPreferChatPrompts
         self.notificationsMinRelevanceScore = notificationsMinRelevanceScore
         self.notificationsLearningEnabled = notificationsLearningEnabled
+        self.mcpEnabled = mcpEnabled
     }
 }

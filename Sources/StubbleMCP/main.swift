@@ -29,6 +29,12 @@ struct StubbleMCPMain {
             return
         }
 
+        // Check if MCP is enabled before starting server
+        guard isMCPEnabled() else {
+            printDisabledMessage()
+            return
+        }
+
         // Default: run MCP server with stdio
         let server = MCPServer()
         await server.runStdio()
@@ -73,6 +79,11 @@ struct StubbleMCPMain {
     }
 
     static func showKey() {
+        guard isMCPEnabled() else {
+            printDisabledMessage()
+            return
+        }
+
         if let key = MCPAuth.shared.getKey() {
             print("API Key: \(key)")
             print("\nAdd to your MCP client config:")
@@ -92,6 +103,11 @@ struct StubbleMCPMain {
     }
 
     static func rotateKey() {
+        guard isMCPEnabled() else {
+            printDisabledMessage()
+            return
+        }
+
         if let newKey = MCPAuth.shared.rotateKey() {
             print("New API Key: \(newKey)")
             print("\nAll existing agent connections have been invalidated.")
@@ -99,5 +115,39 @@ struct StubbleMCPMain {
         } else {
             print("Error: Could not rotate API key")
         }
+    }
+
+    /// Check if MCP is enabled in settings.
+    static func isMCPEnabled() -> Bool {
+        let supportDir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+        let settingsPath = supportDir.appendingPathComponent("Stubble/settings.json")
+
+        guard FileManager.default.fileExists(atPath: settingsPath.path) else {
+            return false
+        }
+
+        do {
+            let data = try Data(contentsOf: settingsPath)
+            if let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+               let mcpEnabled = json["mcpEnabled"] as? Bool {
+                return mcpEnabled
+            }
+            return false
+        } catch {
+            return false
+        }
+    }
+
+    static func printDisabledMessage() {
+        print("""
+        MCP access is disabled.
+
+        To enable AI agent access to your Stubble data:
+        1. Open Stubble
+        2. Go to Settings → Data
+        3. Enable "Allow AI agents to access activity data"
+
+        Then run this command again to get your API key.
+        """)
     }
 }

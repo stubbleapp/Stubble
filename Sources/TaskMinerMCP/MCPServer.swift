@@ -29,6 +29,23 @@ public final class MCPServer: @unchecked Sendable {
 
     /// Start the MCP server with stdio transport
     public func runStdio() async {
+        // Check if MCP is enabled in settings
+        guard isMCPEnabled() else {
+            let errorResponse: [String: Any] = [
+                "jsonrpc": "2.0",
+                "id": NSNull(),
+                "error": [
+                    "code": -32001,
+                    "message": "MCP access is disabled. Enable it in Stubble Settings → Data → AI Agent Access."
+                ]
+            ]
+            if let data = try? JSONSerialization.data(withJSONObject: errorResponse) {
+                FileHandle.standardOutput.write(data)
+                FileHandle.standardOutput.write("\n".data(using: .utf8)!)
+            }
+            return
+        }
+
         // Initialize database reader and memory store
         guard let dbReader = await initializeDatabaseReader() else {
             await sendError(id: nil, error: .internalError)
@@ -307,6 +324,29 @@ public final class MCPServer: @unchecked Sendable {
         let stubbleDir = supportDir.appendingPathComponent("Stubble")
         let memoryPath = stubbleDir.appendingPathComponent("memory.json")
         return UserMemoryStore(filePath: memoryPath)
+    }
+
+    /// Check if MCP is enabled in settings.
+    /// Reads the settings file directly since MCP runs as a separate process.
+    private func isMCPEnabled() -> Bool {
+        let supportDir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+        let settingsPath = supportDir.appendingPathComponent("Stubble/settings.json")
+
+        guard FileManager.default.fileExists(atPath: settingsPath.path) else {
+            return false // Settings file doesn't exist, default to disabled
+        }
+
+        do {
+            let data = try Data(contentsOf: settingsPath)
+            if let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+               let mcpEnabled = json["mcpEnabled"] as? Bool {
+                return mcpEnabled
+            }
+            return false // Key not present, default to disabled
+        } catch {
+            Logger.error("MCPServer: Failed to read settings: \(error)")
+            return false
+        }
     }
 
     private func sendError(id: RequestID?, error: JSONRPCError) async {

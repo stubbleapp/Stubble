@@ -41,6 +41,7 @@ let package = Package(
             dependencies: [
                 "TaskMinerShared",
                 "TaskMinerDaemon",
+                "TaskMinerMCP",
                 "Sparkle",
                 .product(name: "TelemetryDeck", package: "SwiftSDK"),
                 .product(name: "MarkdownUI", package: "swift-markdown-ui"),

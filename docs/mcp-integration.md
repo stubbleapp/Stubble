@@ -100,7 +100,7 @@ Get AI-generated task summaries for a date range.
 
 ### get_activity_log
 
-Get raw activity records (app switches, window titles, idle periods).
+Get raw activity records (app switches, window titles, idle periods). Supports single-date or date-range queries.
 
 ```json
 {
@@ -114,13 +114,29 @@ Get raw activity records (app switches, window titles, idle periods).
 }
 ```
 
+**Date range example:**
+```json
+{
+  "name": "get_activity_log",
+  "arguments": {
+    "from": "2026-03-20",
+    "to": "2026-03-23",
+    "limit": 500
+  }
+}
+```
+
 **Parameters:**
 | Name | Type | Default | Description |
 |------|------|---------|-------------|
-| `date` | string | today | Date to query |
+| `date` | string | today | Single date to query (YYYY-MM-DD) |
+| `from` | string | - | Start date for range (YYYY-MM-DD) |
+| `to` | string | today | End date for range (YYYY-MM-DD) |
 | `app` | string | - | Filter by app name |
 | `include_idle` | boolean | true | Include idle periods |
 | `limit` | integer | 500 | Max results (up to 2000) |
+
+Note: Use `date` for single-day queries OR `from`/`to` for multi-day ranges. Date range capped at 30 days.
 
 **Response:**
 ```json
@@ -287,6 +303,35 @@ Get the user's learned profile (role, projects, tech stack, interests).
 ```json
 {
   "profile": "Software engineer working on Stubble, a macOS productivity app. Primary tech stack: Swift, SwiftUI, SQLite. Interested in AI/ML integration and developer tools."
+}
+```
+
+---
+
+### get_ocr_digest
+
+Get the daily OCR digest containing extracted URLs, file paths, code symbols, and other structured data from screen captures. Useful for understanding what was visible on screen.
+
+```json
+{
+  "name": "get_ocr_digest",
+  "arguments": {
+    "date": "2026-03-23"
+  }
+}
+```
+
+**Parameters:**
+| Name | Type | Default | Description |
+|------|------|---------|-------------|
+| `date` | string | today | Date to query (YYYY-MM-DD) |
+
+**Response:**
+```json
+{
+  "date": "2026-03-23",
+  "digest": "## URLs Visited\n- github.com/samattias/stubble\n- stackoverflow.com/questions/...\n\n## Code Symbols\n- MCPTools\n- DatabaseReader\n- ActivityRecord\n\n## File Paths\n- Sources/TaskMinerMCP/MCPTools.swift\n- docs/mcp-integration.md",
+  "generated_at": "2026-03-23T18:00:00Z"
 }
 ```
 

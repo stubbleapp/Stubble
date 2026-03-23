@@ -29,16 +29,20 @@ public final class MCPAuth: @unchecked Sendable {
         }
     }
 
-    /// Get the current API key (generates one if none exists)
+    /// Get the current API key (generates one if none exists).
+    /// Returns nil if MCP is disabled in settings.
     public func getKey() -> String? {
         queue.sync {
-            loadOrGenerateKey()
+            guard isMCPEnabled() else { return nil }
+            return loadOrGenerateKey()
         }
     }
 
-    /// Rotate the API key (invalidates all existing connections)
+    /// Rotate the API key (invalidates all existing connections).
+    /// Returns nil if MCP is disabled in settings.
     public func rotateKey() -> String? {
         queue.sync {
+            guard isMCPEnabled() else { return nil }
             let newKey = generateKey()
             if saveKey(newKey) {
                 cachedKey = newKey
@@ -120,6 +124,28 @@ public final class MCPAuth: @unchecked Sendable {
                 ofItemAtPath: keyFileURL.path
             )
             return true
+        } catch {
+            return false
+        }
+    }
+
+    /// Check if MCP is enabled in settings.
+    /// Reads the settings file directly since MCP runs as a separate process.
+    private func isMCPEnabled() -> Bool {
+        let supportDir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+        let settingsPath = supportDir.appendingPathComponent("Stubble/settings.json")
+
+        guard FileManager.default.fileExists(atPath: settingsPath.path) else {
+            return false // Settings file doesn't exist, default to disabled
+        }
+
+        do {
+            let data = try Data(contentsOf: settingsPath)
+            if let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+               let mcpEnabled = json["mcpEnabled"] as? Bool {
+                return mcpEnabled
+            }
+            return false // Key not present, default to disabled
         } catch {
             return false
         }

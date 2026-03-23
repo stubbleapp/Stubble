@@ -1085,6 +1085,23 @@ public class DatabaseReader {
         return sqlite3_column_text(stmt, 0).map { String(cString: $0) }
     }
 
+    /// Fetch the cached OCR digest record for a date, including generated_at timestamp.
+    public func ocrDigestRecord(for date: Date) -> OCRDigestRecord? {
+        let dateStr = SharedFormatters.dayFormatter.string(from: date)
+        let sql = "SELECT date, digest, generated_at FROM ocr_digests WHERE date = ?"
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return nil }
+        defer { sqlite3_finalize(stmt) }
+        sqliteBindText(stmt, 1, dateStr)
+
+        guard sqlite3_step(stmt) == SQLITE_ROW else { return nil }
+        return OCRDigestRecord(
+            date: sqlite3_column_text(stmt, 0).map { String(cString: $0) } ?? dateStr,
+            digest: sqlite3_column_text(stmt, 1).map { String(cString: $0) } ?? "",
+            generatedAt: sqlite3_column_text(stmt, 2).flatMap { SharedFormatters.iso8601.date(from: String(cString: $0)) } ?? Date()
+        )
+    }
+
     /// Fetch all OCR texts for a date (used to build digest on-demand in the dashboard).
     public func ocrTextsForDate(_ date: Date) -> [String] {
         let range = dateRange(for: date)

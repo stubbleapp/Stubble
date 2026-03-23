@@ -47,24 +47,24 @@ public final class MCPTools: @unchecked Sendable {
         ),
         MCPTool(
             name: "get_activity_log",
-            description: "Get raw activity records (app switches, window titles, idle periods). Shows what apps were used and when.",
+            description: "Get raw activity records (app switches, window titles, idle periods). Shows what apps were used and when. Use 'date' for single-day queries or 'from'/'to' for multi-day ranges (up to 30 days).",
             inputSchema: .object([
                 "type": .string("object"),
                 "properties": .object([
                     "date": .object([
                         "type": .string("string"),
                         "format": .string("date"),
-                        "description": .string("Date to query (YYYY-MM-DD). Defaults to today.")
+                        "description": .string("Single date to query (YYYY-MM-DD). Defaults to today if no date range specified.")
                     ]),
                     "from": .object([
                         "type": .string("string"),
-                        "format": .string("date-time"),
-                        "description": .string("Start time (ISO8601)")
+                        "format": .string("date"),
+                        "description": .string("Start date for range query (YYYY-MM-DD)")
                     ]),
                     "to": .object([
                         "type": .string("string"),
-                        "format": .string("date-time"),
-                        "description": .string("End time (ISO8601)")
+                        "format": .string("date"),
+                        "description": .string("End date for range query (YYYY-MM-DD). Defaults to today if 'from' is provided.")
                     ]),
                     "app": .object([
                         "type": .string("string"),
@@ -176,6 +176,20 @@ public final class MCPTools: @unchecked Sendable {
                 "type": .string("object"),
                 "properties": .object([:])
             ])
+        ),
+        MCPTool(
+            name: "get_ocr_digest",
+            description: "Get the daily OCR digest containing extracted URLs, file paths, code symbols, and other structured data from screen captures. Useful for understanding what was on screen.",
+            inputSchema: .object([
+                "type": .string("object"),
+                "properties": .object([
+                    "date": .object([
+                        "type": .string("string"),
+                        "format": .string("date"),
+                        "description": .string("Date to query (YYYY-MM-DD). Defaults to today.")
+                    ])
+                ])
+            ])
         )
     ]
 
@@ -198,6 +212,8 @@ public final class MCPTools: @unchecked Sendable {
             return try await getDaySummary(params: GetDaySummaryInput.parse(from: params))
         case "get_user_profile":
             return try await getUserProfile()
+        case "get_ocr_digest":
+            return try await getOCRDigest(params: GetOCRDigestInput.parse(from: params))
         default:
             throw MCPError.toolNotFound(tool)
         }
@@ -238,8 +254,39 @@ public final class MCPTools: @unchecked Sendable {
     }
 
     private func getActivityLog(params: GetActivityLogInput) async throws -> MCPToolResult {
-        let date = try parseDate(params.date) ?? Date()
-        var activities = await MainActor.run { dbReader.activities(for: date) }
+        var activities: [ActivityRecord] = []
+
+        // Handle date range vs single date
+        if let fromStr = params.from {
+            // Date range mode
+            guard let fromDate = try parseDate(fromStr) else {
+                throw MCPError.invalidDateFormat(fromStr)
+            }
+            let toDate = try parseDate(params.to) ?? Date()
+
+            // Cap range at 30 days to prevent excessive queries
+            let daysDiff = Calendar.current.dateComponents([.day], from: fromDate, to: toDate).day ?? 0
+            if daysDiff > 30 {
+                throw MCPError.internalError("Date range exceeds 30 days maximum")
+            }
+            if daysDiff < 0 {
+                throw MCPError.internalError("'from' date must be before 'to' date")
+            }
+
+            // Query each day in the range
+            var currentDate = fromDate
+            while currentDate <= toDate {
+                let queryDate = currentDate
+                let dayActivities = await MainActor.run { dbReader.activities(for: queryDate) }
+                activities.append(contentsOf: dayActivities)
+                guard let next = Calendar.current.date(byAdding: .day, value: 1, to: currentDate) else { break }
+                currentDate = next
+            }
+        } else {
+            // Single date mode (existing behavior)
+            let date = try parseDate(params.date) ?? Date()
+            activities = await MainActor.run { dbReader.activities(for: date) }
+        }
 
         // Filter by app if specified
         if let app = params.app {
@@ -444,6 +491,27 @@ public final class MCPTools: @unchecked Sendable {
         } else {
             output["profile"] = nil
             output["message"] = "No user profile available yet"
+        }
+
+        let json = try JSONSerialization.data(withJSONObject: output, options: [.prettyPrinted, .sortedKeys])
+        return MCPToolResult(text: String(data: json, encoding: .utf8) ?? "{}")
+    }
+
+    private func getOCRDigest(params: GetOCRDigestInput) async throws -> MCPToolResult {
+        let date = try parseDate(params.date) ?? Date()
+
+        let digestRecord = await MainActor.run { dbReader.ocrDigestRecord(for: date) }
+
+        var output: [String: Any] = [
+            "date": SharedFormatters.dayFormatter.string(from: date)
+        ]
+
+        if let record = digestRecord {
+            output["digest"] = DataSanitizer.sanitize(record.digest)
+            output["generated_at"] = SharedFormatters.iso8601.string(from: record.generatedAt)
+        } else {
+            output["digest"] = nil
+            output["message"] = "No OCR digest available for this date"
         }
 
         let json = try JSONSerialization.data(withJSONObject: output, options: [.prettyPrinted, .sortedKeys])

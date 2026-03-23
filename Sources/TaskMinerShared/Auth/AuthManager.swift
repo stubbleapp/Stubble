@@ -480,6 +480,7 @@ public final class AuthManager: @unchecked Sendable {
                 self.userId = user["id"] as? String
                 self._userEmail = user["email"] as? String
 
+                // Try created_at first (may be missing in PKCE token exchange response)
                 if let createdAtStr = user["created_at"] as? String {
                     self.userCreatedAt = Self.iso8601Formatter.date(from: createdAtStr)
                 }
@@ -496,6 +497,19 @@ public final class AuthManager: @unchecked Sendable {
                     if self._userEmail == nil, let email = metadata["email"] as? String {
                         self._userEmail = email
                     }
+                    // Fallback: use trial_start from response metadata if created_at wasn't available
+                    if self.userCreatedAt == nil, let trialStart = metadata["trial_start"] as? TimeInterval {
+                        self.userCreatedAt = Date(timeIntervalSince1970: trialStart)
+                    }
+                }
+            }
+
+            // Final fallback: decode JWT to extract trial_start from user_metadata claim
+            // (Supabase's PKCE response body may not include user_metadata, but the JWT always has it)
+            if self.userCreatedAt == nil {
+                if let jwtMetadata = Self.decodeJWTUserMetadata(newAccessToken),
+                   let trialStart = jwtMetadata["trial_start"] as? TimeInterval {
+                    self.userCreatedAt = Date(timeIntervalSince1970: trialStart)
                 }
             }
 
@@ -636,6 +650,34 @@ public final class AuthManager: @unchecked Sendable {
             .replacingOccurrences(of: "+", with: "-")
             .replacingOccurrences(of: "/", with: "_")
             .replacingOccurrences(of: "=", with: "")
+    }
+
+    // MARK: - JWT Helpers
+
+    /// Decode a JWT's payload and extract the user_metadata claim.
+    /// JWTs are base64url-encoded: header.payload.signature
+    /// Returns nil if decoding fails or user_metadata is not present.
+    private static func decodeJWTUserMetadata(_ jwt: String) -> [String: Any]? {
+        let parts = jwt.split(separator: ".")
+        guard parts.count == 3 else { return nil }
+
+        // Decode the payload (second part)
+        var base64 = String(parts[1])
+            .replacingOccurrences(of: "-", with: "+")
+            .replacingOccurrences(of: "_", with: "/")
+
+        // Add padding if needed (base64 requires length divisible by 4)
+        let remainder = base64.count % 4
+        if remainder > 0 {
+            base64 += String(repeating: "=", count: 4 - remainder)
+        }
+
+        guard let payloadData = Data(base64Encoded: base64),
+              let payload = try? JSONSerialization.jsonObject(with: payloadData) as? [String: Any],
+              let userMetadata = payload["user_metadata"] as? [String: Any]
+        else { return nil }
+
+        return userMetadata
     }
 }
 

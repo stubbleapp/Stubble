@@ -130,4 +130,11 @@ final class SettingsManager {
         get { store?.notificationsLearningEnabled ?? true }
         set { store?.notificationsLearningEnabled = newValue }
     }
+
+    // MARK: - MCP Settings
+
+    var mcpEnabled: Bool {
+        get { store?.mcpEnabled ?? false }
+        set { store?.mcpEnabled = newValue }
+    }
 }

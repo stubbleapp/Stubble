@@ -1,6 +1,7 @@
 import SwiftUI
 import AuthenticationServices
 import TaskMinerShared
+import TaskMinerMCP
 
 // MARK: - Settings Category
 
@@ -108,6 +109,8 @@ struct SettingsView: View {
 
     // Data
     @State private var showClearConfirmation = false
+    @State private var mcpEnabled: Bool = false
+    @State private var mcpKey: String? = nil
 
     // Auth state reactivity — AuthManager is not @Observable, so we use a
     // counter that increments on .authStateChanged to trigger SwiftUI re-render.
@@ -225,7 +228,9 @@ struct SettingsView: View {
         dayWrapHour = SettingsManager.shared.dayWrapHour
         appearanceMode = SettingsManager.shared.appearanceMode
         exclusions = SettingsManager.shared.exclusions
+        mcpEnabled = SettingsManager.shared.mcpEnabled
         loadMemoryEntries()
+        loadMCPKey()
         isLoading = false
     }
 
@@ -832,12 +837,95 @@ struct SettingsView: View {
     // MARK: - Data Pane
 
     private var dataPane: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            Text("Data Management")
-                .font(.subheadline.weight(.medium))
-                .foregroundStyle(Theme.textPrimary)
+        VStack(alignment: .leading, spacing: 24) {
+            // AI Agent Access (MCP)
+            VStack(alignment: .leading, spacing: 12) {
+                Text("AI Agent Access (MCP)")
+                    .font(.subheadline.weight(.medium))
+                    .foregroundStyle(Theme.textPrimary)
 
+                Toggle(isOn: $mcpEnabled) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Allow AI agents to access activity data")
+                            .font(.system(size: 12))
+                            .foregroundStyle(Theme.textPrimary)
+                        Text("When enabled, AI agents like Claude Code can query your activity history via the MCP protocol.")
+                            .font(.caption2)
+                            .foregroundStyle(Theme.textMuted)
+                    }
+                }
+                .toggleStyle(.switch)
+                .onChange(of: mcpEnabled) {
+                    guard !isLoading else { return }
+                    SettingsManager.shared.mcpEnabled = mcpEnabled
+                    if mcpEnabled {
+                        loadMCPKey()
+                    } else {
+                        mcpKey = nil
+                    }
+                }
+
+                if mcpEnabled {
+                    VStack(alignment: .leading, spacing: 8) {
+                        if let key = mcpKey {
+                            HStack(spacing: 8) {
+                                Text("API Key:")
+                                    .font(.system(size: 11))
+                                    .foregroundStyle(Theme.textSecondary)
+                                Text(key)
+                                    .font(.system(size: 11, design: .monospaced))
+                                    .foregroundStyle(Theme.textPrimary)
+                                    .textSelection(.enabled)
+                                Spacer()
+                                Button {
+                                    NSPasteboard.general.clearContents()
+                                    NSPasteboard.general.setString(key, forType: .string)
+                                } label: {
+                                    Image(systemName: "doc.on.doc")
+                                        .font(.system(size: 10))
+                                        .foregroundStyle(Theme.accent)
+                                }
+                                .buttonStyle(.plain)
+                                .help("Copy API key")
+                            }
+                            .padding(8)
+                            .background(Theme.surfaceElevated)
+                            .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+                        }
+
+                        // Audit log link
+                        Button {
+                            let homeDir = FileManager.default.homeDirectoryForCurrentUser
+                            let auditPath = homeDir.appendingPathComponent(".stubble/mcp-audit.log")
+                            if FileManager.default.fileExists(atPath: auditPath.path) {
+                                NSWorkspace.shared.open(auditPath)
+                            } else {
+                                // Open the directory if log doesn't exist yet
+                                let stubbleDir = homeDir.appendingPathComponent(".stubble")
+                                NSWorkspace.shared.open(stubbleDir)
+                            }
+                        } label: {
+                            HStack(spacing: 4) {
+                                Image(systemName: "doc.text")
+                                    .font(.system(size: 10))
+                                Text("View Audit Log")
+                                    .font(.system(size: 11, weight: .medium))
+                            }
+                            .foregroundStyle(Theme.textSecondary)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+            }
+
+            Divider()
+
+            // Data Management
             VStack(alignment: .leading, spacing: 8) {
+                Text("Data Management")
+                    .font(.subheadline.weight(.medium))
+                    .foregroundStyle(Theme.textPrimary)
+
                 Button {
                     showClearConfirmation = true
                 } label: {
@@ -853,6 +941,15 @@ struct SettingsView: View {
                     .foregroundStyle(Theme.textMuted)
             }
         }
+    }
+
+    private func loadMCPKey() {
+        // Only load key if MCP is enabled
+        guard mcpEnabled else {
+            mcpKey = nil
+            return
+        }
+        mcpKey = MCPAuth.shared.getKey()
     }
 
     // MARK: - About Pane

@@ -242,4 +242,24 @@ final class SettingsStoreTests: XCTestCase {
         XCTAssertEqual(store.minAwayMinutes, 5)
         XCTAssertEqual(store.granularity, .low)
     }
+
+    // MARK: - MCP Settings
+
+    func testMcpEnabledAccessor() {
+        let store = makeStore()
+        XCTAssertFalse(store.mcpEnabled, "Default should be false")
+        store.mcpEnabled = true
+        XCTAssertTrue(store.mcpEnabled)
+        store.mcpEnabled = false
+        XCTAssertFalse(store.mcpEnabled)
+    }
+
+    func testMcpEnabledPersistsAcrossInstances() {
+        let path = makePath("mcp.json")
+        let store1 = SettingsStore(filePath: path)
+        store1.mcpEnabled = true
+
+        let store2 = SettingsStore(filePath: path)
+        XCTAssertTrue(store2.mcpEnabled)
+    }
 }

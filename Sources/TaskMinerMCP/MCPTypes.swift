@@ -330,6 +330,15 @@ struct GetDaySummaryInput: Codable {
     }
 }
 
+/// Input for get_ocr_digest tool
+struct GetOCRDigestInput: Codable {
+    let date: String?
+
+    static func parse(from params: [String: JSONValue]?) -> GetOCRDigestInput {
+        GetOCRDigestInput(date: params?["date"]?.stringValue)
+    }
+}
+
 // MARK: - MCP Errors
 
 public enum MCPError: Error, LocalizedError {
