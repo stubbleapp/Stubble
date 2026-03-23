@@ -46,6 +46,9 @@ const TRIAL_DAYS = 5;
 // Gemini API base URL
 const GEMINI_BASE = "https://generativelanguage.googleapis.com";
 
+// Maximum response size from Gemini (50MB)
+const MAX_RESPONSE_SIZE = 50 * 1024 * 1024;
+
 // Supabase JWKS URL for ES256 verification
 const SUPABASE_JWKS_URL =
   "https://uyeacjkroneihbtjswnv.supabase.co/auth/v1/.well-known/jwks.json";
@@ -115,7 +118,9 @@ export default {
 
       // 5. Forward to Gemini (only allowed Gemini API paths)
       const url = new URL(request.url);
-      if (!url.pathname.startsWith("/v1beta/models/") && !url.pathname.startsWith("/v1/models/")) {
+      // Normalize path to prevent traversal attacks (e.g., /v1beta/../admin/)
+      const normalizedPath = normalizePath(url.pathname);
+      if (!normalizedPath.startsWith("/v1beta/models/") && !normalizedPath.startsWith("/v1/models/")) {
         return errorResponse(400, "invalid_path", "Only Gemini model endpoints are allowed");
       }
       // Reject oversized payloads before forwarding to Gemini (10MB limit)
@@ -124,7 +129,7 @@ export default {
         return errorResponse(413, "payload_too_large", "Request body exceeds 10MB limit");
       }
 
-      const geminiUrl = `${GEMINI_BASE}${url.pathname}${url.search}`;
+      const geminiUrl = `${GEMINI_BASE}${normalizedPath}${url.search}`;
 
       const geminiHeaders = new Headers();
       geminiHeaders.set(
@@ -147,7 +152,7 @@ export default {
         });
       }
 
-      // 7. Stream response back
+      // 7. Stream response back with size limiting
       const responseHeaders = new Headers(corsHeaders());
       responseHeaders.set(
         "Content-Type",
@@ -162,7 +167,12 @@ export default {
         );
       }
 
-      return new Response(geminiResponse.body, {
+      // Wrap response body with size-limiting transform stream
+      const limitedBody = geminiResponse.body
+        ? createSizeLimitedStream(geminiResponse.body, MAX_RESPONSE_SIZE)
+        : null;
+
+      return new Response(limitedBody, {
         status: geminiResponse.status,
         headers: responseHeaders,
       });
@@ -217,17 +227,26 @@ async function getJWK(kid?: string): Promise<CryptoKey | null> {
 async function verifyJWT_ES256(token: string): Promise<JWTPayload | null> {
   try {
     const parts = token.split(".");
-    if (parts.length !== 3) return null;
+    if (parts.length !== 3) {
+      console.warn("JWT verification failed: invalid token format (expected 3 parts)");
+      return null;
+    }
 
     const [headerB64, payloadB64, signatureB64] = parts;
 
     // Check algorithm and extract kid for key matching
     const headerJson = new TextDecoder().decode(base64UrlDecode(headerB64));
     const header = JSON.parse(headerJson) as { alg?: string; kid?: string };
-    if (header.alg !== "ES256") return null;
+    if (header.alg !== "ES256") {
+      console.warn(`JWT verification failed: unsupported algorithm ${header.alg}`);
+      return null;
+    }
 
     const key = await getJWK(header.kid);
-    if (!key) return null;
+    if (!key) {
+      console.warn(`JWT verification failed: could not fetch JWKS key (kid: ${header.kid})`);
+      return null;
+    }
 
     const data = new TextEncoder().encode(`${headerB64}.${payloadB64}`);
 
@@ -240,12 +259,16 @@ async function verifyJWT_ES256(token: string): Promise<JWTPayload | null> {
       signature,
       data
     );
-    if (!valid) return null;
+    if (!valid) {
+      console.warn("JWT verification failed: signature invalid");
+      return null;
+    }
 
     // Decode payload
     const payloadJson = new TextDecoder().decode(base64UrlDecode(payloadB64));
     return JSON.parse(payloadJson) as JWTPayload;
-  } catch {
+  } catch (error) {
+    console.warn("JWT verification failed: exception during verification", error);
     return null;
   }
 }
@@ -346,6 +369,7 @@ function corsHeaders(): Record<string, string> {
     "Access-Control-Allow-Methods": "POST, OPTIONS",
     "Access-Control-Allow-Headers": "Content-Type, Authorization",
     "Access-Control-Max-Age": "86400",
+    "Strict-Transport-Security": "max-age=31536000; includeSubDomains",
   };
 }
 
@@ -361,4 +385,48 @@ function errorResponse(
       ...corsHeaders(),
     },
   });
+}
+
+/**
+ * Normalize a URL path to resolve .. and . segments, preventing path traversal.
+ * For example: /v1beta/../admin/ becomes /admin/
+ */
+function normalizePath(path: string): string {
+  const segments = path.split("/");
+  const normalized: string[] = [];
+
+  for (const segment of segments) {
+    if (segment === "..") {
+      // Go up one directory (but don't go above root)
+      normalized.pop();
+    } else if (segment !== "." && segment !== "") {
+      normalized.push(segment);
+    }
+  }
+
+  return "/" + normalized.join("/");
+}
+
+/**
+ * Wraps a ReadableStream with a size limit. Aborts the stream if the limit is exceeded.
+ */
+function createSizeLimitedStream(
+  source: ReadableStream<Uint8Array>,
+  maxSize: number
+): ReadableStream<Uint8Array> {
+  let totalBytes = 0;
+
+  return source.pipeThrough(
+    new TransformStream<Uint8Array, Uint8Array>({
+      transform(chunk, controller) {
+        totalBytes += chunk.byteLength;
+        if (totalBytes > maxSize) {
+          console.warn(`Response size limit exceeded: ${totalBytes} > ${maxSize}`);
+          controller.error(new Error("Response too large"));
+          return;
+        }
+        controller.enqueue(chunk);
+      },
+    })
+  );
 }

@@ -1,4 +1,5 @@
 import Foundation
+import TaskMinerShared
 
 /// Audit logger for MCP tool invocations
 public final class MCPAuditLog: @unchecked Sendable {
@@ -55,7 +56,11 @@ public final class MCPAuditLog: @unchecked Sendable {
             entry += " duration_ms=\(durationMs)"
 
             if let error = error {
-                entry += " error=\"\(error.replacingOccurrences(of: "\"", with: "'"))\""
+                // Sanitize and escape error message to prevent log injection
+                let sanitizedError = DataSanitizer.sanitize(error)
+                let escapedError = self.escapeLogValue(sanitizedError)
+                let truncatedError = escapedError.count > 200 ? String(escapedError.prefix(200)) + "..." : escapedError
+                entry += " error=\"\(truncatedError)\""
             }
 
             entry += "\n"
@@ -70,7 +75,8 @@ public final class MCPAuditLog: @unchecked Sendable {
             guard let self = self else { return }
 
             let timestamp = self.dateFormatter.string(from: Date())
-            let entry = "[\(timestamp)] auth_failure reason=\"\(reason)\"\n"
+            let escapedReason = self.escapeLogValue(reason)
+            let entry = "[\(timestamp)] auth_failure reason=\"\(escapedReason)\"\n"
             self.writeEntry(entry)
         }
     }
@@ -145,24 +151,38 @@ public final class MCPAuditLog: @unchecked Sendable {
     }
 
     private func sanitizeParams(_ params: [String: JSONValue]) -> String {
-        // Convert to simple string representation, omitting sensitive values
+        // Convert to simple string representation with proper sanitization
         var parts: [String] = []
         for (key, value) in params.sorted(by: { $0.key < $1.key }) {
+            // Sanitize key to prevent injection
+            let safeKey = escapeLogValue(key)
             switch value {
             case .string(let s):
-                // Truncate long strings
-                let truncated = s.count > 50 ? String(s.prefix(50)) + "..." : s
-                parts.append("\(key):\"\(truncated)\"")
+                // Apply DataSanitizer to redact sensitive patterns, then truncate
+                let sanitized = DataSanitizer.sanitize(s)
+                let truncated = sanitized.count > 50 ? String(sanitized.prefix(50)) + "..." : sanitized
+                let escaped = escapeLogValue(truncated)
+                parts.append("\(safeKey):\"\(escaped)\"")
             case .int(let i):
-                parts.append("\(key):\(i)")
+                parts.append("\(safeKey):\(i)")
             case .bool(let b):
-                parts.append("\(key):\(b)")
+                parts.append("\(safeKey):\(b)")
             case .null:
-                parts.append("\(key):null")
+                parts.append("\(safeKey):null")
             default:
-                parts.append("\(key):[...]")
+                parts.append("\(safeKey):[...]")
             }
         }
         return "{\(parts.joined(separator: ", "))}"
+    }
+
+    /// Escape special characters to prevent log injection
+    private func escapeLogValue(_ value: String) -> String {
+        value
+            .replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: "\n", with: "\\n")
+            .replacingOccurrences(of: "\r", with: "\\r")
+            .replacingOccurrences(of: "\t", with: "\\t")
+            .replacingOccurrences(of: "\"", with: "\\\"")
     }
 }

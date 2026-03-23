@@ -49,10 +49,10 @@ struct DayWrapCard: View {
 
     private var statsCard: some View {
         HStack(spacing: 0) {
-            // Focus Time
+            // Work Time (total task duration)
             StatBlock(
                 value: formatDuration(focusTime),
-                label: "Focus",
+                label: "Work",
                 icon: "bolt.fill"
             )
 

@@ -34,7 +34,7 @@ extension DashboardViewModel {
         let isDayWrapped = shouldShowDayWrap  // True for past days OR today after wrap hour
         let dateLabel = SharedFormatters.headerDateFormatter.string(from: selectedDate)
         let dateString = SharedFormatters.dayFormatter.string(from: selectedDate)
-        let fingerprintAtGeneration = currentTaskFingerprint
+        let fingerprintAtGeneration = currentStubsFingerprint
 
         recommendationsTask?.cancel()
         recommendationsTask = Task {
@@ -46,16 +46,20 @@ extension DashboardViewModel {
                 let activityLog = self.buildActivityLog()
                 let weeklyTrends = self.buildWeeklyTrends(from: recentTasks)
                 let ocrDigest = self.loadOrBuildOCRDigest()
+                let recentMeetings = self.dbReader?.granolaMeetings(for: Date()) ?? []
 
                 guard !Task.isCancelled else { return }
 
-                // Ensure user profile is fresh before generating recommendations
+                // Fire-and-forget profile synthesis - don't block recommendations
                 if let client = self.geminiClient {
                     let synth = ProfileSynthesizer(geminiClient: client)
-                    await synth.synthesizeIfNeeded(store: self.memoryStore)
+                    let store = self.memoryStore
+                    Task { await synth.synthesizeIfNeeded(store: store) }
                 }
-                guard !Task.isCancelled else { return }
+                // Use current profile immediately (may be slightly stale but avoids latency)
                 let memoryContext = self.memoryStore.contextString()
+
+                guard !Task.isCancelled else { return }
 
                 // Capture all values needed by the sendable closure before entering the timeout
                 let capturedGenerator = generator
@@ -66,6 +70,7 @@ extension DashboardViewModel {
                 let capturedActivityLog = activityLog
                 let capturedWeeklyTrends = weeklyTrends
                 let capturedOcrDigest = ocrDigest
+                let capturedMeetings = recentMeetings
                 let capturedDateLabel = dateLabel
                 let capturedIsDayWrapped = isDayWrapped
 
@@ -91,7 +96,8 @@ extension DashboardViewModel {
                             memoryContext: capturedMemoryContext,
                             activityLog: capturedActivityLog,
                             weeklyTrends: capturedWeeklyTrends,
-                            ocrDigest: capturedOcrDigest
+                            ocrDigest: capturedOcrDigest,
+                            recentMeetings: capturedMeetings
                         )
                     }
                 }
@@ -171,8 +177,12 @@ extension DashboardViewModel {
 
     // MARK: - Auto-Refresh Staleness Check
 
-    /// Check whether stubs should be auto-refreshed based on task data changes.
+    /// Check whether stubs should be auto-refreshed based on data changes or time elapsed.
     /// Called from the periodic refresh timer after loading fresh data from the DB.
+    ///
+    /// Refresh triggers:
+    /// 1. Data changed (tasks, meetings, memory) AND 30+ min since last refresh
+    /// 2. OR 1 hour elapsed since last refresh (time-based fallback for freshness)
     func checkStubsStaleness() {
         // Only auto-refresh for today's date
         guard isViewingToday else { return }
@@ -186,15 +196,19 @@ extension DashboardViewModel {
         // Need AI access and tasks to work with
         guard hasAIAccess, !tasks.isEmpty else { return }
 
-        // Enforce minimum interval between auto-refreshes
         let elapsed = Date().timeIntervalSince(lastStubsGenerationTime)
-        guard elapsed >= Self.minStubsRefreshInterval else { return }
+        let fingerprint = currentStubsFingerprint
+        let fingerprintChanged = fingerprint != lastStubsTaskFingerprint
 
-        // Compare task fingerprints — skip if data hasn't changed
-        let fingerprint = currentTaskFingerprint
-        guard fingerprint != lastStubsTaskFingerprint else { return }
+        // Refresh if:
+        // 1. Data changed AND 30+ min elapsed (existing behavior)
+        // 2. OR 1 hour elapsed (time-based fallback for freshness)
+        let shouldRefresh = (fingerprintChanged && elapsed >= Self.minStubsRefreshInterval)
+                         || elapsed >= Self.maxStubsAge
 
-        Logger.debug("Stubs data changed (\(lastStubsTaskFingerprint) → \(fingerprint)) — auto-refreshing")
+        guard shouldRefresh else { return }
+
+        Logger.debug("Stubs refresh: elapsed=\(Int(elapsed))s, changed=\(fingerprintChanged), fingerprint=\(fingerprint)")
         generateRecommendations()
     }
 

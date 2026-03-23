@@ -798,6 +798,42 @@ class AppDelegate {
             ))
         }
 
+        // Create "Other" project for unassigned tasks (matches dashboard's resolveProjectActivities)
+        let unassigned = tasks.indices.filter { !assignedIndices.contains($0) }
+        if !unassigned.isEmpty {
+            let otherTasks = unassigned.map { tasks[$0] }
+            let totalDuration = otherTasks.reduce(0.0) { $0 + $1.duration }
+            let startTime = otherTasks.map(\.startTime).min() ?? otherTasks[0].startTime
+            let endTime = otherTasks.map(\.endTime).max() ?? otherTasks[0].endTime
+
+            var apps: [String] = []
+            var seen = Set<String>()
+            for task in otherTasks {
+                for app in task.appNamesList where seen.insert(app).inserted { apps.append(app) }
+            }
+            let appsJSON = (try? JSONSerialization.data(withJSONObject: apps)).flatMap { String(data: $0, encoding: .utf8) } ?? "[]"
+            let titlesJSON = (try? JSONSerialization.data(withJSONObject: otherTasks.map(\.title))).flatMap { String(data: $0, encoding: .utf8) } ?? "[]"
+
+            // Use same djb2 hash algorithm for "Other" color
+            var hash: UInt64 = 5381
+            for byte in "other".utf8 {
+                hash = ((hash &<< 5) &+ hash) &+ UInt64(byte)
+            }
+            let colorIndex = Int(hash % 8)
+
+            records.append(ProjectActivityRecord(
+                date: dateStr,
+                name: "Other",
+                summary: "Miscellaneous activities.",
+                totalDuration: totalDuration,
+                appNames: appsJSON,
+                taskTitles: titlesJSON,
+                startTime: startTime,
+                endTime: endTime,
+                colorIndex: colorIndex
+            ))
+        }
+
         do {
             try db.insertProjectActivities(records)
             Logger.info("Persisted \(records.count) project activities")

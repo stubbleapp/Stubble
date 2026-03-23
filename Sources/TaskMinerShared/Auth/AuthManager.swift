@@ -94,10 +94,9 @@ public final class AuthManager: @unchecked Sendable {
 
     /// Stores the PKCE code verifier from the most recent `buildGoogleSignInURL()` call
     /// so that `handleCallback(url:)` can complete the exchange when `onOpenURL` fires.
+    /// Note: PKCE (code verifier binding) provides CSRF protection, so a separate state
+    /// parameter is not needed. Supabase GoTrue uses its own internal state anyway.
     private var pendingCodeVerifier: String?
-
-    /// OAuth state parameter for CSRF protection (validated in handleCallback).
-    private var pendingState: String?
 
     /// File path for auth.json.
     private let authFilePath: URL
@@ -139,7 +138,6 @@ public final class AuthManager: @unchecked Sendable {
 
         guard let url = components?.url else { return nil }
         pendingCodeVerifier = codeVerifier
-        pendingState = nil
         return (url, codeVerifier)
     }
 
@@ -200,20 +198,10 @@ public final class AuthManager: @unchecked Sendable {
               let verifier = pendingCodeVerifier
         else { return false }
 
-        // Validate OAuth state parameter (CSRF protection)
-        if let expectedState = pendingState {
-            let components = URLComponents(url: url, resolvingAgainstBaseURL: false)
-            let returnedState = components?.queryItems?.first(where: { $0.name == "state" })?.value
-            guard returnedState == expectedState else {
-                Logger.warning("AuthManager: OAuth state mismatch — possible CSRF attack")
-                pendingCodeVerifier = nil
-                pendingState = nil
-                return false
-            }
-        }
+        // Note: CSRF protection is provided by PKCE (code verifier binding).
+        // Supabase GoTrue manages its own state parameter internally.
 
         pendingCodeVerifier = nil
-        pendingState = nil
         do {
             try await exchangeCode(code, codeVerifier: verifier)
             return true
@@ -263,10 +251,11 @@ public final class AuthManager: @unchecked Sendable {
         let signedIn = sessionQueue.sync { self._isSignedIn }
         guard signedIn else { throw AuthError.sessionExpired }
 
-        // Refresh if token expires within 60 seconds
+        // Refresh if token expires within 5 minutes (300 seconds)
+        // Increased from 60s to provide buffer for slow networks and concurrent requests
         let needsRefresh = sessionQueue.sync { () -> Bool in
             guard let expiresAt = self.tokenExpiresAt else { return false }
-            return expiresAt.timeIntervalSinceNow < 60
+            return expiresAt.timeIntervalSinceNow < 300
         }
         if needsRefresh {
             try await refreshSession()
@@ -286,7 +275,7 @@ public final class AuthManager: @unchecked Sendable {
 
         let needsRefresh = sessionQueue.sync { () -> Bool in
             guard let expiresAt = self.tokenExpiresAt else { return false }
-            return expiresAt.timeIntervalSinceNow < 60
+            return expiresAt.timeIntervalSinceNow < 300
         }
         if needsRefresh {
             try await refreshSession()
@@ -377,7 +366,7 @@ public final class AuthManager: @unchecked Sendable {
         // Check if the reloaded token is still valid (not expiring soon)
         let needsRefresh = sessionQueue.sync { () -> Bool in
             guard let expiresAt = self.tokenExpiresAt else { return true }
-            return expiresAt.timeIntervalSinceNow < 60
+            return expiresAt.timeIntervalSinceNow < 300
         }
         if !needsRefresh {
             Logger.info("AuthManager: skipping refresh — another process already refreshed")
@@ -416,7 +405,7 @@ public final class AuthManager: @unchecked Sendable {
                 reloadSessionFromDisk()
                 let stillValid = sessionQueue.sync { () -> Bool in
                     guard let expiresAt = self.tokenExpiresAt else { return false }
-                    return expiresAt.timeIntervalSinceNow > 60
+                    return expiresAt.timeIntervalSinceNow > 300
                 }
                 if stillValid {
                     Logger.info("AuthManager: refresh failed but file has valid token — another process refreshed")
@@ -497,9 +486,8 @@ public final class AuthManager: @unchecked Sendable {
 
                 if let metadata = user["user_metadata"] as? [String: Any] {
                     self._subscriptionTier = metadata["subscription_tier"] as? String
-                    if let avatarStr = metadata["avatar_url"] as? String,
-                       avatarStr.hasPrefix("https://") {
-                        self._userAvatarURL = URL(string: avatarStr)
+                    if let avatarStr = metadata["avatar_url"] as? String {
+                        self._userAvatarURL = Self.validateAvatarURL(avatarStr)
                     }
                     if let name = metadata["full_name"] as? String ?? metadata["name"] as? String {
                         self._userName = name
@@ -594,13 +582,41 @@ public final class AuthManager: @unchecked Sendable {
         if let createdAtStr = dict["user_created_at"] as? String {
             userCreatedAt = Self.iso8601Formatter.date(from: createdAtStr)
         }
-        // Validate HTTPS to prevent MITM attacks from crafted auth.json
-        if let avatarStr = dict["avatar_url"] as? String,
-           avatarStr.hasPrefix("https://") {
-            _userAvatarURL = URL(string: avatarStr)
+        // Validate avatar URL with domain whitelist
+        if let avatarStr = dict["avatar_url"] as? String {
+            _userAvatarURL = Self.validateAvatarURL(avatarStr)
         }
 
         _isSignedIn = (accessToken != nil && refreshToken != nil)
+    }
+
+    // MARK: - Avatar URL Validation
+
+    /// Allowed domains for avatar URLs (Google OAuth avatars, Supabase CDN)
+    private static let allowedAvatarDomains = [
+        "googleusercontent.com",
+        "lh3.googleusercontent.com",
+        "supabase.co",
+        "supabase.com",
+    ]
+
+    /// Validates an avatar URL: must be HTTPS and from an allowed domain.
+    /// Returns the URL if valid, nil otherwise.
+    private static func validateAvatarURL(_ urlString: String) -> URL? {
+        guard let url = URL(string: urlString),
+              url.scheme == "https",
+              let host = url.host?.lowercased()
+        else { return nil }
+
+        // Check if host matches or is a subdomain of an allowed domain
+        for domain in allowedAvatarDomains {
+            if host == domain || host.hasSuffix(".\(domain)") {
+                return url
+            }
+        }
+
+        Logger.warning("AuthManager: Rejected avatar URL from untrusted domain: \(host)")
+        return nil
     }
 
     // MARK: - PKCE Helpers

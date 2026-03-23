@@ -9,6 +9,7 @@ public final class MCPServer: @unchecked Sendable {
     private let auditLog: MCPAuditLog
     private var tools: MCPTools?
     private var isInitialized = false
+    private var isAuthenticated = false
     private var clientInfo: [String: String] = [:]
 
     // Protocol version
@@ -56,9 +57,11 @@ public final class MCPServer: @unchecked Sendable {
                     output.write("\n".data(using: .utf8)!)
                 }
             } catch {
+                // Log error internally but return generic message
+                Logger.error("MCPServer: Request handling error: \(error)")
                 let errorResponse = JSONRPCResponse(
                     id: nil,
-                    error: JSONRPCError(code: -32603, message: error.localizedDescription)
+                    error: JSONRPCError(code: -32603, message: "Internal server error")
                 )
                 if let jsonData = try? JSONEncoder().encode(errorResponse) {
                     output.write(jsonData)
@@ -113,26 +116,34 @@ public final class MCPServer: @unchecked Sendable {
     // MARK: - MCP Method Handlers
 
     private func handleInitialize(_ request: JSONRPCRequest) -> JSONRPCResponse {
-        // Validate API key from params
+        // Authentication is REQUIRED - extract and validate API key
+        var providedKey: String?
+
+        // Try to get key from request params (_meta.authorization)
         if let params = request.params,
            let meta = params["_meta"]?.objectValue,
            let authHeader = meta["authorization"]?.stringValue {
-            let key = authHeader.replacingOccurrences(of: "Bearer ", with: "")
-            if !auth.validateKey(key) {
-                auditLog.logAuthFailure(reason: "invalid_key")
-                return JSONRPCResponse(id: request.id, error: .unauthorized)
-            }
-        } else {
-            // Check environment variable as fallback
-            if let envKey = ProcessInfo.processInfo.environment["STUBBLE_MCP_KEY"] {
-                if !auth.validateKey(envKey) {
-                    auditLog.logAuthFailure(reason: "invalid_env_key")
-                    return JSONRPCResponse(id: request.id, error: .unauthorized)
-                }
-            }
-            // If no key provided and no env var, we allow it for local development
-            // In production, this should require a key
+            providedKey = authHeader.replacingOccurrences(of: "Bearer ", with: "")
         }
+
+        // Fallback to environment variable (only if key file exists, for stdio transport)
+        if providedKey == nil, let envKey = ProcessInfo.processInfo.environment["STUBBLE_MCP_KEY"] {
+            providedKey = envKey
+        }
+
+        // Validate the key - authentication is mandatory
+        guard let key = providedKey else {
+            auditLog.logAuthFailure(reason: "no_key_provided")
+            return JSONRPCResponse(id: request.id, error: .unauthorized)
+        }
+
+        if !auth.validateKey(key) {
+            auditLog.logAuthFailure(reason: "invalid_key")
+            return JSONRPCResponse(id: request.id, error: .unauthorized)
+        }
+
+        // Mark as authenticated
+        isAuthenticated = true
 
         // Store client info
         if let params = request.params {
@@ -165,7 +176,7 @@ public final class MCPServer: @unchecked Sendable {
     }
 
     private func handleToolsList(_ request: JSONRPCRequest) -> JSONRPCResponse {
-        guard isInitialized else {
+        guard isInitialized, isAuthenticated else {
             return JSONRPCResponse(id: request.id, error: JSONRPCError(code: -32002, message: "Server not initialized"))
         }
 
@@ -186,7 +197,7 @@ public final class MCPServer: @unchecked Sendable {
     }
 
     private func handleToolsCall(_ request: JSONRPCRequest) async -> JSONRPCResponse {
-        guard isInitialized else {
+        guard isInitialized, isAuthenticated else {
             return JSONRPCResponse(id: request.id, error: JSONRPCError(code: -32002, message: "Server not initialized"))
         }
 
@@ -250,6 +261,7 @@ public final class MCPServer: @unchecked Sendable {
                 error: error.localizedDescription
             )
 
+            // Return user-facing error message for known errors
             return JSONRPCResponse(
                 id: request.id,
                 error: JSONRPCError(code: -32602, message: error.localizedDescription)
@@ -257,6 +269,7 @@ public final class MCPServer: @unchecked Sendable {
 
         } catch {
             let durationMs = Int(Date().timeIntervalSince(startTime) * 1000)
+            // Log full error details internally
             auditLog.logToolCall(
                 tool: toolName,
                 params: toolParams,
@@ -265,9 +278,10 @@ public final class MCPServer: @unchecked Sendable {
                 error: error.localizedDescription
             )
 
+            // Return generic error message to prevent information disclosure
             return JSONRPCResponse(
                 id: request.id,
-                error: JSONRPCError(code: -32603, message: "Internal error: \(error.localizedDescription)")
+                error: JSONRPCError(code: -32603, message: "Internal server error")
             )
         }
     }

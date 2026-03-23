@@ -93,12 +93,24 @@ final class DashboardViewModel {
     /// Minimum interval between automatic stubs refreshes (30 minutes).
     static let minStubsRefreshInterval: TimeInterval = 1800
 
+    /// Maximum age before stubs are refreshed even if data hasn't changed (1 hour).
+    /// Ensures time-sensitive recommendations stay fresh (e.g., meeting prep).
+    static let maxStubsAge: TimeInterval = 3600
+
     /// Lightweight fingerprint of the current task data.
     /// Changes when tasks are added, removed, or their time ranges shift.
-    var currentTaskFingerprint: String {
-        guard !tasks.isEmpty else { return "0|" }
-        let latestEnd = tasks.map(\.endTime).max() ?? Date.distantPast
-        return "\(tasks.count)|\(SharedFormatters.iso8601.string(from: latestEnd))"
+    /// Also includes meeting and memory counts to detect new context signals.
+    var currentStubsFingerprint: String {
+        let taskPart: String
+        if tasks.isEmpty {
+            taskPart = "0|"
+        } else {
+            let latestEnd = tasks.map(\.endTime).max() ?? Date.distantPast
+            taskPart = "\(tasks.count)|\(SharedFormatters.iso8601.string(from: latestEnd))"
+        }
+        let meetingCount = granolaMeetings.count
+        let memoryCount = memoryStore.load().count
+        return "\(taskPart)|\(meetingCount)|\(memoryCount)"
     }
 
     /// Whether the user is viewing today's date (forward-looking stubs) or a past day (retrospective summary).
@@ -119,7 +131,7 @@ final class DashboardViewModel {
         return hour >= SettingsManager.shared.dayWrapHour
     }
 
-    /// Total focus time (non-idle task duration).
+    /// Total work time (sum of all task durations, excludes idle/away periods).
     var totalFocusTime: TimeInterval {
         tasks.reduce(0) { $0 + $1.duration }
     }
@@ -376,6 +388,11 @@ final class DashboardViewModel {
     func selectDate(_ date: Date) {
         // Cancel any in-flight date loading
         dateLoadingTask?.cancel()
+
+        // Cancel any in-flight summary regeneration for the previous date
+        summaryTask?.cancel()
+        isGeneratingSummary = false
+        summaryError = nil
 
         // Immediate UI update — date pill reflects selection instantly
         selectedDate = date
@@ -1044,7 +1061,7 @@ final class DashboardViewModel {
         // Mark as already loaded so auto-generate doesn't fire
         if !recommendations.isEmpty || daySummaryContent != nil {
             hasAttemptedStubsGeneration = true
-            lastStubsTaskFingerprint = currentTaskFingerprint
+            lastStubsTaskFingerprint = currentStubsFingerprint
             lastStubsGenerationTime = record.generatedAt
         }
     }

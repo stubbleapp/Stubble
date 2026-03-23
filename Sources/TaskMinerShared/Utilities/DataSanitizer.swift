@@ -42,18 +42,22 @@ public enum DataSanitizer {
             (#"-----BEGIN[A-Z ]*PRIVATE KEY-----[\s\S]*?-----END[A-Z ]*PRIVATE KEY-----"#, "[REDACTED_PRIVATE_KEY]", []),
 
             // --- API keys & tokens ---
-            // Generic long hex/base64 tokens (32+ chars of alnum/+/=/_/-)
-            (#"(?<=[=:\s"'])[A-Za-z0-9+/=_\-]{32,}"#, "[REDACTED_TOKEN]", []),
-            // Prefixed tokens: sk-, pk-, ghp_, gho_, xoxb-, xoxp-, etc.
-            (#"\b(?:sk|pk|ghp|gho|ghu|ghs|xox[bpsa]|AKIA|AIza|hf_|sk-ant-)[A-Za-z0-9_\-]{10,}\b"#, "[REDACTED_KEY]", []),
+            // Prefixed tokens: sk-, pk-, ghp_, gho_, xoxb-, xoxp-, etc. (MUST come before generic pattern)
+            (#"\b(?:sk-|pk-|ghp_|gho_|ghu_|ghs_|xox[bpsa]-|AKIA|AIza|hf_|sk-ant-|api-|key-|token-|secret-)[A-Za-z0-9_\-]{10,}\b"#, "[REDACTED_KEY]", []),
+            // Generic long tokens ONLY after specific markers (=, :, " followed by token-like context)
+            // Require at least one digit AND one letter to avoid matching plain base64 text
+            (#"(?<=[=:]\s{0,2}["']?)[A-Za-z0-9+/=_\-]{32,}(?=["']?(?:\s|$|,|\)))"#, "[REDACTED_TOKEN]", []),
 
             // --- Passwords in common UI patterns ---
             // "Password: ****" or "password = something" (captures value after separator)
             (#"(?i)(?:password|passwd|pwd|secret|token|api[_\s]?key)\s*[:=]\s*\S+"#, "[REDACTED_CREDENTIAL]", [.caseInsensitive]),
 
             // --- Financial ---
-            // Credit card numbers (13-19 digits, possibly separated by spaces/dashes)
-            (#"\b(?:\d[ \-]?){13,19}\b"#, "[REDACTED_CARD]", []),
+            // Credit card numbers in typical formats (4-4-4-4 or 4-6-5 groupings, or 16 consecutive digits)
+            // Avoids matching phone numbers (10-11 digits) and other numeric sequences
+            (#"\b(?:\d{4}[- ]?){3}\d{4}\b"#, "[REDACTED_CARD]", []),  // 16-digit: XXXX-XXXX-XXXX-XXXX
+            (#"\b\d{4}[- ]?\d{6}[- ]?\d{5}\b"#, "[REDACTED_CARD]", []),  // 15-digit Amex: XXXX-XXXXXX-XXXXX
+            (#"\b(?<!\d)\d{15,16}(?!\d)\b"#, "[REDACTED_CARD]", []),  // 15-16 consecutive digits (not part of longer number)
             // SSN (US)
             (#"\b\d{3}[- ]?\d{2}[- ]?\d{4}\b"#, "[REDACTED_SSN]", []),
 

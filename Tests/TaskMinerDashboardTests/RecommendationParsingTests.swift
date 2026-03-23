@@ -230,6 +230,109 @@ final class RecommendationParsingTests: XCTestCase {
         XCTAssertTrue(content.daySummary!.contains("Afternoon"))
     }
 
+    // MARK: - Null URL Handling
+
+    func testParseNullURLSetsActionURLToNil() {
+        let json = """
+        {
+          "recommendations": [
+            {
+              "category": "article",
+              "title": "Article with null URL",
+              "description": "Sometimes AI returns null for URLs.",
+              "reason": "Search didn't find a result.",
+              "action_url": null
+            }
+          ]
+        }
+        """
+
+        let content = parseStubsResponse(json)
+
+        XCTAssertEqual(content.recommendations.count, 1)
+        XCTAssertNil(content.recommendations[0].actionURL)
+        XCTAssertEqual(content.recommendations[0].actionLabel, "Noted")
+    }
+
+    func testParseValidURLSetsProperActionLabel() {
+        let json = """
+        {
+          "recommendations": [
+            {
+              "category": "tool",
+              "title": "SwiftLint",
+              "description": "A linter for Swift.",
+              "reason": "Keep your code clean.",
+              "action_url": "https://github.com/realm/SwiftLint"
+            }
+          ]
+        }
+        """
+
+        let content = parseStubsResponse(json)
+
+        XCTAssertEqual(content.recommendations.count, 1)
+        XCTAssertEqual(content.recommendations[0].actionURL, "https://github.com/realm/SwiftLint")
+        // Tool category should have "Try It" as action label
+        XCTAssertEqual(content.recommendations[0].actionLabel, "Try It")
+    }
+
+    // MARK: - Action Label Defaults By Category
+
+    func testArticleActionLabelDefaults() {
+        let json = """
+        {
+          "recommendations": [
+            {
+              "category": "article",
+              "title": "Test Article",
+              "description": "Desc",
+              "reason": "Reason",
+              "action_url": "https://example.com"
+            }
+          ]
+        }
+        """
+        let content = parseStubsResponse(json)
+        XCTAssertEqual(content.recommendations[0].actionLabel, "Read Article")
+    }
+
+    func testLearningActionLabelDefaults() {
+        let json = """
+        {
+          "recommendations": [
+            {
+              "category": "learning",
+              "title": "Test Learning",
+              "description": "Desc",
+              "reason": "Reason",
+              "action_url": "https://example.com"
+            }
+          ]
+        }
+        """
+        let content = parseStubsResponse(json)
+        XCTAssertEqual(content.recommendations[0].actionLabel, "Explore")
+    }
+
+    func testExplorationActionLabelDefaults() {
+        let json = """
+        {
+          "recommendations": [
+            {
+              "category": "exploration",
+              "title": "Test Exploration",
+              "description": "Desc",
+              "reason": "Reason",
+              "action_url": "https://example.com"
+            }
+          ]
+        }
+        """
+        let content = parseStubsResponse(json)
+        XCTAssertEqual(content.recommendations[0].actionLabel, "Explore")
+    }
+
     // MARK: - Malformed JSON
 
     func testParseInvalidJSON() {

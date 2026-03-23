@@ -34,7 +34,7 @@ final class RecommendationGenerator: Sendable {
     // MARK: - Public API
 
     /// Generate stubs content: greeting, suggested questions, and recommendations.
-    /// Uses two-stage generation: first generates candidates, then refines for relevance.
+    /// Single-stage generation with built-in relevance filtering for better performance.
     func generate(
         recentTasks: [String: [TaskRecord]],
         projectActivities: [ProjectActivity],
@@ -45,8 +45,8 @@ final class RecommendationGenerator: Sendable {
         ocrDigest: String? = nil,
         recentMeetings: [GranolaMeetingRecord] = []
     ) async throws -> StubsContent {
-        // Stage 1: Generate candidate recommendations (6-8 items)
-        let candidateContent = try await generateCandidates(
+        // Single-stage generation - prompt requests final 3-4 recommendations directly
+        return try await generateCandidates(
             recentTasks: recentTasks,
             projectActivities: projectActivities,
             appsUsed: appsUsed,
@@ -55,27 +55,6 @@ final class RecommendationGenerator: Sendable {
             weeklyTrends: weeklyTrends,
             ocrDigest: ocrDigest,
             recentMeetings: recentMeetings
-        )
-
-        // If we got few recommendations, skip refinement
-        guard candidateContent.recommendations.count > 3 else {
-            return candidateContent
-        }
-
-        // Stage 2: Refine recommendations for relevance
-        let refinedRecs = try await refineRecommendations(
-            candidates: candidateContent.recommendations,
-            memoryContext: memoryContext,
-            primaryFocus: extractPrimaryFocus(from: recentTasks, projectActivities: projectActivities),
-            weeklyTrends: weeklyTrends,
-            recentMeetings: recentMeetings
-        )
-
-        return StubsContent(
-            greetingContext: candidateContent.greetingContext,
-            daySummary: nil,
-            suggestedQuestions: candidateContent.suggestedQuestions,
-            recommendations: refinedRecs
         )
     }
 
@@ -205,8 +184,10 @@ final class RecommendationGenerator: Sendable {
            - Action-style have NO punctuation: "Help me optimize the SQLite queries", "Explain TCC permissions" \
            At least 2 should be action-style (no question mark). At least one should be exploratory. \
            Keep them punchy and concise. Reference their actual projects, technologies, and interests. \
-        3. recommendations: Generate 6-8 candidate recommendations (see categories below). \
-           These will be refined in a second pass, so include a mix of categories and depths. \
+        3. recommendations: Generate exactly 3-4 HIGH-QUALITY recommendations (see categories below). \
+           Be selective — only include recommendations that DIRECTLY help with their current work. \
+           Each must score high on: RELEVANCE (helps TODAY's work), ACTIONABILITY (can use immediately), \
+           and NOVELTY (something they likely don't already know). \
         \
         Categories: \
         - article: A relevant technical article, tutorial, or documentation page. \
@@ -227,9 +208,10 @@ final class RecommendationGenerator: Sendable {
           what files they're editing — then recommend resources that go deeper on those specific topics. \
         - Every recommendation's "reason" must cite specific projects, tasks, or patterns from the data. \
         - Never recommend tools/apps the user already uses heavily. \
-        - URLs: You have access to Google Search. Use it to find REAL, current URLs for your recommendations. \
-          Search for the specific tool, article, or resource and include the actual URL from search results. \
-          This ensures links are valid and up-to-date. If search doesn't return a relevant result, use null. \
+        - URLs: You MUST include a valid URL for every recommendation. Use Google Search to find the official \
+          page for each tool, article, or resource. Search for "[name] official site" or "[name] documentation" \
+          and use the top result. For tools, link to the official homepage or GitHub repo. \
+          If you cannot find a good URL for a recommendation, replace it with a different recommendation that has one. \
         - Avoid generic advice ("take breaks", "use version control", "back up your data"). \
         \
         Respond with a JSON object. Do not include any text outside the JSON.
@@ -862,25 +844,20 @@ final class RecommendationGenerator: Sendable {
                             return (index, false)
                         }
 
-                        // Check for soft 404s in response body
+                        // Check for soft 404s - only in the <title> tag to avoid false positives
                         let body = String(data: data, encoding: .utf8)?.lowercased() ?? ""
-                        let soft404Patterns = [
-                            "page not found", "404 not found", "page doesn't exist",
-                            "page does not exist", "this page isn't available",
-                            "no longer available", "content not found", "we couldn't find"
-                        ]
+                        let soft404Patterns = ["404", "not found", "page doesn't exist", "page does not exist"]
 
-                        for pattern in soft404Patterns {
-                            if body.contains(pattern) {
-                                Logger.info("RecommendationGenerator: URL validation - soft 404 for \(urlString)")
-                                return (index, false)
+                        // Extract title tag content if present
+                        if let titleStart = body.range(of: "<title>"),
+                           let titleEnd = body.range(of: "</title>", range: titleStart.upperBound..<body.endIndex) {
+                            let titleContent = String(body[titleStart.upperBound..<titleEnd.lowerBound])
+                            for pattern in soft404Patterns {
+                                if titleContent.contains(pattern) {
+                                    Logger.info("RecommendationGenerator: URL validation - soft 404 in title for \(urlString)")
+                                    return (index, false)
+                                }
                             }
-                        }
-
-                        // Detect SPA shells that render 404s client-side
-                        if body.contains("this page requires javascript") {
-                            Logger.info("RecommendationGenerator: URL validation - SPA shell for \(urlString)")
-                            return (index, false)
                         }
 
                         return (index, true)

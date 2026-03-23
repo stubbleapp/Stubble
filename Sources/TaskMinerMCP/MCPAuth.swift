@@ -98,13 +98,14 @@ public final class MCPAuth: @unchecked Sendable {
     }
 
     private func generateKey() -> String {
-        var bytes = [UInt8](repeating: 0, count: 24)
+        // Use 32 bytes (256 bits) of entropy for strong key generation
+        var bytes = [UInt8](repeating: 0, count: 32)
         _ = SecRandomCopyBytes(kSecRandomDefault, bytes.count, &bytes)
         let base64 = Data(bytes).base64EncodedString()
             .replacingOccurrences(of: "+", with: "")
             .replacingOccurrences(of: "/", with: "")
             .replacingOccurrences(of: "=", with: "")
-        // Take first 32 chars for a clean key
+        // Take first 32 chars for a clean key (still 192+ bits of entropy after base64)
         let suffix = String(base64.prefix(32))
         return keyPrefix + suffix
     }
@@ -125,16 +126,25 @@ public final class MCPAuth: @unchecked Sendable {
     }
 
     /// Constant-time string comparison to prevent timing attacks
-    private func constantTimeCompare(_ a: String, _ b: String) -> Bool {
-        let aBytes = Array(a.utf8)
-        let bBytes = Array(b.utf8)
+    /// Always iterates through the expected key length to avoid timing leaks on length mismatch
+    private func constantTimeCompare(_ provided: String, _ expected: String) -> Bool {
+        let providedBytes = Array(provided.utf8)
+        let expectedBytes = Array(expected.utf8)
 
-        guard aBytes.count == bBytes.count else { return false }
-
+        // Always iterate through the expected length to prevent timing leaks
+        // If provided is shorter, we compare against zeros (will fail but in constant time)
+        // If provided is longer, we ignore extra bytes (will fail due to length check)
         var result: UInt8 = 0
-        for (aByte, bByte) in zip(aBytes, bBytes) {
-            result |= aByte ^ bByte
+
+        // Check length mismatch in constant time
+        result |= UInt8(truncatingIfNeeded: providedBytes.count ^ expectedBytes.count)
+
+        // Compare bytes, padding with zeros if needed
+        for i in 0..<expectedBytes.count {
+            let providedByte = i < providedBytes.count ? providedBytes[i] : 0
+            result |= providedByte ^ expectedBytes[i]
         }
+
         return result == 0
     }
 }
