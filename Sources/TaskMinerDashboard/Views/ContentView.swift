@@ -12,22 +12,39 @@ private enum ToolbarLayout {
 /// Tab identifiers to avoid hardcoded indices drifting out of sync.
 private enum Tab: Int, CaseIterable {
     case day = 0
-    case forYou = 1
-    case projects = 2
+    case projects = 1
+    case connect = 2
     case log = 3
+    case graph = 4
 
     var title: String {
         switch self {
         case .day: return "Day"
-        case .forYou: return "For You"
         case .projects: return "Projects"
+        case .connect: return "Connect"
         case .log: return "Log"
+        case .graph: return "Graph"
+        }
+    }
+
+    /// Whether this is a debug-only tab (hidden by default).
+    var isDebugTab: Bool {
+        self == .log || self == .graph
+    }
+
+    /// Whether this tab hides the date selector (cross-day or non-date views).
+    var hidesDateSelector: Bool {
+        switch self {
+        case .projects, .connect:
+            return true
+        default:
+            return false
         }
     }
 
     /// Visible tabs (excludes debug tabs unless requested).
     static func visibleTabs(includeDebug: Bool) -> [Tab] {
-        includeDebug ? Tab.allCases : [.day, .forYou, .projects]
+        includeDebug ? Tab.allCases : [.day, .projects, .connect]
     }
 }
 
@@ -61,8 +78,8 @@ struct ContentView: View {
                 .background(Theme.statusError.opacity(0.12))
             }
 
-            // Hide date selector on For You and Projects (cross-day views)
-            if selectedTab != .forYou && selectedTab != .projects {
+            // Hide date selector on cross-day views (For You, Projects, Connect)
+            if !selectedTab.hidesDateSelector {
                 DaySelectorView()
                     .background(Theme.secondaryBackground)
 
@@ -75,16 +92,23 @@ struct ContentView: View {
                 switch selectedTab {
                 case .day:
                     TaskTimelineView()
-                case .forYou:
-                    ChatTabView()
                 case .projects:
                     ProjectsView()
+                case .connect:
+                    ConnectView()
                 case .log:
                     ActivityLogView()
+                case .graph:
+                    if let dbReader = viewModel.dbReader {
+                        GraphDebugView(dbReader: dbReader)
+                    } else {
+                        Text("Database not available")
+                            .foregroundStyle(.secondary)
+                    }
                 }
 
-                // Chat overlay shared across all tabs (except Log)
-                if selectedTab != .log {
+                // Chat overlay shared across content tabs (not debug tabs or Connect)
+                if !selectedTab.isDebugTab && selectedTab != .connect {
                     ChatOverlayView()
                 }
             }
@@ -116,8 +140,8 @@ struct ContentView: View {
                         withAnimation(.easeInOut(duration: 0.15)) {
                             showDebugTabs = true
                         }
-                    } else if selectedTab != .log {
-                        // Option released while NOT on the debug tab → hide it
+                    } else if !selectedTab.isDebugTab {
+                        // Option released while NOT on a debug tab → hide them
                         withAnimation(.easeInOut(duration: 0.15)) {
                             showDebugTabs = false
                         }
@@ -133,24 +157,14 @@ struct ContentView: View {
             }
         }
         .onChange(of: selectedTab) { _, newTab in
-            // User navigated away from the debug tab → hide it (unless Option still held)
-            if newTab != .log && !optionKeyHeld {
+            // User navigated away from debug tabs → hide them (unless Option still held)
+            if !newTab.isDebugTab && !optionKeyHeld {
                 withAnimation(.easeInOut(duration: 0.15)) {
                     showDebugTabs = false
                 }
             }
-            // For You is day-agnostic — always show today's recommendations
-            if newTab == .forYou && !viewModel.isViewingToday {
-                viewModel.selectDate(Date())
-            }
             // Keep ViewModel's currentScreen in sync so chat context knows which tab is active
             viewModel.currentScreen = newTab.title
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .switchToChatTab)) { _ in
-            // Deep link from notification requested switching to For You tab
-            withAnimation(.easeInOut(duration: 0.15)) {
-                selectedTab = .forYou
-            }
         }
     }
 }

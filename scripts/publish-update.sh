@@ -243,6 +243,12 @@ if [ -f "$DMG_PATH" ]; then
     echo "   Including DMG for website distribution"
 fi
 
+# MCPB extension is published separately to samattias/stubble-mcpb
+MCPB_PATH="$OUTPUT_DIR/Stubble.mcpb"
+if [ -f "$MCPB_PATH" ]; then
+    echo "   MCPB built (publish separately: gh release create v$VERSION $MCPB_PATH --repo samattias/stubble-mcpb)"
+fi
+
 # Check if release already exists
 if gh release view "$TAG" --repo "$GITHUB_REPO" &>/dev/null; then
     echo "   Release $TAG already exists — uploading assets (overwriting)..."
@@ -270,6 +276,9 @@ echo "   Archive:  $DOWNLOAD_URL"
 if [ -f "$DMG_PATH" ]; then
 echo "   DMG:      https://github.com/$GITHUB_REPO/releases/download/$TAG/Stubble-$VERSION.dmg"
 echo "   DMG (stable): https://github.com/$GITHUB_REPO/releases/latest/download/Stubble.dmg"
+fi
+if [ -f "$MCPB_PATH" ]; then
+echo "   MCPB:     https://github.com/samattias/stubble-mcpb/releases/latest/download/Stubble.mcpb"
 fi
 echo ""
 echo "   Sparkle will find updates via SUFeedURL in Info.plist:"

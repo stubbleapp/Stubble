@@ -1,6 +1,36 @@
 import SwiftUI
 import TaskMinerShared
 
+/// Simple row for displaying a project activity in the day summary
+private struct DaySummaryProjectRow: View {
+    let activity: ProjectActivity
+    let onTap: () -> Void
+
+    var body: some View {
+        Button(action: onTap) {
+            HStack(spacing: 10) {
+                Circle()
+                    .fill(Theme.accent.opacity(0.6))
+                    .frame(width: 8, height: 8)
+
+                Text(activity.name)
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(Theme.textPrimary)
+                    .lineLimit(1)
+
+                Spacer()
+
+                Text(formatDuration(activity.totalDuration))
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundStyle(Theme.textMuted)
+            }
+            .padding(.vertical, 6)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+}
+
 struct DaySummaryCardView: View {
     let tasks: [TaskRecord]
     let aiSummary: String?
@@ -31,7 +61,7 @@ struct DaySummaryCardView: View {
         VStack(alignment: .leading, spacing: 0) {
             if !sortedProjects.isEmpty {
                 ForEach(displayedProjects) { activity in
-                    ProjectRow(activity: activity, expandedID: .constant(nil)) {
+                    DaySummaryProjectRow(activity: activity) {
                         selectedProject = activity.toAggregatedProject()
                     }
                 }

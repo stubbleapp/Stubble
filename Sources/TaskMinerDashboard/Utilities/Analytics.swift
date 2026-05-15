@@ -62,13 +62,6 @@ enum Analytics {
         TelemetryDeck.signal("chat.messageSent")
     }
 
-    static func recommendationsGenerated(count: Int) {
-        guard isEnabled else { return }
-        TelemetryDeck.signal("recommendations.generated", parameters: [
-            "count": "\(count)"
-        ])
-    }
-
     static func csvExported(taskCount: Int) {
         guard isEnabled else { return }
         TelemetryDeck.signal("csv.exported", parameters: [

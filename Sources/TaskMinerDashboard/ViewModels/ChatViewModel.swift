@@ -29,7 +29,7 @@ final class ChatViewModel {
     /// Tracks message counts at last summary generation per thread.
     var threadSummaryMessageCounts: [Int64: Int] = [:]
 
-    /// Set by ChatTabView or ChatOverlayView to trigger a chat question.
+    /// Set by ChatOverlayView to trigger a chat question.
     var pendingQuestion: String?
 
     /// Set to true to expand the chat overlay panel.

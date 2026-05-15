@@ -7,10 +7,15 @@ public final class MCPAuditLog: @unchecked Sendable {
 
     private let logFileURL: URL
     private let oldLogFileURL: URL
+    private let clientsFileURL: URL
     private let maxLogSize: UInt64 = 10 * 1024 * 1024  // 10 MB
     private let queue = DispatchQueue(label: "com.stubble.mcp.audit")
     private var writeCount = 0
     private let checkRotationEvery = 100
+
+    /// In-memory cache of connected clients
+    private var clientsCache: [String: MCPClient] = [:]
+    private var clientsCacheLoaded = false
 
     private lazy var dateFormatter: ISO8601DateFormatter = {
         let formatter = ISO8601DateFormatter()
@@ -23,6 +28,7 @@ public final class MCPAuditLog: @unchecked Sendable {
         let stubbleDir = homeDir.appendingPathComponent(".stubble")
         self.logFileURL = stubbleDir.appendingPathComponent("mcp-audit.log")
         self.oldLogFileURL = stubbleDir.appendingPathComponent("mcp-audit.log.old")
+        self.clientsFileURL = stubbleDir.appendingPathComponent("mcp-clients.json")
 
         // Ensure directory exists
         try? FileManager.default.createDirectory(at: stubbleDir, withIntermediateDirectories: true)
@@ -104,6 +110,83 @@ public final class MCPAuditLog: @unchecked Sendable {
                 .filter { !$0.isEmpty }
 
             return Array(lines.suffix(limit))
+        }
+    }
+
+    // MARK: - Client Tracking
+
+    /// Log a client connection from the MCP initialize request.
+    /// Updates existing client or creates a new entry.
+    public func logClientConnection(name: String, version: String?) {
+        queue.async { [weak self] in
+            guard let self = self else { return }
+
+            self.loadClientsIfNeeded()
+
+            let now = Date()
+            if var existing = self.clientsCache[name] {
+                existing.lastSeen = now
+                self.clientsCache[name] = existing
+            } else {
+                let client = MCPClient(name: name, version: version, firstSeen: now, lastSeen: now, totalCalls: 0)
+                self.clientsCache[name] = client
+            }
+
+            self.saveClients()
+        }
+    }
+
+    /// Increment the tool call count for a client.
+    public func incrementClientCalls(name: String) {
+        queue.async { [weak self] in
+            guard let self = self else { return }
+
+            self.loadClientsIfNeeded()
+
+            if var existing = self.clientsCache[name] {
+                existing.totalCalls += 1
+                existing.lastSeen = Date()
+                self.clientsCache[name] = existing
+                self.saveClients()
+            }
+        }
+    }
+
+    /// Load all connected clients.
+    public func loadConnectedClients() -> [MCPClient] {
+        queue.sync {
+            loadClientsIfNeeded()
+            return Array(clientsCache.values).sorted { $0.lastSeen > $1.lastSeen }
+        }
+    }
+
+    private func loadClientsIfNeeded() {
+        guard !clientsCacheLoaded else { return }
+        clientsCacheLoaded = true
+
+        guard FileManager.default.fileExists(atPath: clientsFileURL.path),
+              let data = try? Data(contentsOf: clientsFileURL),
+              let store = try? JSONDecoder().decode(MCPClientStore.self, from: data) else {
+            return
+        }
+
+        for client in store.clients {
+            clientsCache[client.name] = client
+        }
+    }
+
+    private func saveClients() {
+        let store = MCPClientStore(clients: Array(clientsCache.values))
+        guard let data = try? JSONEncoder().encode(store) else { return }
+
+        do {
+            try data.write(to: clientsFileURL, options: .atomic)
+            try FileManager.default.setAttributes(
+                [.posixPermissions: 0o600],
+                ofItemAtPath: clientsFileURL.path
+            )
+        } catch {
+            Logger.error("MCPAuditLog: Failed to save clients: \(error)")
         }
     }
 

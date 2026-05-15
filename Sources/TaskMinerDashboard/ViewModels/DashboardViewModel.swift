@@ -71,14 +71,9 @@ final class DashboardViewModel {
     private var _resolvedAggregatedColors: [UUID: Color] = [:]
 
     // Stubs page (AI-generated, persisted per day)
-    var recommendations: [Recommendation] = []
     var greetingContext: String?
     var daySummaryContent: String?
     var suggestedQuestions: [String] = []
-    var isGeneratingRecommendations = false
-    var isGeneratingSuggestedQuestions = false
-    var recommendationsError: String?
-    var recommendationGenerator: RecommendationGenerator?
     /// Tracks whether we've already attempted to auto-generate stubs for this date,
     /// so we don't re-trigger on every tab switch.
     var hasAttemptedStubsGeneration = false
@@ -94,7 +89,7 @@ final class DashboardViewModel {
     static let minStubsRefreshInterval: TimeInterval = 1800
 
     /// Maximum age before stubs are refreshed even if data hasn't changed (1 hour).
-    /// Ensures time-sensitive recommendations stay fresh (e.g., meeting prep).
+    /// Maximum age before stubs are refreshed even if data hasn't changed (1 hour).
     static let maxStubsAge: TimeInterval = 3600
 
     /// Lightweight fingerprint of the current task data.
@@ -267,7 +262,7 @@ final class DashboardViewModel {
     /// The name of the currently active screen/tab (e.g. "Day", "Chat").
     /// Used to give the chat assistant context about what the user is looking at.
     var currentScreen: String = "Chat"
-    /// Set by ChatTabView or ChatOverlayView to trigger a chat question.
+    /// Set by ChatOverlayView to trigger a chat question.
     var pendingChatQuestion: String? {
         get { chatVM.pendingQuestion }
         set { chatVM.pendingQuestion = newValue }
@@ -286,7 +281,6 @@ final class DashboardViewModel {
     var cachedActivities: [ActivityRecord] = []
 
     // In-flight AI task handles (for cancellation on new request)
-    var recommendationsTask: Task<Void, Never>?
     var summaryTask: Task<Void, Never>?
 
     // Pause
@@ -349,13 +343,11 @@ final class DashboardViewModel {
             self.geminiClient = client
             self.taskSummarizer = TaskSummarizer(geminiClient: client)
             self.activityGenerator = ProjectActivityGenerator(geminiClient: client)
-            self.recommendationGenerator = RecommendationGenerator(geminiClient: client)
             self.hasAIAccess = true
         } else {
             self.geminiClient = nil
             self.taskSummarizer = nil
             self.activityGenerator = nil
-            self.recommendationGenerator = nil
             self.hasAIAccess = false
         }
 
@@ -377,9 +369,6 @@ final class DashboardViewModel {
         startPausePolling()
         startPeriodicRefresh()
         observeSystemWake()
-
-        // Auto-generate day summaries for recent past days that don't have one yet
-        autoGeneratePendingSummaries()
     }
 
     /// Task handle for cancelling in-flight date loading when user rapidly switches dates
@@ -401,14 +390,12 @@ final class DashboardViewModel {
         daySummaryText = nil
         clearAppDurationCache()
         // Reset stubs state for the new date (but NOT suggestedQuestions — chat is date-agnostic)
-        recommendations = []
         greetingContext = nil
         daySummaryContent = nil
         // suggestedQuestions intentionally NOT cleared — chat overlay is constant across all dates
         hasAttemptedStubsGeneration = false
         lastStubsTaskFingerprint = ""
         lastStubsGenerationTime = .distantPast
-        recommendationsError = nil
         // Reset persisted day wrap metrics
         persistedFocusTime = nil
         persistedMeetingTime = nil
@@ -429,20 +416,6 @@ final class DashboardViewModel {
 
             loadDataForSelectedDate()
             isLoadingDateData = false
-
-            guard !Task.isCancelled else { return }
-
-            // Auto-generate stubs if no persisted content was loaded and we have data.
-            // For wrapped days (past days OR today after wrap hour): regenerate if day summary is missing.
-            let needsDaySummaryForWrappedDay = shouldShowDayWrap && daySummaryContent == nil
-            if (recommendations.isEmpty || needsDaySummaryForWrappedDay)
-                && daySummaryContent == nil
-                && !isGeneratingRecommendations
-                && hasAIAccess
-                && !tasks.isEmpty {
-                hasAttemptedStubsGeneration = true
-                generateRecommendations()
-            }
         }
     }
 
@@ -518,12 +491,6 @@ final class DashboardViewModel {
                 self.refreshTasksAndProjects()
                 self.daySummaryText = result.daySummary
                 self.isGeneratingSummary = false
-
-                // For past days, regenerate the long summary using the new project activities
-                if !self.isViewingToday {
-                    self.daySummaryContent = nil
-                    self.generateRecommendations()
-                }
 
                 Analytics.summaryGenerated(taskCount: result.tasks.count)
             } catch {
@@ -757,7 +724,6 @@ final class DashboardViewModel {
             self.geminiClient = client
             self.taskSummarizer = TaskSummarizer(geminiClient: client)
             self.activityGenerator = ProjectActivityGenerator(geminiClient: client)
-            self.recommendationGenerator = RecommendationGenerator(geminiClient: client)
             self.hasAIAccess = true
             // Update sub-view-models
             self.chatVM.geminiClient = client
@@ -765,7 +731,6 @@ final class DashboardViewModel {
             self.geminiClient = nil
             self.taskSummarizer = nil
             self.activityGenerator = nil
-            self.recommendationGenerator = nil
             self.hasAIAccess = false
             // Clear sub-view-models
             self.chatVM.geminiClient = nil
@@ -1005,7 +970,7 @@ final class DashboardViewModel {
     }
 
     /// Attempt to load stubs content from the database for the selected date.
-    /// If found, populates greetingContext, daySummaryContent, and recommendations.
+    /// If found, populates greetingContext and daySummaryContent.
     /// Note: suggestedQuestions are only loaded for today — chat overlay is date-agnostic.
     private func loadPersistedStubs(from db: DatabaseReader) {
         let dateStr = SharedFormatters.dayFormatter.string(from: selectedDate)
@@ -1026,40 +991,13 @@ final class DashboardViewModel {
             }
         }
 
-        // Deserialize recommendations
-        if let data = record.recommendationsJson.data(using: .utf8),
-           let items = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] {
-            recommendations = items.compactMap { dict -> Recommendation? in
-                guard let categoryStr = dict["category"] as? String,
-                      let title = dict["title"] as? String,
-                      let description = dict["description"] as? String,
-                      let reason = dict["reason"] as? String
-                else { return nil }
-
-                let category = Recommendation.Category(rawValue: categoryStr) ?? .bestPractice
-                let actionURL = dict["action_url"] as? String
-                let iconName = dict["icon"] as? String ?? category.defaultIcon
-
-                return Recommendation(
-                    id: UUID(),
-                    category: category,
-                    title: title,
-                    description: description,
-                    reason: reason,
-                    actionLabel: actionURL != nil ? category.defaultActionLabel : "Noted",
-                    actionURL: actionURL,
-                    iconName: iconName
-                )
-            }
-        }
-
         // Load persisted day wrap metrics
         persistedFocusTime = record.focusTimeSeconds.map { TimeInterval($0) }
         persistedMeetingTime = record.meetingTimeSeconds.map { TimeInterval($0) }
         persistedProjectCount = record.projectCount
 
         // Mark as already loaded so auto-generate doesn't fire
-        if !recommendations.isEmpty || daySummaryContent != nil {
+        if daySummaryContent != nil {
             hasAttemptedStubsGeneration = true
             lastStubsTaskFingerprint = currentStubsFingerprint
             lastStubsGenerationTime = record.generatedAt
@@ -1116,7 +1054,6 @@ final class DashboardViewModel {
         granolaMeetings = []
         projectActivities = []
         timelineItems = []
-        recommendations = []
         greetingContext = nil
         daySummaryContent = nil
         suggestedQuestions = []
@@ -1128,7 +1065,6 @@ final class DashboardViewModel {
         idleSeconds = 0
         daySummaryText = nil
         summaryError = nil
-        recommendationsError = nil
 
         Logger.info("All data cleared by user")
         Analytics.dataClearedByUser()
@@ -1183,7 +1119,6 @@ final class DashboardViewModel {
             // Still today — just refresh data (daemon may have written new rows)
             loadAvailableDates()
             loadDataForSelectedDate()
-            checkStubsStaleness()
             return
         }
         Logger.info("Dashboard: date rolled over, advancing to today")
@@ -1200,9 +1135,28 @@ final class DashboardViewModel {
                 guard self.isViewingToday else { return }
                 self.loadAvailableDates()
                 self.loadDataForSelectedDate()
-                self.checkStubsStaleness()
                 Logger.debug("Periodic dashboard refresh completed")
             }
         }
+    }
+
+    // MARK: - OCR Digest
+
+    /// Load the cached OCR digest for the selected date, or build it on-demand from DB.
+    func loadOrBuildOCRDigest() -> String? {
+        guard let db = dbReader else { return nil }
+        // Try cached first
+        if let cached = db.ocrDigest(for: selectedDate) {
+            return cached
+        }
+        // Build on-demand from whatever OCR texts are in the DB
+        let ocrTexts = db.ocrTextsForDate(selectedDate)
+        guard !ocrTexts.isEmpty else { return nil }
+        let digest = OCRDigestBuilder.buildDigest(from: ocrTexts)
+        guard let section = digest.asPromptSection() else { return nil }
+        // Cache it
+        let dateStr = SharedFormatters.dayFormatter.string(from: selectedDate)
+        db.insertOrReplaceOCRDigest(date: dateStr, digest: section)
+        return section
     }
 }

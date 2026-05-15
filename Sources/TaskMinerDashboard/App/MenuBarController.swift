@@ -565,4 +565,6 @@ extension Notification.Name {
     static let menuBarChatQuestion = Notification.Name("menuBarChatQuestion")
     /// Posted when a notification deep link wants to switch to the Chat tab.
     static let switchToChatTab = Notification.Name("switchToChatTab")
+    /// Posted when user requests a knowledge graph rebuild from the Graph debug view.
+    static let rebuildKnowledgeGraph = Notification.Name("rebuildKnowledgeGraph")
 }

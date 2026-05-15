@@ -176,6 +176,11 @@ public final class MCPServer: @unchecked Sendable {
 
         isInitialized = true
 
+        // Log client connection for tracking
+        if let name = self.clientInfo["name"] {
+            auditLog.logClientConnection(name: name, version: self.clientInfo["version"])
+        }
+
         let result: [String: JSONValue] = [
             "protocolVersion": .string(Self.protocolVersion),
             "capabilities": .object([
@@ -185,7 +190,8 @@ public final class MCPServer: @unchecked Sendable {
             ]),
             "serverInfo": .object([
                 "name": .string(Self.serverName),
-                "version": .string(Self.serverVersion)
+                "version": .string(Self.serverVersion),
+                "description": .string("Stubble tracks the user's work activity on their Mac. Use these tools to understand what the user has been working on, their projects, how they spent their time, and their work patterns. Useful for providing personalized assistance, answering questions about recent work, and helping with context-aware tasks.")
             ])
         ]
 
@@ -252,6 +258,11 @@ public final class MCPServer: @unchecked Sendable {
                 resultRows: rowCount,
                 durationMs: durationMs
             )
+
+            // Increment client call count
+            if let name = self.clientInfo["name"] {
+                auditLog.incrementClientCalls(name: name)
+            }
 
             // Format MCP response
             var contentArray: [JSONValue] = []

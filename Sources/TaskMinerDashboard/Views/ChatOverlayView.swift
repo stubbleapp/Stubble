@@ -323,74 +323,34 @@ struct ChatOverlayView: View {
         }
     }
 
-    // MARK: - Suggestion Pills (horizontal scroll with refresh button)
-
-    private var isLoadingSuggestions: Bool {
-        viewModel.isGeneratingSuggestedQuestions
-    }
+    // MARK: - Suggestion Pills (horizontal scroll)
 
     private var suggestionPills: some View {
-        HStack(spacing: 0) {
-            // Refresh button — spins while generating
-            Button {
-                viewModel.refreshSuggestedQuestions()
-            } label: {
-                Image(systemName: "arrow.clockwise")
-                    .font(.system(size: 10, weight: .medium))
-                    .foregroundStyle(isLoadingSuggestions ? Theme.accent : Theme.textMuted)
-                    .rotationEffect(.degrees(isLoadingSuggestions ? 360 : 0))
-                    .animation(
-                        isLoadingSuggestions
-                            ? .linear(duration: 1).repeatForever(autoreverses: false)
-                            : .default,
-                        value: isLoadingSuggestions
-                    )
-                    .frame(width: 22, height: 22)
-                    .background(
-                        Circle()
-                            .strokeBorder(Theme.cardBorder, lineWidth: 0.5)
-                    )
-                    .contentShape(Circle())
-            }
-            .buttonStyle(.plain)
-            .disabled(isLoadingSuggestions)
-            .help(isLoadingSuggestions ? "Generating…" : "Refresh suggestions")
-            .padding(.leading, 14)
-
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 6) {
-                    if isLoadingSuggestions {
-                        // Skeleton loading pills
-                        ForEach(0..<4, id: \.self) { _ in
-                            SkeletonSuggestionPill()
-                        }
-                    } else {
-                        ForEach(activeSuggestions, id: \.self) { suggestion in
-                            Button {
-                                // Always start a new chat when clicking a suggestion
-                                viewModel.activeThreadId = nil
-                                viewModel.chatMessages = []
-                                inputText = suggestion
-                                sendMessage()
-                            } label: {
-                                Text(suggestion)
-                                    .font(.system(size: 11, weight: .medium))
-                                    .foregroundStyle(Theme.textSecondary)
-                                    .padding(.horizontal, 10)
-                                    .padding(.vertical, 5)
-                                    .background(
-                                        Capsule()
-                                            .strokeBorder(Theme.cardBorder, lineWidth: 0.5)
-                                    )
-                            }
-                            .buttonStyle(.plain)
-                        }
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 6) {
+                ForEach(activeSuggestions, id: \.self) { suggestion in
+                    Button {
+                        // Always start a new chat when clicking a suggestion
+                        viewModel.activeThreadId = nil
+                        viewModel.chatMessages = []
+                        inputText = suggestion
+                        sendMessage()
+                    } label: {
+                        Text(suggestion)
+                            .font(.system(size: 11, weight: .medium))
+                            .foregroundStyle(Theme.textSecondary)
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 5)
+                            .background(
+                                Capsule()
+                                    .strokeBorder(Theme.cardBorder, lineWidth: 0.5)
+                            )
                     }
+                    .buttonStyle(.plain)
                 }
-                .padding(.leading, 8)
-                .padding(.trailing, 14)
-                .padding(.vertical, 8)
             }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 8)
         }
     }
 
@@ -521,20 +481,3 @@ struct ChatOverlayView: View {
     }
 }
 
-// MARK: - Skeleton Suggestion Pill
-
-private struct SkeletonSuggestionPill: View {
-    // Varying widths for visual interest
-    private static let widths: [CGFloat] = [80, 100, 70, 90]
-    @State private var width: CGFloat = 80
-
-    var body: some View {
-        RoundedRectangle(cornerRadius: 12, style: .continuous)
-            .fill(Theme.textMuted.opacity(0.15))
-            .frame(width: width, height: 24)
-            .shimmer(active: true)
-            .onAppear {
-                width = Self.widths.randomElement() ?? 80
-            }
-    }
-}

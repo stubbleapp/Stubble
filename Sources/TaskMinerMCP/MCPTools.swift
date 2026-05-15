@@ -17,7 +17,7 @@ public final class MCPTools: @unchecked Sendable {
     public static let toolDefinitions: [MCPTool] = [
         MCPTool(
             name: "query_tasks",
-            description: "Get AI-generated task summaries for a date range. Returns task title, description, time range, apps used, and relevant links.",
+            description: "Get what the user worked on. Returns AI-generated task summaries with titles, descriptions, time ranges, apps used, and relevant links. Use this when the user asks 'what did I work on?', 'what have I been doing?', or needs context about their recent work.",
             inputSchema: .object([
                 "type": .string("object"),
                 "properties": .object([
@@ -47,7 +47,7 @@ public final class MCPTools: @unchecked Sendable {
         ),
         MCPTool(
             name: "get_activity_log",
-            description: "Get raw activity records (app switches, window titles, idle periods). Shows what apps were used and when. Use 'date' for single-day queries or 'from'/'to' for multi-day ranges (up to 30 days).",
+            description: "Get detailed activity records showing app usage, window titles, and idle periods. Use this when you need granular data about which apps were used, when, and for how long. Useful for time tracking questions like 'how much time did I spend in VS Code?' or understanding work patterns.",
             inputSchema: .object([
                 "type": .string("object"),
                 "properties": .object([
@@ -86,7 +86,7 @@ public final class MCPTools: @unchecked Sendable {
         ),
         MCPTool(
             name: "search_activities",
-            description: "Search activities by app name, window title, or content. Returns matching activity records.",
+            description: "Search the user's activity history by keyword. Finds activities matching app names, window titles, or content. Use this when looking for specific work like 'find when I worked on the login feature' or 'when did I last use Figma?'.",
             inputSchema: .object([
                 "type": .string("object"),
                 "properties": .object([
@@ -119,7 +119,7 @@ public final class MCPTools: @unchecked Sendable {
         ),
         MCPTool(
             name: "get_projects",
-            description: "Get project activity summaries. Shows project names, durations, and associated tasks.",
+            description: "Get project-level work summaries. Shows what projects the user worked on, how long they spent on each, and which tasks belong to each project. Use this for questions like 'what projects am I working on?' or 'how much time did I spend on Project X?'.",
             inputSchema: .object([
                 "type": .string("object"),
                 "properties": .object([
@@ -143,7 +143,7 @@ public final class MCPTools: @unchecked Sendable {
         ),
         MCPTool(
             name: "get_timeline",
-            description: "Get the day view timeline showing tasks interleaved with away/idle periods.",
+            description: "Get a chronological view of the user's day showing tasks and breaks. Shows when the user started working, took breaks, and ended their day. Use this for questions about daily schedule or work-life balance.",
             inputSchema: .object([
                 "type": .string("object"),
                 "properties": .object([
@@ -157,7 +157,7 @@ public final class MCPTools: @unchecked Sendable {
         ),
         MCPTool(
             name: "get_day_summary",
-            description: "Get the day summary including focus time, meeting time, and AI-generated summary.",
+            description: "Get a high-level summary of the user's day including total focus time, meeting time, and an AI-generated narrative of what was accomplished. Use this for quick overviews like 'how was my day?' or 'summarize what I did today'.",
             inputSchema: .object([
                 "type": .string("object"),
                 "properties": .object([
@@ -171,7 +171,7 @@ public final class MCPTools: @unchecked Sendable {
         ),
         MCPTool(
             name: "get_user_profile",
-            description: "Get the user's learned profile including role, projects, tech stack, and interests.",
+            description: "Get the user's profile learned from their work activity. Includes their role, current projects, technology stack, and interests. Use this to personalize assistance and understand the user's context. Call this first when you need to understand who the user is.",
             inputSchema: .object([
                 "type": .string("object"),
                 "properties": .object([:])
@@ -179,7 +179,7 @@ public final class MCPTools: @unchecked Sendable {
         ),
         MCPTool(
             name: "get_ocr_digest",
-            description: "Get the daily OCR digest containing extracted URLs, file paths, code symbols, and other structured data from screen captures. Useful for understanding what was on screen.",
+            description: "Get structured data extracted from the user's screen content including URLs visited, file paths opened, code symbols seen, and terminal commands run. Use this when you need to know what specific content the user was looking at, like 'what documentation was I reading?' or 'what files did I have open?'.",
             inputSchema: .object([
                 "type": .string("object"),
                 "properties": .object([

@@ -67,6 +67,29 @@ class AppDelegate {
         // Crash recovery: finalize any stale activities from previous crashed sessions
         db.finalizeStaleActivities()
 
+        // Run knowledge graph migration from memory.json (one-time, on first launch after update)
+        if let migrated = GraphMigration.migrateIfNeeded(memoryPath: config.shared.memoryPath, store: db) {
+            Logger.info("Knowledge graph migration complete: \(migrated) nodes created")
+            backfillKnowledgeGraphFromHistory()
+        } else {
+            // Even without migration, backfill if graph is nearly empty
+            let nodeCount = db.knowledgeNodeCount()
+            if nodeCount < 5 {
+                Logger.info("Knowledge graph has \(nodeCount) nodes, running backfill...")
+                backfillKnowledgeGraphFromHistory()
+            }
+        }
+
+        // One-time cleanup of invalid nodes (short names, first names, garbage data)
+        let cleanupVersion = UserDefaults.standard.integer(forKey: "graphCleanupVersion")
+        if cleanupVersion < 1 {
+            let cleaned = GraphMigration.cleanupInvalidNodes(store: db)
+            if cleaned > 0 {
+                Logger.info("Graph cleanup: removed \(cleaned) invalid nodes")
+            }
+            UserDefaults.standard.set(1, forKey: "graphCleanupVersion")
+        }
+
         // Wire up app change callback
         activityMonitor.onAppChanged = { [weak self] app in
             self?.handleAppChange(app: app)
@@ -147,6 +170,16 @@ class AppDelegate {
             repeats: true
         ) { [weak self] _ in
             self?.checkSummarization()
+        }
+
+        // Listen for knowledge graph rebuild requests from the dashboard
+        DistributedNotificationCenter.default().addObserver(
+            forName: Notification.Name("rebuildKnowledgeGraph"),
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Logger.info("Received knowledge graph rebuild request")
+            self?.backfillKnowledgeGraphFromHistory()
         }
 
         Logger.info("Stubble started - monitoring desktop activity")
@@ -353,12 +386,23 @@ class AppDelegate {
         }
 
         // 5. Daily memory review — run decay/pruning even on quiet days with no new entries.
+        //    Also maintains the knowledge graph (decay + pruning).
         //    Triggers once per day alongside the midnight rollover.
         if lastMemoryReviewDate != today {
             lastMemoryReviewDate = today
             let memoryStore = UserMemoryStore(filePath: config.shared.memoryPath)
             memoryStore.mergeStructured(newEntries: [])  // runs decay + pruning pass
             Logger.debug("Daily memory review: decay pass completed")
+
+            // Knowledge graph maintenance
+            Task { @MainActor in
+                let graph = KnowledgeGraph(store: self.db)
+                let decayed = graph.applyDecay()
+                let pruned = graph.prune(belowConfidence: 0.15)
+                if decayed > 0 || pruned > 0 {
+                    Logger.info("Knowledge graph maintenance: decayed \(decayed), pruned \(pruned)")
+                }
+            }
         }
 
         // 6. Tiered screenshot pruning (once per day):
@@ -653,9 +697,9 @@ class AppDelegate {
             return settings
         }()
 
-        // Load memory context (reuse config.shared)
+        // Load memory context — prefer knowledge graph, fall back to legacy memory store
         let memoryStore = UserMemoryStore(filePath: self.config.shared.memoryPath)
-        let memoryContext = memoryStore.contextString()
+        // Note: Graph context is loaded asynchronously inside the Task below
 
         // Compute significant idle breaks for session-aware task generation
         let minAwaySeconds = TimeInterval((cliSettings?.minAwayMinutes ?? 15) * 60)
@@ -668,6 +712,15 @@ class AppDelegate {
         let dateStr = todayString()
         Task {
             do {
+                // Load memory context — prefer knowledge graph, fall back to legacy memory store
+                let memoryContext: String? = await {
+                    let graph = await MainActor.run { KnowledgeGraph(store: db) }
+                    if let graphContext = await graph.contextString() {
+                        return graphContext
+                    }
+                    return memoryStore.contextString()
+                }()
+
                 let result = try await summarizer.summarize(
                     activities: activityData,
                     date: endTime,
@@ -711,6 +764,18 @@ class AppDelegate {
                     // Merge new structured memory entries
                     if !result.newMemoryEntries.isEmpty {
                         memoryStore.mergeStructured(newEntries: result.newMemoryEntries)
+                    }
+
+                    // Upsert knowledge graph updates
+                    if !result.graphUpdates.isEmpty {
+                        let graph = KnowledgeGraph(store: db)
+                        for node in result.graphUpdates.nodes {
+                            graph.upsertNode(node)
+                        }
+                        for edge in result.graphUpdates.edges {
+                            graph.upsertEdge(edge)
+                        }
+                        Logger.info("Graph updated: \(result.graphUpdates.nodes.count) nodes, \(result.graphUpdates.edges.count) edges")
                     }
                 }
 
@@ -951,5 +1016,58 @@ class AppDelegate {
                       "Edit", "View", "Help", "Window", "Menu", "Open", "Save", "Close",
                       "Untitled", "Document", "Welcome", "Settings", "Preferences"]
         return common.contains(word)
+    }
+
+    // MARK: - Knowledge Graph Backfill
+
+    /// Backfill the knowledge graph from existing historical data.
+    /// Called once after migration to enrich the graph with tasks, projects, and browser history.
+    private func backfillKnowledgeGraphFromHistory() {
+        // Get last 30 days of tasks
+        let calendar = Calendar.current
+        let endDate = Date()
+        guard let startDate = calendar.date(byAdding: .day, value: -30, to: endDate) else { return }
+
+        var allTasks: [TaskRecord] = []
+        var allProjects: [ProjectActivityRecord] = []
+
+        // Collect tasks and projects from the last 30 days
+        var currentDate = startDate
+        while currentDate <= endDate {
+            let dateStr = SharedFormatters.dayFormatter.string(from: currentDate)
+            allTasks.append(contentsOf: db.tasks(for: dateStr))
+            allProjects.append(contentsOf: db.projectActivities(for: dateStr))
+            currentDate = calendar.date(byAdding: .day, value: 1, to: currentDate) ?? endDate
+        }
+
+        // Backfill from tasks and projects
+        if !allTasks.isEmpty || !allProjects.isEmpty {
+            let backfilled = GraphMigration.backfillFromHistoricalData(
+                tasks: allTasks,
+                projectActivities: allProjects,
+                store: db
+            )
+            if backfilled > 0 {
+                Logger.info("Knowledge graph backfilled \(backfilled) nodes from \(allTasks.count) tasks and \(allProjects.count) projects")
+            }
+        }
+
+        // Backfill topics from browser history
+        let activities = db.activities(
+            from: startDate,
+            to: endDate,
+            includeIdle: false,
+            limit: 5000
+        )
+        let activitiesWithURLs = activities.filter { $0.browserURL != nil && !$0.browserURL!.isEmpty }
+        if !activitiesWithURLs.isEmpty {
+            let topicsCreated = GraphMigration.extractTopicsFromBrowserHistory(
+                activities: activitiesWithURLs,
+                store: db
+            )
+            if topicsCreated > 0 {
+                Logger.info("Knowledge graph: extracted \(topicsCreated) topics from \(activitiesWithURLs.count) browser activities")
+            }
+        }
     }
 }

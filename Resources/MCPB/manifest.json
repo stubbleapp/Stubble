@@ -1,0 +1,57 @@
+{
+  "manifest_version": "0.3",
+  "name": "stubble",
+  "display_name": "Stubble",
+  "version": "1.0.0",
+  "description": "Access your activity history, tasks, and projects from Stubble",
+  "long_description": "Stubble tracks your work activity and generates AI-powered task summaries. This extension allows Claude to query your activity history, tasks, projects, and daily summaries to provide personalized assistance based on what you've been working on.",
+  "author": {
+    "name": "Stubble",
+    "url": "https://stubble.ai"
+  },
+  "homepage": "https://stubble.ai",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/samattias/stubble-mcpb.git"
+  },
+  "license": "Proprietary",
+  "keywords": ["productivity", "activity-tracking", "tasks", "time-tracking"],
+  "icon": "icon.png",
+  "icons": [
+    {
+      "src": "icon-32.png",
+      "size": "32x32"
+    },
+    {
+      "src": "icon-128.png",
+      "size": "128x128"
+    },
+    {
+      "src": "icon-512.png",
+      "size": "512x512"
+    }
+  ],
+  "compatibility": {
+    "platforms": ["darwin"]
+  },
+  "user_config": {
+    "api_key": {
+      "type": "string",
+      "title": "Stubble API Key",
+      "description": "Your Stubble MCP API key. Find it in the Stubble app under Connect tab.",
+      "sensitive": true,
+      "required": true
+    }
+  },
+  "server": {
+    "type": "binary",
+    "entry_point": "stubble-mcp",
+    "mcp_config": {
+      "command": "${__dirname}/stubble-mcp",
+      "args": [],
+      "env": {
+        "STUBBLE_MCP_KEY": "${user_config.api_key}"
+      }
+    }
+  }
+}

@@ -2,7 +2,7 @@ import Foundation
 import SQLite3
 import TaskMinerShared
 
-class DatabaseManager {
+class DatabaseManager: KnowledgeGraphStore {
     private var db: OpaquePointer?
 
     init(path: URL) throws {
@@ -86,7 +86,7 @@ class DatabaseManager {
     }
 
     /// Current schema version — kept in sync with DatabaseReader's migrations.
-    private static let schemaVersion = 15
+    private static let schemaVersion = 16
 
     private func runMigrations() {
         let currentVersion = getUserVersion()
@@ -427,6 +427,48 @@ class DatabaseManager {
                             label: "15c: add project_count to stubs_content", ignoreDuplicate: true) {
                 migrationFailed = true
             }
+        }
+
+        if currentVersion < 16 {
+            // Knowledge graph tables for evolved personalization
+            let nodesSql = """
+            CREATE TABLE IF NOT EXISTS knowledge_nodes (
+                id TEXT PRIMARY KEY,
+                type TEXT NOT NULL,
+                name TEXT NOT NULL,
+                aliases TEXT DEFAULT '[]',
+                confidence REAL DEFAULT 0.7,
+                first_seen TEXT NOT NULL,
+                last_seen TEXT NOT NULL,
+                reinforcement_count INTEGER DEFAULT 1,
+                properties TEXT DEFAULT '{}',
+                UNIQUE(type, name)
+            )
+            """
+            if !execMigration(nodesSql, label: "16a: create knowledge_nodes table") {
+                migrationFailed = true
+            }
+            sqlite3_exec(db, "CREATE INDEX IF NOT EXISTS idx_knowledge_nodes_type ON knowledge_nodes(type)", nil, nil, nil)
+
+            let edgesSql = """
+            CREATE TABLE IF NOT EXISTS knowledge_edges (
+                id TEXT PRIMARY KEY,
+                type TEXT NOT NULL,
+                source_id TEXT NOT NULL,
+                target_id TEXT NOT NULL,
+                confidence REAL DEFAULT 0.7,
+                first_seen TEXT NOT NULL,
+                last_seen TEXT NOT NULL,
+                reinforcement_count INTEGER DEFAULT 1,
+                context TEXT,
+                UNIQUE(type, source_id, target_id)
+            )
+            """
+            if !execMigration(edgesSql, label: "16b: create knowledge_edges table") {
+                migrationFailed = true
+            }
+            sqlite3_exec(db, "CREATE INDEX IF NOT EXISTS idx_knowledge_edges_source ON knowledge_edges(source_id)", nil, nil, nil)
+            sqlite3_exec(db, "CREATE INDEX IF NOT EXISTS idx_knowledge_edges_target ON knowledge_edges(target_id)", nil, nil, nil)
         }
 
         // Only bump the version if all migrations succeeded — failed migrations
@@ -1484,6 +1526,442 @@ class DatabaseManager {
 
     private var lastError: String {
         db.flatMap { String(cString: sqlite3_errmsg($0)) } ?? "no database"
+    }
+
+    // MARK: - Knowledge Graph
+
+    /// Fetch all knowledge nodes, optionally filtered by type.
+    func knowledgeNodes(type: NodeType? = nil) -> [KnowledgeNode] {
+        guard db != nil else { return [] }
+
+        let sql: String
+        if let nodeType = type {
+            sql = """
+            SELECT id, type, name, aliases, confidence, first_seen, last_seen, reinforcement_count, properties
+            FROM knowledge_nodes
+            WHERE type = ?
+            ORDER BY confidence DESC, last_seen DESC
+            """
+            var stmt: OpaquePointer?
+            guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return [] }
+            defer { sqlite3_finalize(stmt) }
+            sqliteBindText(stmt, 1, nodeType.rawValue)
+            return parseKnowledgeNodes(stmt)
+        } else {
+            sql = """
+            SELECT id, type, name, aliases, confidence, first_seen, last_seen, reinforcement_count, properties
+            FROM knowledge_nodes
+            ORDER BY confidence DESC, last_seen DESC
+            """
+            var stmt: OpaquePointer?
+            guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return [] }
+            defer { sqlite3_finalize(stmt) }
+            return parseKnowledgeNodes(stmt)
+        }
+    }
+
+    /// Find a knowledge node by type and name.
+    func knowledgeNode(type: NodeType, name: String) -> KnowledgeNode? {
+        guard db != nil else { return nil }
+        let sql = """
+        SELECT id, type, name, aliases, confidence, first_seen, last_seen, reinforcement_count, properties
+        FROM knowledge_nodes
+        WHERE type = ? AND LOWER(name) = LOWER(?)
+        LIMIT 1
+        """
+        var stmt: OpaquePointer?
+        if sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK {
+            sqliteBindText(stmt, 1, type.rawValue)
+            sqliteBindText(stmt, 2, name)
+            let nodes = parseKnowledgeNodes(stmt)
+            sqlite3_finalize(stmt)
+            if let node = nodes.first { return node }
+        }
+        let allNodes = knowledgeNodes(type: type)
+        return allNodes.first { $0.matches(name: name) }
+    }
+
+    /// Fetch a knowledge node by ID.
+    func knowledgeNode(id: UUID) -> KnowledgeNode? {
+        guard db != nil else { return nil }
+        let sql = """
+        SELECT id, type, name, aliases, confidence, first_seen, last_seen, reinforcement_count, properties
+        FROM knowledge_nodes
+        WHERE id = ?
+        LIMIT 1
+        """
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return nil }
+        defer { sqlite3_finalize(stmt) }
+        sqliteBindText(stmt, 1, id.uuidString)
+        return parseKnowledgeNodes(stmt).first
+    }
+
+    private func parseKnowledgeNodes(_ stmt: OpaquePointer?) -> [KnowledgeNode] {
+        var results: [KnowledgeNode] = []
+        while sqlite3_step(stmt) == SQLITE_ROW {
+            guard let idStr = sqlite3_column_text(stmt, 0).map({ String(cString: $0) }),
+                  let id = UUID(uuidString: idStr),
+                  let typeStr = sqlite3_column_text(stmt, 1).map({ String(cString: $0) }),
+                  let type = NodeType(rawValue: typeStr),
+                  let name = sqlite3_column_text(stmt, 2).map({ String(cString: $0) })
+            else { continue }
+
+            let aliasesJson = sqlite3_column_text(stmt, 3).map { String(cString: $0) } ?? "[]"
+            let aliases = (try? JSONDecoder().decode([String].self, from: Data(aliasesJson.utf8))) ?? []
+            let confidence = sqlite3_column_double(stmt, 4)
+            let firstSeen = sqlite3_column_text(stmt, 5).flatMap { SharedFormatters.iso8601.date(from: String(cString: $0)) } ?? Date()
+            let lastSeen = sqlite3_column_text(stmt, 6).flatMap { SharedFormatters.iso8601.date(from: String(cString: $0)) } ?? Date()
+            let reinforcementCount = Int(sqlite3_column_int(stmt, 7))
+            let propertiesJson = sqlite3_column_text(stmt, 8).map { String(cString: $0) } ?? "{}"
+            let properties = (try? JSONDecoder().decode([String: String].self, from: Data(propertiesJson.utf8))) ?? [:]
+
+            results.append(KnowledgeNode(
+                id: id, type: type, name: name, aliases: aliases, confidence: confidence,
+                firstSeen: firstSeen, lastSeen: lastSeen, reinforcementCount: reinforcementCount, properties: properties
+            ))
+        }
+        return results
+    }
+
+    /// Fetch knowledge edges.
+    func knowledgeEdges(from sourceId: UUID? = nil, to targetId: UUID? = nil) -> [KnowledgeEdge] {
+        guard db != nil else { return [] }
+
+        var conditions: [String] = []
+        if sourceId != nil { conditions.append("source_id = ?") }
+        if targetId != nil { conditions.append("target_id = ?") }
+
+        let whereClause = conditions.isEmpty ? "" : "WHERE " + conditions.joined(separator: " AND ")
+        let sql = """
+        SELECT id, type, source_id, target_id, confidence, first_seen, last_seen, reinforcement_count, context
+        FROM knowledge_edges
+        \(whereClause)
+        ORDER BY confidence DESC
+        """
+
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return [] }
+        defer { sqlite3_finalize(stmt) }
+
+        var paramIdx: Int32 = 1
+        if let src = sourceId {
+            sqliteBindText(stmt, paramIdx, src.uuidString)
+            paramIdx += 1
+        }
+        if let tgt = targetId {
+            sqliteBindText(stmt, paramIdx, tgt.uuidString)
+        }
+
+        return parseKnowledgeEdges(stmt)
+    }
+
+    /// Find an edge by type and endpoints.
+    func knowledgeEdge(type: EdgeType, source: UUID, target: UUID) -> KnowledgeEdge? {
+        guard db != nil else { return nil }
+        let sql = """
+        SELECT id, type, source_id, target_id, confidence, first_seen, last_seen, reinforcement_count, context
+        FROM knowledge_edges
+        WHERE type = ? AND source_id = ? AND target_id = ?
+        LIMIT 1
+        """
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return nil }
+        defer { sqlite3_finalize(stmt) }
+        sqliteBindText(stmt, 1, type.rawValue)
+        sqliteBindText(stmt, 2, source.uuidString)
+        sqliteBindText(stmt, 3, target.uuidString)
+        return parseKnowledgeEdges(stmt).first
+    }
+
+    private func parseKnowledgeEdges(_ stmt: OpaquePointer?) -> [KnowledgeEdge] {
+        var results: [KnowledgeEdge] = []
+        while sqlite3_step(stmt) == SQLITE_ROW {
+            guard let idStr = sqlite3_column_text(stmt, 0).map({ String(cString: $0) }),
+                  let id = UUID(uuidString: idStr),
+                  let typeStr = sqlite3_column_text(stmt, 1).map({ String(cString: $0) }),
+                  let type = EdgeType(rawValue: typeStr),
+                  let sourceStr = sqlite3_column_text(stmt, 2).map({ String(cString: $0) }),
+                  let sourceId = UUID(uuidString: sourceStr),
+                  let targetStr = sqlite3_column_text(stmt, 3).map({ String(cString: $0) }),
+                  let targetId = UUID(uuidString: targetStr)
+            else { continue }
+
+            let confidence = sqlite3_column_double(stmt, 4)
+            let firstSeen = sqlite3_column_text(stmt, 5).flatMap { SharedFormatters.iso8601.date(from: String(cString: $0)) } ?? Date()
+            let lastSeen = sqlite3_column_text(stmt, 6).flatMap { SharedFormatters.iso8601.date(from: String(cString: $0)) } ?? Date()
+            let reinforcementCount = Int(sqlite3_column_int(stmt, 7))
+            let context = sqlite3_column_text(stmt, 8).map { String(cString: $0) }
+
+            results.append(KnowledgeEdge(
+                id: id, type: type, sourceId: sourceId, targetId: targetId,
+                confidence: confidence, firstSeen: firstSeen, lastSeen: lastSeen,
+                reinforcementCount: reinforcementCount, context: context
+            ))
+        }
+        return results
+    }
+
+    /// Upsert a knowledge node.
+    func upsertKnowledgeNode(_ node: KnowledgeNode) {
+        guard db != nil else { return }
+        let sql = """
+        INSERT INTO knowledge_nodes (id, type, name, aliases, confidence, first_seen, last_seen, reinforcement_count, properties)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(type, name) DO UPDATE SET
+            aliases = excluded.aliases,
+            confidence = MAX(confidence, excluded.confidence),
+            last_seen = excluded.last_seen,
+            reinforcement_count = reinforcement_count + 1,
+            properties = excluded.properties
+        """
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return }
+        defer { sqlite3_finalize(stmt) }
+
+        let aliasesJson = (try? JSONEncoder().encode(node.aliases)).flatMap { String(data: $0, encoding: .utf8) } ?? "[]"
+        let propertiesJson = (try? JSONEncoder().encode(node.properties)).flatMap { String(data: $0, encoding: .utf8) } ?? "{}"
+
+        sqliteBindText(stmt, 1, node.id.uuidString)
+        sqliteBindText(stmt, 2, node.type.rawValue)
+        sqliteBindText(stmt, 3, node.name)
+        sqliteBindText(stmt, 4, aliasesJson)
+        sqlite3_bind_double(stmt, 5, node.confidence)
+        sqliteBindText(stmt, 6, SharedFormatters.iso8601.string(from: node.firstSeen))
+        sqliteBindText(stmt, 7, SharedFormatters.iso8601.string(from: node.lastSeen))
+        sqlite3_bind_int(stmt, 8, Int32(node.reinforcementCount))
+        sqliteBindText(stmt, 9, propertiesJson)
+
+        sqlite3_step(stmt)
+    }
+
+    /// Upsert a knowledge edge.
+    func upsertKnowledgeEdge(_ edge: KnowledgeEdge) {
+        guard db != nil else { return }
+        let sql = """
+        INSERT INTO knowledge_edges (id, type, source_id, target_id, confidence, first_seen, last_seen, reinforcement_count, context)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(type, source_id, target_id) DO UPDATE SET
+            confidence = MAX(confidence, excluded.confidence),
+            last_seen = excluded.last_seen,
+            reinforcement_count = reinforcement_count + 1,
+            context = COALESCE(excluded.context, context)
+        """
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return }
+        defer { sqlite3_finalize(stmt) }
+
+        sqliteBindText(stmt, 1, edge.id.uuidString)
+        sqliteBindText(stmt, 2, edge.type.rawValue)
+        sqliteBindText(stmt, 3, edge.sourceId.uuidString)
+        sqliteBindText(stmt, 4, edge.targetId.uuidString)
+        sqlite3_bind_double(stmt, 5, edge.confidence)
+        sqliteBindText(stmt, 6, SharedFormatters.iso8601.string(from: edge.firstSeen))
+        sqliteBindText(stmt, 7, SharedFormatters.iso8601.string(from: edge.lastSeen))
+        sqlite3_bind_int(stmt, 8, Int32(edge.reinforcementCount))
+        if let ctx = edge.context { sqliteBindText(stmt, 9, ctx) } else { sqlite3_bind_null(stmt, 9) }
+
+        sqlite3_step(stmt)
+    }
+
+    /// Delete a knowledge node by ID.
+    func deleteKnowledgeNode(id: UUID) {
+        guard db != nil else { return }
+        sqlite3_exec(db, "DELETE FROM knowledge_edges WHERE source_id = '\(id.uuidString)' OR target_id = '\(id.uuidString)'", nil, nil, nil)
+        sqlite3_exec(db, "DELETE FROM knowledge_nodes WHERE id = '\(id.uuidString)'", nil, nil, nil)
+    }
+
+    /// Delete a knowledge edge by ID.
+    func deleteKnowledgeEdge(id: UUID) {
+        guard db != nil else { return }
+        sqlite3_exec(db, "DELETE FROM knowledge_edges WHERE id = '\(id.uuidString)'", nil, nil, nil)
+    }
+
+    /// Update node confidence.
+    func updateKnowledgeNodeConfidence(id: UUID, confidence: Double) {
+        guard db != nil else { return }
+        let sql = "UPDATE knowledge_nodes SET confidence = ? WHERE id = ?"
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return }
+        defer { sqlite3_finalize(stmt) }
+        sqlite3_bind_double(stmt, 1, confidence)
+        sqliteBindText(stmt, 2, id.uuidString)
+        sqlite3_step(stmt)
+    }
+
+    /// Update edge confidence.
+    func updateKnowledgeEdgeConfidence(id: UUID, confidence: Double) {
+        guard db != nil else { return }
+        let sql = "UPDATE knowledge_edges SET confidence = ? WHERE id = ?"
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return }
+        defer { sqlite3_finalize(stmt) }
+        sqlite3_bind_double(stmt, 1, confidence)
+        sqliteBindText(stmt, 2, id.uuidString)
+        sqlite3_step(stmt)
+    }
+
+    /// Prune nodes below threshold.
+    func pruneKnowledgeNodes(belowConfidence threshold: Double) -> Int {
+        guard db != nil else { return 0 }
+        var ids: [UUID] = []
+        let selectSql = "SELECT id FROM knowledge_nodes WHERE confidence < ?"
+        var stmt: OpaquePointer?
+        if sqlite3_prepare_v2(db, selectSql, -1, &stmt, nil) == SQLITE_OK {
+            sqlite3_bind_double(stmt, 1, threshold)
+            while sqlite3_step(stmt) == SQLITE_ROW {
+                if let idStr = sqlite3_column_text(stmt, 0).map({ String(cString: $0) }),
+                   let id = UUID(uuidString: idStr) {
+                    ids.append(id)
+                }
+            }
+            sqlite3_finalize(stmt)
+        }
+        for id in ids { deleteKnowledgeNode(id: id) }
+        return ids.count
+    }
+
+    /// Prune edges below threshold.
+    func pruneKnowledgeEdges(belowConfidence threshold: Double) -> Int {
+        guard db != nil else { return 0 }
+        let sql = "DELETE FROM knowledge_edges WHERE confidence < ?"
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return 0 }
+        defer { sqlite3_finalize(stmt) }
+        sqlite3_bind_double(stmt, 1, threshold)
+        if sqlite3_step(stmt) == SQLITE_DONE {
+            return Int(sqlite3_changes(db))
+        }
+        return 0
+    }
+
+    /// Count of knowledge nodes.
+    func knowledgeNodeCount() -> Int {
+        guard db != nil else { return 0 }
+        let sql = "SELECT COUNT(*) FROM knowledge_nodes"
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return 0 }
+        defer { sqlite3_finalize(stmt) }
+        if sqlite3_step(stmt) == SQLITE_ROW {
+            return Int(sqlite3_column_int(stmt, 0))
+        }
+        return 0
+    }
+
+    // MARK: - Query Methods (for backfill)
+
+    /// Fetch tasks for a specific date string (YYYY-MM-DD).
+    func tasks(for dateStr: String) -> [TaskRecord] {
+        guard db != nil else { return [] }
+        let sql = """
+        SELECT id, date, start_time, end_time, title, description, app_names, confidence, relevant_links, active_duration, websites
+        FROM tasks
+        WHERE date = ?
+        ORDER BY start_time ASC
+        """
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return [] }
+        defer { sqlite3_finalize(stmt) }
+
+        sqliteBindText(stmt, 1, dateStr)
+
+        var results: [TaskRecord] = []
+        while sqlite3_step(stmt) == SQLITE_ROW {
+            let activeDuration: TimeInterval? = sqlite3_column_type(stmt, 9) != SQLITE_NULL
+                ? sqlite3_column_double(stmt, 9) : nil
+            let record = TaskRecord(
+                id: sqlite3_column_int64(stmt, 0),
+                date: sqlite3_column_text(stmt, 1).map({ String(cString: $0) }) ?? dateStr,
+                startTime: sqlite3_column_text(stmt, 2).flatMap({ SharedFormatters.iso8601.date(from: String(cString: $0)) }) ?? Date(),
+                endTime: sqlite3_column_text(stmt, 3).flatMap({ SharedFormatters.iso8601.date(from: String(cString: $0)) }) ?? Date(),
+                title: sqlite3_column_text(stmt, 4).map({ String(cString: $0) }) ?? "",
+                description: sqlite3_column_text(stmt, 5).map({ String(cString: $0) }) ?? "",
+                appNames: sqlite3_column_text(stmt, 6).map({ String(cString: $0) }) ?? "[]",
+                confidence: sqlite3_column_double(stmt, 7),
+                relevantLinks: sqlite3_column_text(stmt, 8).map({ String(cString: $0) }) ?? "[]",
+                activeDuration: activeDuration,
+                websites: sqlite3_column_text(stmt, 10).map({ String(cString: $0) }) ?? "[]"
+            )
+            results.append(record)
+        }
+        return results
+    }
+
+    /// Fetch project activities for a specific date string (YYYY-MM-DD).
+    func projectActivities(for dateStr: String) -> [ProjectActivityRecord] {
+        guard db != nil else { return [] }
+        let sql = """
+        SELECT id, date, name, summary, total_duration, app_names, task_titles, start_time, end_time, color_index
+        FROM project_activities
+        WHERE date = ?
+        ORDER BY total_duration DESC
+        """
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return [] }
+        defer { sqlite3_finalize(stmt) }
+
+        sqliteBindText(stmt, 1, dateStr)
+
+        var results: [ProjectActivityRecord] = []
+        while sqlite3_step(stmt) == SQLITE_ROW {
+            let record = ProjectActivityRecord(
+                id: sqlite3_column_int64(stmt, 0),
+                date: sqlite3_column_text(stmt, 1).map({ String(cString: $0) }) ?? dateStr,
+                name: sqlite3_column_text(stmt, 2).map({ String(cString: $0) }) ?? "",
+                summary: sqlite3_column_text(stmt, 3).map({ String(cString: $0) }) ?? "",
+                totalDuration: sqlite3_column_double(stmt, 4),
+                appNames: sqlite3_column_text(stmt, 5).map({ String(cString: $0) }) ?? "[]",
+                taskTitles: sqlite3_column_text(stmt, 6).map({ String(cString: $0) }) ?? "[]",
+                startTime: sqlite3_column_text(stmt, 7).flatMap({ SharedFormatters.iso8601.date(from: String(cString: $0)) }) ?? Date(),
+                endTime: sqlite3_column_text(stmt, 8).flatMap({ SharedFormatters.iso8601.date(from: String(cString: $0)) }) ?? Date(),
+                colorIndex: sqlite3_column_type(stmt, 9) != SQLITE_NULL ? Int(sqlite3_column_int(stmt, 9)) : 0
+            )
+            results.append(record)
+        }
+        return results
+    }
+
+    /// Fetch activities for a date range.
+    func activities(from start: Date, to end: Date, includeIdle: Bool, limit: Int) -> [ActivityRecord] {
+        guard db != nil else { return [] }
+        let startStr = SharedFormatters.iso8601.string(from: start)
+        let endStr = SharedFormatters.iso8601.string(from: end)
+
+        let idleClause = includeIdle ? "" : "AND is_idle = 0"
+        let sql = """
+        SELECT id, timestamp, end_time, app_name, bundle_id, window_title, duration, is_idle,
+               browser_url, document_path, focused_element_role
+        FROM activities
+        WHERE timestamp >= ? AND timestamp < ? \(idleClause)
+        ORDER BY timestamp ASC
+        LIMIT ?
+        """
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return [] }
+        defer { sqlite3_finalize(stmt) }
+
+        sqliteBindText(stmt, 1, startStr)
+        sqliteBindText(stmt, 2, endStr)
+        sqlite3_bind_int(stmt, 3, Int32(limit))
+
+        var results: [ActivityRecord] = []
+        while sqlite3_step(stmt) == SQLITE_ROW {
+            let record = ActivityRecord(
+                id: sqlite3_column_int64(stmt, 0),
+                timestamp: sqlite3_column_text(stmt, 1).flatMap({ SharedFormatters.iso8601.date(from: String(cString: $0)) }) ?? Date(),
+                endTime: sqlite3_column_text(stmt, 2).flatMap({ SharedFormatters.iso8601.date(from: String(cString: $0)) }),
+                appName: sqlite3_column_text(stmt, 3).map({ String(cString: $0) }) ?? "Unknown",
+                bundleId: sqlite3_column_text(stmt, 4).map({ String(cString: $0) }),
+                windowTitle: sqlite3_column_text(stmt, 5).map({ String(cString: $0) }),
+                duration: sqlite3_column_type(stmt, 6) != SQLITE_NULL ? sqlite3_column_double(stmt, 6) : nil,
+                isIdle: sqlite3_column_int(stmt, 7) != 0,
+                browserURL: sqlite3_column_text(stmt, 8).map({ String(cString: $0) }),
+                documentPath: sqlite3_column_text(stmt, 9).map({ String(cString: $0) }),
+                focusedElementRole: sqlite3_column_text(stmt, 10).map({ String(cString: $0) })
+            )
+            results.append(record)
+        }
+        return results
     }
 
 }

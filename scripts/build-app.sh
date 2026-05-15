@@ -135,6 +135,22 @@ if [ -d "$FONTS_DIR" ]; then
     echo "🔤 Custom fonts copied"
 fi
 
+# Copy Connect tab icons
+CONNECT_ICONS_DIR="$BUILD_DIR/Resources/ConnectIcons"
+if [ -d "$CONNECT_ICONS_DIR" ]; then
+    mkdir -p "$APP_BUNDLE/Contents/Resources/ConnectIcons"
+    cp "$CONNECT_ICONS_DIR"/*.png "$APP_BUNDLE/Contents/Resources/ConnectIcons/" 2>/dev/null
+    echo "🔗 Connect icons copied"
+fi
+
+# Build MCPB extension for Claude Desktop (not bundled, published separately)
+if [ -f "$BUILD_DIR/scripts/build-mcpb.sh" ]; then
+    bash "$BUILD_DIR/scripts/build-mcpb.sh" >/dev/null 2>&1 || true
+    if [ -f "$OUTPUT_DIR/Stubble.mcpb" ]; then
+        echo "📦 MCPB extension built (publish separately to samattias/stubble-mcpb)"
+    fi
+fi
+
 # ─── Bundle Sparkle.framework ────────────────────────────────────
 # SPM builds Sparkle as a dynamic framework; we need to embed it in the .app
 SPARKLE_FRAMEWORK=$(find "$BUILD_DIR/.build" -name "Sparkle.framework" -type d 2>/dev/null | head -1)
