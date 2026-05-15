@@ -111,8 +111,36 @@ struct ConnectToolConfig: Identifiable {
         comingSoon: false
     )
 
+    /// GitHub Copilot (VS Code) configuration - uses .vscode/mcp.json
+    static let githubCopilot = ConnectToolConfig(
+        name: "GitHub Copilot",
+        iconName: "github-copilot",
+        fallbackSFSymbol: "chevron.left.forwardslash.chevron.right",
+        description: "AI pair programmer in VS Code",
+        configMethod: .configFile,
+        configPath: ".vscode/mcp.json",
+        cliCommand: nil,
+        configTemplate: { apiKey in
+            """
+            {
+              "servers": {
+                "stubble": {
+                  "type": "stdio",
+                  "command": "/Applications/Stubble.app/Contents/MacOS/stubble-mcp",
+                  "env": {
+                    "STUBBLE_MCP_KEY": "\(apiKey)"
+                  }
+                }
+              }
+            }
+            """
+        },
+        docsURL: URL(string: "https://code.visualstudio.com/docs/copilot/customization/mcp-servers"),
+        comingSoon: false
+    )
+
     /// All known tools
-    static let allTools: [ConnectToolConfig] = [claudeCode, claudeDesktop, cursor, windsurf]
+    static let allTools: [ConnectToolConfig] = [claudeCode, claudeDesktop, githubCopilot, cursor, windsurf]
 
     /// Generic MCP configuration for other stdio-based clients
     static func genericConfig(apiKey: String) -> String {
@@ -145,6 +173,9 @@ struct ConnectToolConfig: Identifiable {
         }
         if normalized.contains("windsurf") || normalized.contains("codeium") {
             return .windsurf
+        }
+        if normalized.contains("github") || normalized.contains("copilot") || normalized.contains("vscode") || normalized.contains("vs code") {
+            return .githubCopilot
         }
 
         return nil
