@@ -7,7 +7,6 @@ import TaskMinerShared
 private enum SettingsCategory: String, CaseIterable, Identifiable {
     case account
     case general
-    case notifications
     case exclusions
     case personalisation
     case data
@@ -19,7 +18,6 @@ private enum SettingsCategory: String, CaseIterable, Identifiable {
         switch self {
         case .account: return "Account"
         case .general: return "General"
-        case .notifications: return "Notifications"
         case .exclusions: return "Exclusions"
         case .personalisation: return "Personalisation"
         case .data: return "Data"
@@ -31,7 +29,6 @@ private enum SettingsCategory: String, CaseIterable, Identifiable {
         switch self {
         case .account: return "person.crop.circle"
         case .general: return "gearshape"
-        case .notifications: return "bell"
         case .exclusions: return "eye.slash"
         case .personalisation: return "person"
         case .data: return "externaldrive"
@@ -154,8 +151,6 @@ struct SettingsView: View {
                         accountPane
                     case .general:
                         generalPane
-                    case .notifications:
-                        NotificationSettingsView()
                     case .exclusions:
                         exclusionsPane
                     case .personalisation:
