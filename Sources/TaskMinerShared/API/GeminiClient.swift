@@ -418,6 +418,213 @@ public final class GeminiClient: Sendable {
             return false
         }
     }
+
+    // MARK: - Function Calling
+
+    /// Result of a function calling request.
+    public struct FunctionCallResult: Sendable {
+        /// The final text response after all function calls are resolved.
+        public let text: String
+        /// The function calls that were made (for logging/debugging).
+        public let functionCalls: [FunctionCall]
+    }
+
+    /// A function call requested by the model.
+    public struct FunctionCall: Sendable {
+        public let name: String
+        public let arguments: [String: Any]
+
+        public init(name: String, arguments: [String: Any]) {
+            self.name = name
+            self.arguments = arguments
+        }
+    }
+
+    /// Generate content with function calling support.
+    /// The model can request function calls, which are executed via the provided handler.
+    /// This continues until the model returns a text response.
+    ///
+    /// - Parameters:
+    ///   - prompt: The user prompt
+    ///   - systemInstruction: Optional system instruction
+    ///   - functions: Array of function declarations (Gemini format)
+    ///   - conversationHistory: Optional previous conversation turns
+    ///   - executeFunction: Handler that executes a function call and returns the result as a string
+    /// - Returns: The final text response and list of function calls made
+    public func generateWithFunctions(
+        prompt: String,
+        systemInstruction: String? = nil,
+        functions: [[String: Any]],
+        conversationHistory: [[String: Any]]? = nil,
+        executeFunction: @escaping (FunctionCall) async throws -> String
+    ) async throws -> FunctionCallResult {
+        var contents: [[String: Any]] = conversationHistory ?? []
+        contents.append([
+            "role": "user",
+            "parts": [["text": prompt]]
+        ])
+
+        var allFunctionCalls: [FunctionCall] = []
+        let maxIterations = 10  // Prevent infinite loops
+
+        for _ in 0..<maxIterations {
+            let response = try await sendFunctionCallRequest(
+                contents: contents,
+                systemInstruction: systemInstruction,
+                functions: functions
+            )
+
+            // Check if the response contains function calls
+            if let functionCalls = response.functionCalls, !functionCalls.isEmpty {
+                // Execute each function call
+                var functionResponses: [[String: Any]] = []
+
+                for call in functionCalls {
+                    let fc = FunctionCall(name: call.name, arguments: call.arguments)
+                    allFunctionCalls.append(fc)
+
+                    let result = try await executeFunction(fc)
+                    functionResponses.append([
+                        "functionResponse": [
+                            "name": call.name,
+                            "response": ["result": result]
+                        ]
+                    ])
+                }
+
+                // Add the model's function call to history
+                contents.append([
+                    "role": "model",
+                    "parts": functionCalls.map { call in
+                        [
+                            "functionCall": [
+                                "name": call.name,
+                                "args": call.arguments
+                            ]
+                        ]
+                    }
+                ])
+
+                // Add function responses to history
+                contents.append([
+                    "role": "user",
+                    "parts": functionResponses
+                ])
+            } else if let text = response.text {
+                // Model returned a text response — we're done
+                return FunctionCallResult(text: text, functionCalls: allFunctionCalls)
+            } else {
+                throw GeminiError.parseError("Response contained neither text nor function calls")
+            }
+        }
+
+        throw GeminiError.parseError("Function calling loop exceeded maximum iterations")
+    }
+
+    /// Internal response structure for function calling.
+    private struct FunctionCallResponse {
+        let text: String?
+        let functionCalls: [ParsedFunctionCall]?
+
+        struct ParsedFunctionCall {
+            let name: String
+            let arguments: [String: Any]
+        }
+    }
+
+    /// Send a request that may return function calls or text.
+    private func sendFunctionCallRequest(
+        contents: [[String: Any]],
+        systemInstruction: String?,
+        functions: [[String: Any]]
+    ) async throws -> FunctionCallResponse {
+        var components = URLComponents(string: baseURL)
+        components?.path += "/\(model):generateContent"
+        guard let url = components?.url else {
+            throw GeminiError.invalidURL
+        }
+
+        var body: [String: Any] = ["contents": contents]
+
+        if let system = systemInstruction {
+            body["systemInstruction"] = ["parts": [["text": system]]]
+        }
+
+        body["generationConfig"] = [
+            "temperature": 0.3,
+            "maxOutputTokens": 8192,
+            "thinkingConfig": ["thinkingBudget": 1024]
+        ] as [String: Any]
+
+        // Add function declarations
+        body["tools"] = [
+            ["functionDeclarations": functions]
+        ]
+
+        let jsonData = try JSONSerialization.data(withJSONObject: body)
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        try await applyAuth(to: &request)
+        request.httpBody = jsonData
+        request.timeoutInterval = 120
+
+        let (data, response) = try await URLSession.shared.data(for: request)
+
+        guard let httpResponse = response as? HTTPURLResponse else {
+            throw GeminiError.invalidResponse
+        }
+
+        if apiMode == .proxy, let proxyError = checkProxyError(statusCode: httpResponse.statusCode) {
+            throw proxyError
+        }
+
+        guard httpResponse.statusCode == 200 else {
+            let errorBody = String(data: data, encoding: .utf8) ?? "unknown"
+            throw GeminiError.apiError(statusCode: httpResponse.statusCode, message: errorBody)
+        }
+
+        return try parseFunctionCallResponse(data)
+    }
+
+    /// Parse response that may contain function calls or text.
+    private func parseFunctionCallResponse(_ data: Data) throws -> FunctionCallResponse {
+        guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let candidates = json["candidates"] as? [[String: Any]],
+              let firstCandidate = candidates.first,
+              let content = firstCandidate["content"] as? [String: Any],
+              let parts = content["parts"] as? [[String: Any]]
+        else {
+            let preview = String(data: data.prefix(500), encoding: .utf8) ?? "?"
+            throw GeminiError.parseError("Could not parse function call response: \(preview)")
+        }
+
+        // Check for function calls
+        var functionCalls: [FunctionCallResponse.ParsedFunctionCall] = []
+        var textParts: [String] = []
+
+        for part in parts {
+            // Skip thought parts
+            if part["thought"] != nil { continue }
+
+            if let functionCall = part["functionCall"] as? [String: Any],
+               let name = functionCall["name"] as? String {
+                let args = functionCall["args"] as? [String: Any] ?? [:]
+                functionCalls.append(FunctionCallResponse.ParsedFunctionCall(name: name, arguments: args))
+            } else if let text = part["text"] as? String, !text.isEmpty {
+                textParts.append(text)
+            }
+        }
+
+        if !functionCalls.isEmpty {
+            return FunctionCallResponse(text: nil, functionCalls: functionCalls)
+        } else if !textParts.isEmpty {
+            return FunctionCallResponse(text: textParts.joined(), functionCalls: nil)
+        } else {
+            throw GeminiError.parseError("Response contained no usable parts")
+        }
+    }
 }
 
 public enum GeminiError: Error, LocalizedError {

@@ -247,32 +247,43 @@ extension DashboardViewModel {
         chatError = nil
         Analytics.chatMessageSent()
 
-        // Classify intent and build appropriate context
+        // Classify intent
         let intent = ChatIntentClassifier.classify(trimmed)
         let memoryContext = memoryStore.contextString()
-        let history = buildConversationHistory()
-        let screenContext = currentScreen
 
-        // Build intent-specific prompt and system instruction
-        let (systemInstruction, prompt) = buildPromptForIntent(
-            intent: intent,
-            query: trimmed,
-            memoryContext: memoryContext,
-            screenContext: screenContext
-        )
-
-        // Create empty assistant message for streaming
+        // Create empty assistant message
         let assistantMessage = ChatMessage(role: .assistant, content: "", isStreaming: true)
         appendChatMessage(assistantMessage)
 
         Task {
             do {
-                for try await chunk in client.streamGenerateText(
-                    prompt: prompt,
-                    systemInstruction: systemInstruction,
-                    conversationHistory: history
-                ) {
-                    assistantMessage.content += chunk
+                // For activity queries, use tool calling for precise data retrieval
+                if intent == .activityQuery, let db = dbReader {
+                    let response = try await sendWithToolCalling(
+                        query: trimmed,
+                        client: client,
+                        dbReader: db,
+                        memoryContext: memoryContext
+                    )
+                    assistantMessage.content = response
+                } else {
+                    // For action requests and general knowledge, use streaming
+                    let history = buildConversationHistory()
+                    let screenContext = currentScreen
+                    let (systemInstruction, prompt) = buildPromptForIntent(
+                        intent: intent,
+                        query: trimmed,
+                        memoryContext: memoryContext,
+                        screenContext: screenContext
+                    )
+
+                    for try await chunk in client.streamGenerateText(
+                        prompt: prompt,
+                        systemInstruction: systemInstruction,
+                        conversationHistory: history
+                    ) {
+                        assistantMessage.content += chunk
+                    }
                 }
 
                 assistantMessage.isStreaming = false
@@ -316,6 +327,54 @@ extension DashboardViewModel {
                 self.isChatLoading = false
             }
         }
+    }
+
+    /// Send a message using tool calling for activity queries.
+    /// The AI can call tools to retrieve specific data before formulating a response.
+    private func sendWithToolCalling(
+        query: String,
+        client: GeminiClient,
+        dbReader: DatabaseReader,
+        memoryContext: String?
+    ) async throws -> String {
+        let toolsBridge = StubbleToolsBridge(dbReader: dbReader, memoryStore: memoryStore)
+
+        let systemInstruction = """
+        You are an AI assistant embedded in Stubble, a desktop activity tracker. \
+        You have access to tools that retrieve the user's activity data. \
+        \
+        IMPORTANT: Always use the appropriate tool to get data before answering. \
+        - For "show time by app" or "how much time" questions → use get_time_by_app \
+        - For "what did I work on" or task questions → use query_tasks \
+        - For project questions → use get_projects \
+        - For timeline or schedule questions → use get_timeline \
+        - For day summary questions → use get_day_summary \
+        - For search questions → use search_activities \
+        \
+        After retrieving data, format your response clearly: \
+        - Use markdown formatting (bold for app names, bullet lists for breakdowns) \
+        - Format durations as hours and minutes (e.g. "2h 15m") \
+        - Be concise and direct \
+        - Never fabricate data not present in tool results \
+        \(memoryContext.map { "\nUser context: \($0)" } ?? "")
+        """
+
+        let result = try await client.generateWithFunctions(
+            prompt: query,
+            systemInstruction: systemInstruction,
+            functions: toolsBridge.geminiFunctionDeclarations,
+            conversationHistory: nil
+        ) { functionCall in
+            try await toolsBridge.execute(functionCall: functionCall)
+        }
+
+        // Log tool calls for debugging
+        if !result.functionCalls.isEmpty {
+            let toolNames = result.functionCalls.map { $0.name }.joined(separator: ", ")
+            Logger.info("Chat used tools: \(toolNames)")
+        }
+
+        return result.text
     }
 
     func clearChat() {
