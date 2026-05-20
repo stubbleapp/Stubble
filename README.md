@@ -4,23 +4,39 @@
 [![macOS](https://img.shields.io/badge/macOS-14.0+-000000?logo=apple)](https://www.apple.com/macos/)
 [![Swift](https://img.shields.io/badge/Swift-5.9+-FA7343?logo=swift)](https://swift.org)
 
-A native macOS app that tracks your desktop activity and uses AI to transform it into meaningful insights — tasks, project summaries, and personalized recommendations.
+**Context infrastructure for AI agents.**
+
+Stubble captures what you're working on and makes that context available to AI tools like Claude Code, Cursor, and other MCP-compatible agents. We focus on doing one thing extremely well: understanding your work and exposing it efficiently to AI.
 
 <p align="center">
   <img src="Resources/screenshot.png" alt="Stubble Screenshot" width="600">
 </p>
 
+## Philosophy
+
+We are **not** a do-everything AI app. We don't compete with Claude or ChatGPT — we make them smarter.
+
+| What we do | What we don't do |
+|------------|------------------|
+| Capture screen activity with high fidelity | Audio capture or transcription |
+| Build a knowledge graph of your work | Plugin/extension systems |
+| Learn about you over time (persistent memory) | Cross-platform support |
+| Expose context to AI via MCP | Be the AI that answers questions |
+| Optimize for minimal token usage | Enterprise features |
+
+Our goal: when you use Claude Code or Cursor with Stubble connected, your AI actually understands your projects, your tech stack, and what you were doing this morning.
+
 ## Features
 
+- **MCP server** — Exposes your work context to Claude Code, Cursor, and other AI tools
+- **Knowledge graph** — Builds semantic understanding of your projects, technologies, and skills
+- **Persistent memory** — Learns about your role and work patterns with confidence decay
 - **Activity monitoring** — Tracks app switches, window titles, browser URLs, and document paths
 - **Screen capture** — Periodic screenshots with local OCR (Apple Vision)
 - **File system tracking** — Monitors changes in your code and document directories
 - **Calendar & meeting integration** — Integrates with macOS Calendar and Granola meeting notes
 - **AI-powered task grouping** — Clusters raw activity into meaningful tasks
-- **Project activities** — Groups related tasks into higher-level projects
-- **Natural language chat** — Ask questions about your work
-- **Persistent memory** — Learns about your role, projects, and technologies over time
-- **MCP server** — Exposes your activity data to AI tools like Claude Code
+- **Token optimization** — Synthesizes context efficiently so AI tools get signal, not noise
 
 ## Quick Start
 

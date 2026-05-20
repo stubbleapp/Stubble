@@ -2,9 +2,9 @@
   "manifest_version": "0.3",
   "name": "stubble",
   "display_name": "Stubble",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Access your activity history, tasks, and projects from Stubble",
-  "long_description": "Stubble tracks your work activity and generates AI-powered task summaries. This extension allows Claude to query your activity history, tasks, projects, and daily summaries to provide personalized assistance based on what you've been working on.",
+  "long_description": "Stubble tracks your work activity and generates AI-powered task summaries. This extension allows Claude to query your activity history, tasks, projects, and daily summaries to provide personalized assistance based on what you've been working on. Includes the /stubble skill for generating beautiful visual timesheets.",
   "author": {
     "name": "Stubble",
     "url": "https://stubble.ai"
@@ -53,5 +53,11 @@
         "STUBBLE_MCP_KEY": "${user_config.api_key}"
       }
     }
-  }
+  },
+  "skills": [
+    {
+      "name": "stubble",
+      "path": "skills/stubble"
+    }
+  ]
 }

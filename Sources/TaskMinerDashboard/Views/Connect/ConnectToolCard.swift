@@ -430,6 +430,8 @@ struct ConnectToolCard: View {
 
     @State private var isDownloading = false
     @State private var downloadComplete = false
+    @State private var isDownloadingSkill = false
+    @State private var skillDownloadComplete = false
 
     @ViewBuilder
     private var mcpbInstructions: some View {
@@ -573,6 +575,54 @@ struct ConnectToolCard: View {
                     .font(.system(size: 11))
                     .foregroundStyle(Theme.textPrimary)
             }
+
+            Divider()
+                .padding(.vertical, 4)
+
+            // Skill download section
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Optional: Install /stubble Skill")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(Theme.textPrimary)
+
+                Text("Generate beautiful visual timesheets from your activity data. Type /stubble in Claude Desktop after installing.")
+                    .font(.system(size: 10))
+                    .foregroundStyle(Theme.textSecondary)
+
+                HStack(spacing: 12) {
+                    Button {
+                        downloadSkill()
+                    } label: {
+                        HStack(spacing: 6) {
+                            if isDownloadingSkill {
+                                ProgressView()
+                                    .scaleEffect(0.6)
+                                    .frame(width: 11, height: 11)
+                            } else {
+                                Image(systemName: skillDownloadComplete ? "checkmark.circle.fill" : "arrow.down.circle")
+                                    .font(.system(size: 11))
+                            }
+                            Text(skillDownloadComplete ? "Downloaded!" : (isDownloadingSkill ? "Downloading..." : "Download Skill"))
+                                .font(.system(size: 11, weight: .medium))
+                        }
+                        .foregroundStyle(skillDownloadComplete ? Theme.statusActive : Theme.accent)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 6)
+                        .background(
+                            RoundedRectangle(cornerRadius: 6, style: .continuous)
+                                .strokeBorder(skillDownloadComplete ? Theme.statusActive : Theme.accent, lineWidth: 1)
+                        )
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(isDownloadingSkill)
+
+                    if skillDownloadComplete {
+                        Text("Install via Settings → Skills in Claude Desktop")
+                            .font(.system(size: 10))
+                            .foregroundStyle(Theme.textMuted)
+                    }
+                }
+            }
         }
     }
 
@@ -617,6 +667,62 @@ struct ConnectToolCard: View {
                 } catch {
                     // Fallback: open in browser
                     NSWorkspace.shared.open(mcpbURL)
+                }
+            }
+        }.resume()
+    }
+
+    private func downloadSkill() {
+        isDownloadingSkill = true
+        skillDownloadComplete = false
+
+        let downloadsURL = FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask).first!
+        let destinationURL = downloadsURL.appendingPathComponent("stubble.skill")
+
+        // Try to copy from app bundle first
+        if let bundledSkillURL = Bundle.main.url(forResource: "stubble", withExtension: "skill", subdirectory: "Skills") {
+            do {
+                if FileManager.default.fileExists(atPath: destinationURL.path) {
+                    try FileManager.default.removeItem(at: destinationURL)
+                }
+                try FileManager.default.copyItem(at: bundledSkillURL, to: destinationURL)
+                isDownloadingSkill = false
+                skillDownloadComplete = true
+
+                DispatchQueue.main.asyncAfter(deadline: .now() + 5) {
+                    skillDownloadComplete = false
+                }
+                return
+            } catch {
+                // Fall through to remote download
+            }
+        }
+
+        // Fallback: download from GitHub
+        let skillURL = URL(string: "https://github.com/stubbleapp/stubble-releases/releases/latest/download/stubble.skill")!
+
+        URLSession.shared.downloadTask(with: skillURL) { tempURL, response, error in
+            DispatchQueue.main.async {
+                isDownloadingSkill = false
+
+                guard let tempURL = tempURL, error == nil else {
+                    // Fallback: open in browser
+                    NSWorkspace.shared.open(skillURL)
+                    return
+                }
+
+                do {
+                    if FileManager.default.fileExists(atPath: destinationURL.path) {
+                        try FileManager.default.removeItem(at: destinationURL)
+                    }
+                    try FileManager.default.moveItem(at: tempURL, to: destinationURL)
+                    skillDownloadComplete = true
+
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 5) {
+                        skillDownloadComplete = false
+                    }
+                } catch {
+                    NSWorkspace.shared.open(skillURL)
                 }
             }
         }.resume()

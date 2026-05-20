@@ -151,6 +151,14 @@ if [ -d "$CONNECT_ICONS_DIR" ]; then
     echo "🔗 Connect icons copied"
 fi
 
+# Copy Claude Desktop skills
+SKILLS_DIR="$BUILD_DIR/Resources/Skills"
+if [ -d "$SKILLS_DIR" ]; then
+    mkdir -p "$APP_BUNDLE/Contents/Resources/Skills"
+    cp "$SKILLS_DIR"/*.skill "$APP_BUNDLE/Contents/Resources/Skills/" 2>/dev/null
+    echo "🎯 Claude Desktop skills copied"
+fi
+
 # Build MCPB extension for Claude Desktop (not bundled, published separately)
 if [ -f "$BUILD_DIR/scripts/build-mcpb.sh" ]; then
     bash "$BUILD_DIR/scripts/build-mcpb.sh" >/dev/null 2>&1 || true
