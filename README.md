@@ -1,71 +1,146 @@
 # Stubble
 
+[![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
+[![macOS](https://img.shields.io/badge/macOS-14.0+-000000?logo=apple)](https://www.apple.com/macos/)
+[![Swift](https://img.shields.io/badge/Swift-5.9+-FA7343?logo=swift)](https://swift.org)
+
 A native macOS app that tracks your desktop activity and uses AI to transform it into meaningful insights — tasks, project summaries, and personalized recommendations.
 
-**[Download](https://stubble.ai)** · **[Privacy Policy](https://stubble.ai/privacy)** · **[Terms of Service](https://stubble.ai/terms)**
+<p align="center">
+  <img src="Resources/screenshot.png" alt="Stubble Screenshot" width="600">
+</p>
 
-## How it works
+## Features
 
-Stubble runs quietly in the background, observing your work across apps:
+- **Activity monitoring** — Tracks app switches, window titles, browser URLs, and document paths
+- **Screen capture** — Periodic screenshots with local OCR (Apple Vision)
+- **File system tracking** — Monitors changes in your code and document directories
+- **Calendar & meeting integration** — Integrates with macOS Calendar and Granola meeting notes
+- **AI-powered task grouping** — Clusters raw activity into meaningful tasks
+- **Project activities** — Groups related tasks into higher-level projects
+- **Natural language chat** — Ask questions about your work
+- **Persistent memory** — Learns about your role, projects, and technologies over time
+- **MCP server** — Exposes your activity data to AI tools like Claude Code
 
-- **Activity monitoring** — tracks app switches, window titles, browser URLs, and document paths
-- **Screen capture** — periodic screenshots with local OCR (Apple Vision)
-- **File system** — monitors changes in your code and document directories
-- **Calendar & meetings** — integrates with macOS Calendar and Granola meeting notes
+## Quick Start
 
-Every 15 minutes, Stubble's AI synthesizes this context into high-level tasks and project activities. Over time, it learns your projects, tools, and workflows to provide increasingly relevant insights.
+### Option 1: Hosted Service
 
-## Requirements
-
-- macOS 14.0 (Sonoma) or later
-- Free 30-day trial, then $X/month for Pro
-
-## Installation
+The easiest way to use Stubble is with the hosted service at [stubble.ai](https://stubble.ai):
 
 1. Download from [stubble.ai](https://stubble.ai)
 2. Move `Stubble.app` to Applications
 3. Launch and follow the setup wizard
+4. Sign in with Google (5-day free trial)
 
-The wizard guides you through granting permissions (Accessibility and Screen Recording) and signing in with Google.
+### Option 2: Self-Hosted with Direct API Mode
 
-## Features
+If you prefer to use your own Gemini API key without any backend:
 
-### Intelligent task grouping
-Raw activity is clustered into meaningful tasks like "Reviewing PR #342 in GitHub" or "Writing API documentation in Notion." Tasks include time ranges, apps used, and relevant links extracted from your screen.
+```bash
+# Clone the repository
+git clone https://github.com/samattias/stubble.git
+cd stubble
 
-### Project activities
-Related tasks are grouped into higher-level projects. Stubble tracks time across projects and shows your work distribution at a glance.
+# Set your Gemini API key
+export GEMINI_API_KEY="your-gemini-api-key"
 
-### Day timeline
-A visual timeline of your day with tasks, away periods, and project context. Expand any task to see constituent activities and screenshots.
+# Build with ad-hoc signing (no Developer ID required)
+export CODESIGN_IDENTITY="-"
+export SPARKLE_FEED_URL=""
+export SPARKLE_ED_KEY=""
+export TELEMETRY_DECK_APP_ID=""
 
-### AI chat
-Ask questions about your work in natural language:
-- "What did I work on this morning?"
-- "How much time did I spend on the API this week?"
-- "Summarize my meetings from yesterday"
+bash scripts/build-app.sh
 
-### Personalized recommendations
-Based on your recent activity and interests, Stubble suggests relevant articles, tools, and learning resources. Recommendations appear in the Chat tab when you're not in a conversation.
+# Run the app
+open build/Stubble.app
+```
 
-### Persistent memory
-Stubble learns about you over time — your role, projects, technologies, and interests. This context personalizes AI responses and recommendations across sessions.
+In direct API mode, requests go straight to Google's Gemini API — no Supabase or Cloudflare Worker needed.
 
-### Meeting integration
-Automatically pulls meeting notes and transcripts from [Granola](https://granola.ai) for richer context in summaries and chat.
+### Option 3: Full Self-Hosted Stack
 
-### Privacy-first
-- All data stays on your machine
-- Screenshots are never uploaded
-- Only activity metadata (titles, OCR text) is sent to the AI for summarization
-- Optional analytics can be disabled in Settings
+For complete control, you can deploy your own backend. See [docs/SELF_HOSTING.md](docs/SELF_HOSTING.md) for:
 
-## Data storage
+- Supabase project setup (authentication)
+- Cloudflare Worker deployment (API proxy with rate limiting)
+- Building the app with your own credentials
+
+## Building from Source
+
+### Requirements
+
+- macOS 14.0 (Sonoma) or later
+- Xcode 15+ or Swift 5.9+ toolchain
+- (Optional) Developer ID certificate for distribution
+
+### Build
+
+```bash
+# Clone
+git clone https://github.com/samattias/stubble.git
+cd stubble
+
+# Build
+bash scripts/build-app.sh
+
+# Run
+open build/Stubble.app
+```
+
+### Environment Variables
+
+See [docs/CONFIGURATION.md](docs/CONFIGURATION.md) for all available options. Key variables:
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `GEMINI_API_KEY` | Direct Gemini API key (bypasses proxy) | — |
+| `STUBBLE_SUPABASE_URL` | Supabase project URL | Placeholder |
+| `STUBBLE_SUPABASE_ANON_KEY` | Supabase anon key | Placeholder |
+| `STUBBLE_PROXY_URL` | Cloudflare Worker URL | Placeholder |
+| `CODESIGN_IDENTITY` | Code signing identity (`-` for ad-hoc) | Developer ID |
+| `SPARKLE_FEED_URL` | Auto-update feed URL (empty to disable) | GitHub releases |
+| `TELEMETRY_DECK_APP_ID` | Analytics app ID (empty to disable) | — |
+
+## Architecture
+
+Stubble consists of two processes:
+
+1. **Dashboard** — SwiftUI app with menu bar presence
+2. **Daemon** — Background process that collects activity data
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│                           DAEMON PROCESS                            │
+│  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐  ┌────────────┐ │
+│  │ Activity    │  │ Window      │  │ Idle        │  │ File       │ │
+│  │ Monitor     │  │ Title       │  │ Detector    │  │ Activity   │ │
+│  └──────┬──────┘  └──────┬──────┘  └──────┬──────┘  └──────┬─────┘ │
+│         └────────────────┴────────────────┴────────────────┘       │
+│                                  │                                  │
+│                                  ▼                                  │
+│                   ┌──────────────────────────┐                     │
+│                   │    DatabaseManager       │                     │
+│                   │    (SQLite + WAL)        │                     │
+│                   └──────────────────────────┘                     │
+│                                  │                                  │
+│                                  ▼                                  │
+│                   ┌──────────────────────────┐                     │
+│                   │    TaskSummarizer        │───▶ Gemini API      │
+│                   │    (every 15 min)        │                     │
+│                   └──────────────────────────┘                     │
+└─────────────────────────────────────────────────────────────────────┘
+```
+
+See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for detailed diagrams.
+
+## Data Storage
 
 All data is stored locally in `~/Library/Application Support/Stubble/`:
 
 | File | Contents |
-|---|---|
+|------|----------|
 | `stubble.db` | SQLite database (activities, tasks, projects) |
 | `screenshots/` | JPEG files organized by date |
 | `settings.json` | Preferences and configuration |
@@ -73,11 +148,43 @@ All data is stored locally in `~/Library/Application Support/Stubble/`:
 
 Screenshots are automatically pruned (images after 100, full records after 30 days).
 
-## Support
+## MCP Server
 
-- **Issues**: [github.com/anthropics/claude-code/issues](https://github.com/anthropics/claude-code/issues)
-- **Website**: [stubble.ai](https://stubble.ai)
+Stubble exposes a local [MCP](https://modelcontextprotocol.io) server that allows AI tools to access your activity data:
+
+```bash
+# Show your API key
+/Applications/Stubble.app/Contents/MacOS/stubble-mcp --show-key
+
+# Connect Claude Code
+claude mcp add-json stubble '{"type":"stdio","command":"/Applications/Stubble.app/Contents/MacOS/stubble-mcp","env":{"STUBBLE_MCP_KEY":"sk-stubble-xxxx"}}' --scope user
+```
+
+See the Connect tab in Stubble for setup instructions for other AI tools.
+
+## Privacy
+
+- All data stays on your machine
+- Screenshots are never uploaded
+- Only activity metadata (titles, OCR text) is sent to the AI for summarization
+- Direct API mode sends data only to Google's Gemini API
+- Optional analytics can be disabled
+
+## Contributing
+
+Contributions are welcome! Please:
+
+1. Fork the repository
+2. Create a feature branch (`git checkout -b feature/amazing-feature`)
+3. Commit your changes (`git commit -m 'Add amazing feature'`)
+4. Push to the branch (`git push origin feature/amazing-feature`)
+5. Open a Pull Request
 
 ## License
 
-Proprietary. See [LICENSE](LICENSE) for details.
+Licensed under the Apache License, Version 2.0. See [LICENSE](LICENSE) for details.
+
+## Support
+
+- **Issues**: [github.com/samattias/stubble/issues](https://github.com/samattias/stubble/issues)
+- **Discussions**: [github.com/samattias/stubble/discussions](https://github.com/samattias/stubble/discussions)

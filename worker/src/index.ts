@@ -12,12 +12,10 @@
 interface Env {
   GEMINI_API_KEY: string;
   SUPABASE_ANON_KEY: string;
+  SUPABASE_URL: string;
   RATE_LIMITS: KVNamespace;
   ENVIRONMENT: string;
 }
-
-// Supabase project URL (for user lookup fallback)
-const SUPABASE_URL = "https://uyeacjkroneihbtjswnv.supabase.co";
 
 interface JWTPayload {
   sub: string; // user ID
@@ -49,10 +47,6 @@ const GEMINI_BASE = "https://generativelanguage.googleapis.com";
 // Maximum response size from Gemini (50MB)
 const MAX_RESPONSE_SIZE = 50 * 1024 * 1024;
 
-// Supabase JWKS URL for ES256 verification
-const SUPABASE_JWKS_URL =
-  "https://uyeacjkroneihbtjswnv.supabase.co/auth/v1/.well-known/jwks.json";
-
 // JWKS cache timestamp (keys cached per-kid in getJWK)
 let jwkFetchedAt = 0;
 const JWK_CACHE_TTL = 3600_000; // 1 hour
@@ -77,7 +71,7 @@ export default {
 
       // Verify JWT using ES256 (JWKS) — Supabase's signing algorithm.
       // HS256 fallback intentionally removed to prevent algorithm downgrade attacks.
-      const payload = await verifyJWT_ES256(token);
+      const payload = await verifyJWT_ES256(token, env);
       if (!payload) {
         return errorResponse(401, "invalid_token", "Invalid or expired token");
       }
@@ -188,14 +182,17 @@ export default {
 // Cache keyed by kid to handle key rotation
 const cachedJWKs = new Map<string, CryptoKey>();
 
-async function getJWK(kid?: string): Promise<CryptoKey | null> {
+async function getJWK(kid: string | undefined, env: Env): Promise<CryptoKey | null> {
   // Return cached key if fresh and kid matches
   if (kid && cachedJWKs.has(kid) && Date.now() - jwkFetchedAt < JWK_CACHE_TTL) {
     return cachedJWKs.get(kid)!;
   }
 
+  // Construct JWKS URL from env.SUPABASE_URL
+  const jwksUrl = `${env.SUPABASE_URL}/auth/v1/.well-known/jwks.json`;
+
   try {
-    const response = await fetch(SUPABASE_JWKS_URL);
+    const response = await fetch(jwksUrl);
     if (!response.ok) return null;
 
     const jwks = (await response.json()) as { keys: (JsonWebKey & { kid?: string })[] };
@@ -224,7 +221,7 @@ async function getJWK(kid?: string): Promise<CryptoKey | null> {
   }
 }
 
-async function verifyJWT_ES256(token: string): Promise<JWTPayload | null> {
+async function verifyJWT_ES256(token: string, env: Env): Promise<JWTPayload | null> {
   try {
     const parts = token.split(".");
     if (parts.length !== 3) {
@@ -242,7 +239,7 @@ async function verifyJWT_ES256(token: string): Promise<JWTPayload | null> {
       return null;
     }
 
-    const key = await getJWK(header.kid);
+    const key = await getJWK(header.kid, env);
     if (!key) {
       console.warn(`JWT verification failed: could not fetch JWKS key (kid: ${header.kid})`);
       return null;
@@ -318,7 +315,7 @@ async function getTier(
       // 3. Last resort: fetch from Supabase user API and cache in KV
       try {
         // Use the current JWT to fetch the user's own profile
-        const userResp = await fetch(`${SUPABASE_URL}/auth/v1/user`, {
+        const userResp = await fetch(`${env.SUPABASE_URL}/auth/v1/user`, {
           headers: {
             Authorization: `Bearer ${rawToken}`,
             apikey: env.SUPABASE_ANON_KEY,

@@ -1,0 +1,64 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  build:
+    name: Build and Test
+    runs-on: macos-14
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Xcode
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: latest-stable
+
+      - name: Build
+        run: swift build
+
+      - name: Run Tests
+        run: swift test
+
+  build-app:
+    name: Build App Bundle
+    runs-on: macos-14
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Xcode
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: latest-stable
+
+      - name: Build App
+        env:
+          # Use ad-hoc signing for CI
+          CODESIGN_IDENTITY: "-"
+          # Disable features that require secrets
+          SPARKLE_FEED_URL: ""
+          SPARKLE_ED_KEY: ""
+          TELEMETRY_DECK_APP_ID: ""
+        run: |
+          bash scripts/build-app.sh 0.0.0-ci
+
+      - name: Verify App Bundle
+        run: |
+          test -d build/Stubble.app
+          test -f build/Stubble.app/Contents/MacOS/Stubble
+          codesign --verify build/Stubble.app
+
+      - name: Upload App Bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: Stubble.app
+          path: build/Stubble.app
+          retention-days: 7

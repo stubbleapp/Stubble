@@ -2,20 +2,31 @@ import Foundation
 
 /// Configuration constants for Stubble's backend services.
 ///
-/// The Supabase URL and anon key are **public** (safe to embed in the binary) —
-/// Supabase gates access via Row Level Security and JWT verification, not key secrecy.
-/// The anon key only grants access to the Auth endpoints and public-facing APIs.
+/// For self-hosted deployments, set these environment variables:
+/// - `STUBBLE_SUPABASE_URL`: Your Supabase project URL
+/// - `STUBBLE_SUPABASE_ANON_KEY`: Your Supabase public anon key
+/// - `STUBBLE_PROXY_URL`: Your Cloudflare Worker URL (optional if using direct API mode)
+///
+/// Alternatively, for direct Gemini API access without a proxy:
+/// - Set `GEMINI_API_KEY` environment variable
+/// - No Supabase setup required
 public enum StubbleAPIConfig {
     /// Supabase project URL.
-    /// Replace with your actual project URL after creating the Supabase project.
-    public static let supabaseURL = "https://uyeacjkroneihbtjswnv.supabase.co"
+    /// Set via `STUBBLE_SUPABASE_URL` environment variable, or replace the placeholder.
+    public static let supabaseURL = ProcessInfo.processInfo.environment["STUBBLE_SUPABASE_URL"]
+        ?? "https://YOUR_PROJECT.supabase.co"
 
     /// Supabase public anon key.
-    /// Replace with your actual anon key (safe to embed — it's a public key).
-    public static let supabaseAnonKey = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InV5ZWFjamtyb25laWhidGpzd252Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzIyODUyMDEsImV4cCI6MjA4Nzg2MTIwMX0.-GcJdFcbNgaUW49tf1S8Mnl0djSLbmJmElIQ_b7_53g"
+    /// Set via `STUBBLE_SUPABASE_ANON_KEY` environment variable, or replace the placeholder.
+    /// Safe to embed — it's a public key that only grants access to Auth endpoints.
+    public static let supabaseAnonKey = ProcessInfo.processInfo.environment["STUBBLE_SUPABASE_ANON_KEY"]
+        ?? "YOUR_SUPABASE_ANON_KEY"
 
     /// Cloudflare Worker proxy URL. All proxy-mode AI requests go through this.
-    public static let proxyBaseURL = "https://api.stubble.ai"
+    /// Set via `STUBBLE_PROXY_URL` environment variable, or replace the placeholder.
+    /// Not required if using direct API mode (GEMINI_API_KEY set).
+    public static let proxyBaseURL = ProcessInfo.processInfo.environment["STUBBLE_PROXY_URL"]
+        ?? "https://YOUR_WORKER.workers.dev"
 
     /// Custom URL scheme for OAuth callbacks.
     public static let callbackScheme = "com.stubble"
@@ -23,12 +34,18 @@ public enum StubbleAPIConfig {
     /// Full OAuth callback URL.
     public static var callbackURL: String { "\(callbackScheme)://auth-callback" }
 
-    /// Paddle Price ID for the Pro subscription ($10/month).
-    public static let paddlePriceId = "pri_01kjwwnmrahnxxdbbna0p1myee"
+    /// Paddle Price ID for the Pro subscription.
+    /// Set via `STUBBLE_PADDLE_PRICE_ID` environment variable for your own Paddle account.
+    public static let paddlePriceId = ProcessInfo.processInfo.environment["STUBBLE_PADDLE_PRICE_ID"]
+        ?? "YOUR_PADDLE_PRICE_ID"
 
-    /// Build checkout URL that opens stubble.ai/checkout with Paddle.js overlay.
+    /// Build checkout URL that opens the checkout page with Paddle.js overlay.
     public static func paddleCheckoutURL(userId: String, email: String?) -> URL? {
-        var components = URLComponents(string: "https://stubble.ai/checkout")
+        // Use custom checkout URL if set, otherwise default to stubble.ai
+        let baseURL = ProcessInfo.processInfo.environment["STUBBLE_CHECKOUT_URL"]
+            ?? "https://stubble.ai/checkout"
+
+        var components = URLComponents(string: baseURL)
         var queryItems: [URLQueryItem] = []
 
         queryItems.append(URLQueryItem(name: "user_id", value: userId))
@@ -42,13 +59,21 @@ public enum StubbleAPIConfig {
     }
 
     /// Enterprise contact URL.
-    public static let enterpriseContactURL = "mailto:hello@stubble.app?subject=Stubble%20Enterprise"
+    public static let enterpriseContactURL = ProcessInfo.processInfo.environment["STUBBLE_ENTERPRISE_URL"]
+        ?? "mailto:hello@stubble.app?subject=Stubble%20Enterprise"
 
     /// Free trial duration in days.
     public static let trialDays = 5
 
-    /// Whether the backend is configured (placeholder values replaced).
+    /// Whether the backend is configured for proxy mode.
+    /// Returns true if Supabase credentials are set (not placeholder values).
     public static var isConfigured: Bool {
-        !supabaseURL.contains("PLACEHOLDER") && !supabaseAnonKey.contains("PLACEHOLDER")
+        !supabaseURL.contains("YOUR_") && !supabaseAnonKey.contains("YOUR_")
+    }
+
+    /// Whether direct API mode is available (GEMINI_API_KEY env var is set).
+    /// In direct mode, requests go straight to Gemini without the proxy.
+    public static var isDirectModeAvailable: Bool {
+        ProcessInfo.processInfo.environment["GEMINI_API_KEY"] != nil
     }
 }

@@ -1,40 +1,78 @@
 import Foundation
 
+/// API mode for Gemini requests.
+public enum GeminiAPIMode: Sendable {
+    /// Requests go through the Stubble Cloudflare Worker (requires Supabase auth).
+    case proxy
+    /// Requests go directly to Gemini API (requires GEMINI_API_KEY env var).
+    case direct
+}
+
 /// Lightweight Gemini REST API client using URLSession (text-only, no vision).
 ///
-/// All requests go through the Stubble Cloudflare Worker, authenticated with a Supabase JWT.
-/// The Worker adds the Gemini API key and enforces tier/rate limits.
+/// Supports two modes:
+/// - **Proxy mode** (default): Requests go through the Stubble Cloudflare Worker,
+///   authenticated with a Supabase JWT. The Worker adds the Gemini API key and
+///   enforces tier/rate limits.
+/// - **Direct mode**: When `GEMINI_API_KEY` environment variable is set, requests
+///   go directly to the Gemini API. No Supabase setup required.
 public final class GeminiClient: Sendable {
 
     private let model: String
+    private let apiMode: GeminiAPIMode
 
     /// Maximum number of retry attempts for transient failures.
     private static let maxRetries = 2
     /// Base delay between retries (doubles each attempt).
     private static let retryBaseDelay: TimeInterval = 1.0
 
-    /// Create a proxy-mode client that authenticates via Supabase JWT.
-    public init(model: String = "gemini-2.5-flash") {
+    /// Direct Gemini API base URL.
+    private static let geminiDirectURL = "https://generativelanguage.googleapis.com/v1beta/models"
+
+    /// Create a client with the specified API mode.
+    /// - Parameters:
+    ///   - model: The Gemini model to use (default: gemini-2.5-flash)
+    ///   - apiMode: Whether to use proxy or direct mode
+    public init(model: String = "gemini-2.5-flash", apiMode: GeminiAPIMode = .proxy) {
         self.model = model
+        self.apiMode = apiMode
     }
 
-    /// The base URL for API requests (proxy).
+    /// The base URL for API requests.
     private var baseURL: String {
-        "\(StubbleAPIConfig.proxyBaseURL)/v1beta/models"
+        switch apiMode {
+        case .proxy:
+            return "\(StubbleAPIConfig.proxyBaseURL)/v1beta/models"
+        case .direct:
+            return Self.geminiDirectURL
+        }
     }
 
-    /// Resolve the client if the user is signed in with a valid session.
-    /// Returns nil if the user needs to sign in.
+    /// Resolve the client based on available configuration.
+    ///
+    /// Priority:
+    /// 1. Direct mode if `GEMINI_API_KEY` env var is set
+    /// 2. Proxy mode if signed in with valid session and backend configured
+    /// 3. Returns nil if neither is available
     public static func resolvedClient() -> GeminiClient? {
+        // Direct mode takes priority — no auth required
+        if StubbleAPIConfig.isDirectModeAvailable {
+            return GeminiClient(apiMode: .direct)
+        }
+
+        // Proxy mode requires auth and backend configuration
         let auth = AuthManager.shared
         guard auth.isSignedIn && StubbleAPIConfig.isConfigured && !auth.isTrialExpired else {
             return nil
         }
-        return GeminiClient()
+        return GeminiClient(apiMode: .proxy)
     }
 
-    /// Whether this client is using proxy mode (always true now).
-    public var isProxyMode: Bool { true }
+    /// Whether this client is using proxy mode.
+    public var isProxyMode: Bool { apiMode == .proxy }
+
+    /// Whether this client is using direct mode.
+    public var isDirectMode: Bool { apiMode == .direct }
 
     // MARK: - Public API (unchanged signatures — zero consumer changes needed)
 
@@ -159,8 +197,9 @@ public final class GeminiClient: Sendable {
                         return
                     }
 
-                    // Handle proxy-specific error codes
-                    if let proxyError = self.checkProxyError(statusCode: httpResponse.statusCode) {
+                    // Handle proxy-specific error codes (only in proxy mode)
+                    if self.apiMode == .proxy,
+                       let proxyError = self.checkProxyError(statusCode: httpResponse.statusCode) {
                         continuation.finish(throwing: proxyError)
                         return
                     }
@@ -217,10 +256,18 @@ public final class GeminiClient: Sendable {
 
     // MARK: - Private
 
-    /// Apply authentication headers (proxy mode with JWT).
+    /// Apply authentication headers based on API mode.
     private func applyAuth(to request: inout URLRequest) async throws {
-        let token = try await AuthManager.shared.validAccessToken()
-        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        switch apiMode {
+        case .proxy:
+            let token = try await AuthManager.shared.validAccessToken()
+            request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        case .direct:
+            guard let apiKey = ProcessInfo.processInfo.environment["GEMINI_API_KEY"] else {
+                throw GeminiError.missingAPIKey
+            }
+            request.setValue(apiKey, forHTTPHeaderField: "x-goog-api-key")
+        }
     }
 
     /// Check for proxy-specific HTTP error codes and return a user-friendly error.
@@ -296,8 +343,8 @@ public final class GeminiClient: Sendable {
                     throw GeminiError.invalidResponse
                 }
 
-                // Check for proxy-specific errors (non-retryable)
-                if let proxyError = checkProxyError(statusCode: httpResponse.statusCode) {
+                // Check for proxy-specific errors (non-retryable, only in proxy mode)
+                if apiMode == .proxy, let proxyError = checkProxyError(statusCode: httpResponse.statusCode) {
                     throw proxyError
                 }
 
@@ -384,6 +431,8 @@ public enum GeminiError: Error, LocalizedError {
     case trialExpired
     /// Proxy: rate limit exceeded (429).
     case rateLimited
+    /// Direct mode: GEMINI_API_KEY environment variable not set.
+    case missingAPIKey
 
     public var errorDescription: String? {
         switch self {
@@ -401,6 +450,8 @@ public enum GeminiError: Error, LocalizedError {
             return "Your free trial has ended. Upgrade to Pro for unlimited access."
         case .rateLimited:
             return "Daily request limit reached. Upgrade to Pro for unlimited access."
+        case .missingAPIKey:
+            return "GEMINI_API_KEY environment variable not set. Set it to use direct API mode."
         }
     }
 

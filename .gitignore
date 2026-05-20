@@ -16,4 +16,11 @@ DerivedData/
 
 # Sensitive / internal docs
 POSITIONING.md
+CLAUDE.md
+TODOS.md
+backup.md
+.claude/
 *.env
+
+# Worker config with real KV namespace ID
+worker/wrangler.toml

@@ -84,9 +84,19 @@ final class AuthManagerTests: XCTestCase {
 
 final class StubbleAPIConfigTests: XCTestCase {
 
-    func testIsConfigured() {
-        // Since we've replaced placeholders with real values, this should be true
-        XCTAssertTrue(StubbleAPIConfig.isConfigured)
+    func testIsConfiguredWithPlaceholders() {
+        // With placeholder values (no env vars set), isConfigured should be false
+        // This is expected for OSS builds before configuration
+        // In production, env vars would be set making this true
+        let hasPlaceholder = StubbleAPIConfig.supabaseURL.contains("YOUR_") ||
+                             StubbleAPIConfig.supabaseAnonKey.contains("YOUR_")
+        // If placeholders are present, isConfigured should be false
+        // If real values are set via env vars, isConfigured should be true
+        if hasPlaceholder {
+            XCTAssertFalse(StubbleAPIConfig.isConfigured)
+        } else {
+            XCTAssertTrue(StubbleAPIConfig.isConfigured)
+        }
     }
 
     func testCallbackURL() {
