@@ -587,7 +587,7 @@ struct ConnectToolCard: View {
         isDownloading = true
         downloadComplete = false
 
-        let mcpbURL = URL(string: "https://github.com/samattias/stubble-mcpb/releases/latest/download/Stubble.mcpb")!
+        let mcpbURL = URL(string: "https://github.com/stubbleapp/stubble-mcpb/releases/latest/download/Stubble.mcpb")!
         let downloadsURL = FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask).first!
         let destinationURL = downloadsURL.appendingPathComponent("Stubble.mcpb")
 

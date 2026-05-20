@@ -170,9 +170,9 @@ final class LinkExtractorTests: XCTestCase {
     // MARK: - Short Labels
 
     func testGitHubShortLabel() {
-        let links = LinkExtractor.linksFromOCRText("https://github.com/samattias/stubble-releases")
+        let links = LinkExtractor.linksFromOCRText("https://github.com/stubbleapp/stubble-releases")
         XCTAssertGreaterThanOrEqual(links.count, 1)
-        XCTAssertEqual(links[0].label, "samattias/stubble-releases")
+        XCTAssertEqual(links[0].label, "stubbleapp/stubble-releases")
     }
 
     func testGitHubPRLabel() {

@@ -27,10 +27,10 @@ These variables are used by `scripts/build-app.sh`.
 | Variable | Description | Default |
 |----------|-------------|---------|
 | `APP_NAME` | Application display name | `Stubble` |
-| `BUNDLE_ID` | macOS bundle identifier | `com.samattias.stubble` |
-| `GITHUB_REPO` | GitHub repository for version auto-increment | `samattias/stubble-releases` |
+| `BUNDLE_ID` | macOS bundle identifier | `com.stubble.app` |
+| `GITHUB_REPO` | GitHub repository for version auto-increment | `stubbleapp/stubble-releases` |
 | `CODESIGN_IDENTITY` | Code signing identity. Set to `-` for ad-hoc signing. | `Developer ID Application: ...` |
-| `TEAM_ID` | Apple Developer Team ID. Set to empty for self-hosted builds. | `M3QBXSJ3A2` |
+| `TEAM_ID` | Apple Developer Team ID. Set to empty for self-hosted builds. | — |
 | `SPARKLE_FEED_URL` | URL for Sparkle auto-update feed. Set to empty to disable. | GitHub releases URL |
 | `SPARKLE_ED_KEY` | EdDSA public key for Sparkle updates. Set to empty to disable. | Production key |
 | `TELEMETRY_DECK_APP_ID` | TelemetryDeck app ID for analytics. Set to empty to disable. | Production ID |

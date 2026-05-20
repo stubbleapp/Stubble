@@ -330,7 +330,7 @@ Get the daily OCR digest containing extracted URLs, file paths, code symbols, an
 ```json
 {
   "date": "2026-03-23",
-  "digest": "## URLs Visited\n- github.com/samattias/stubble\n- stackoverflow.com/questions/...\n\n## Code Symbols\n- MCPTools\n- DatabaseReader\n- ActivityRecord\n\n## File Paths\n- Sources/TaskMinerMCP/MCPTools.swift\n- docs/mcp-integration.md",
+  "digest": "## URLs Visited\n- github.com/stubbleapp/stubble\n- stackoverflow.com/questions/...\n\n## Code Symbols\n- MCPTools\n- DatabaseReader\n- ActivityRecord\n\n## File Paths\n- Sources/TaskMinerMCP/MCPTools.swift\n- docs/mcp-integration.md",
   "generated_at": "2026-03-23T18:00:00Z"
 }
 ```
@@ -449,5 +449,5 @@ The MCP server implements JSON-RPC 2.0 over stdio.
 
 ## Support
 
-- **Issues**: [github.com/samattias/stubble/issues](https://github.com/samattias/stubble/issues)
+- **Issues**: [github.com/stubbleapp/stubble/issues](https://github.com/stubbleapp/stubble/issues)
 - **Website**: [stubble.ai](https://stubble.ai)

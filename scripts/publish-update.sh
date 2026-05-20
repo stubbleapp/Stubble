@@ -28,7 +28,7 @@ set -euo pipefail
 #   - Create a GitHub Release and upload everything
 # ─────────────────────────────────────────────────────────────────
 
-GITHUB_REPO="samattias/stubble-releases"
+GITHUB_REPO="stubbleapp/stubble-releases"
 
 BUILD_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 OUTPUT_DIR="$BUILD_DIR/build"
@@ -243,10 +243,10 @@ if [ -f "$DMG_PATH" ]; then
     echo "   Including DMG for website distribution"
 fi
 
-# MCPB extension is published separately to samattias/stubble-mcpb
+# MCPB extension is published separately to stubbleapp/stubble-mcpb
 MCPB_PATH="$OUTPUT_DIR/Stubble.mcpb"
 if [ -f "$MCPB_PATH" ]; then
-    echo "   MCPB built (publish separately: gh release create v$VERSION $MCPB_PATH --repo samattias/stubble-mcpb)"
+    echo "   MCPB built (publish separately: gh release create v$VERSION $MCPB_PATH --repo stubbleapp/stubble-mcpb)"
 fi
 
 # Check if release already exists
@@ -278,7 +278,7 @@ echo "   DMG:      https://github.com/$GITHUB_REPO/releases/download/$TAG/Stubbl
 echo "   DMG (stable): https://github.com/$GITHUB_REPO/releases/latest/download/Stubble.dmg"
 fi
 if [ -f "$MCPB_PATH" ]; then
-echo "   MCPB:     https://github.com/samattias/stubble-mcpb/releases/latest/download/Stubble.mcpb"
+echo "   MCPB:     https://github.com/stubbleapp/stubble-mcpb/releases/latest/download/Stubble.mcpb"
 fi
 echo ""
 echo "   Sparkle will find updates via SUFeedURL in Info.plist:"

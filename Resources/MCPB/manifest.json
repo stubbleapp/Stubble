@@ -12,7 +12,7 @@
   "homepage": "https://stubble.ai",
   "repository": {
     "type": "git",
-    "url": "https://github.com/samattias/stubble-mcpb.git"
+    "url": "https://github.com/stubbleapp/stubble-mcpb.git"
   },
   "license": "Proprietary",
   "keywords": ["productivity", "activity-tracking", "tasks", "time-tracking"],

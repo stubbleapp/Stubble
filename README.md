@@ -39,7 +39,7 @@ If you prefer to use your own Gemini API key without any backend:
 
 ```bash
 # Clone the repository
-git clone https://github.com/samattias/stubble.git
+git clone https://github.com/stubbleapp/stubble.git
 cd stubble
 
 # Set your Gemini API key
@@ -79,7 +79,7 @@ For complete control, you can deploy your own backend. See [docs/SELF_HOSTING.md
 
 ```bash
 # Clone
-git clone https://github.com/samattias/stubble.git
+git clone https://github.com/stubbleapp/stubble.git
 cd stubble
 
 # Build
@@ -186,5 +186,5 @@ Licensed under the Apache License, Version 2.0. See [LICENSE](LICENSE) for detai
 
 ## Support
 
-- **Issues**: [github.com/samattias/stubble/issues](https://github.com/samattias/stubble/issues)
-- **Discussions**: [github.com/samattias/stubble/discussions](https://github.com/samattias/stubble/discussions)
+- **Issues**: [github.com/stubbleapp/stubble/issues](https://github.com/stubbleapp/stubble/issues)
+- **Discussions**: [github.com/stubbleapp/stubble/discussions](https://github.com/stubbleapp/stubble/discussions)

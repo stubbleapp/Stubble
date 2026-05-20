@@ -200,7 +200,7 @@ final class OCRDigestBuilderTests: XCTestCase {
         let ocrText = """
         Getting Started with Stubble
         Editing /Users/sam/Projects/Stubble/Sources/main.swift
-        Visit https://github.com/samattias/stubble for more info
+        Visit https://github.com/stubbleapp/stubble for more info
         class DashboardViewModel: ObservableObject {
         import SwiftUI
         #engineering-team discussion
