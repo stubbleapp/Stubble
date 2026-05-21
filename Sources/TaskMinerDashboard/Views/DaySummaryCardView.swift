@@ -9,9 +9,7 @@ private struct DaySummaryProjectRow: View {
     var body: some View {
         Button(action: onTap) {
             HStack(spacing: 10) {
-                Circle()
-                    .fill(Theme.accent.opacity(0.6))
-                    .frame(width: 8, height: 8)
+                ActivityHaloDot(color: Theme.accent, size: 12)
 
                 Text(activity.name)
                     .font(.system(size: 12, weight: .medium))
