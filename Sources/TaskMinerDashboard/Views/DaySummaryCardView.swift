@@ -4,12 +4,13 @@ import TaskMinerShared
 /// Simple row for displaying a project activity in the day summary
 private struct DaySummaryProjectRow: View {
     let activity: ProjectActivity
+    let color: Color
     let onTap: () -> Void
 
     var body: some View {
         Button(action: onTap) {
             HStack(spacing: 10) {
-                ActivityHaloDot(color: Theme.accent, size: 12)
+                ActivityHaloDot(color: color, size: 12)
 
                 Text(activity.name)
                     .font(.system(size: 12, weight: .medium))
@@ -35,6 +36,7 @@ struct DaySummaryCardView: View {
     var daySummaryContent: String? = nil
     var projectActivities: [ProjectActivity] = []
 
+    @Environment(DashboardViewModel.self) var viewModel
     @State private var selectedProject: AggregatedProject?
     @State private var isExpanded: Bool = false
 
@@ -59,7 +61,10 @@ struct DaySummaryCardView: View {
         VStack(alignment: .leading, spacing: 0) {
             if !sortedProjects.isEmpty {
                 ForEach(displayedProjects) { activity in
-                    DaySummaryProjectRow(activity: activity) {
+                    DaySummaryProjectRow(
+                        activity: activity,
+                        color: viewModel.resolvedColor(for: activity)
+                    ) {
                         selectedProject = activity.toAggregatedProject()
                     }
                 }

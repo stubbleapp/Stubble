@@ -24,3 +24,6 @@ backup.md
 
 # Worker config with real KV namespace ID
 worker/wrangler.toml
+
+# Local build config (Developer ID, etc.)
+scripts/.local-config

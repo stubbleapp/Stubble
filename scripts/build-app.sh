@@ -1,6 +1,15 @@
 #!/bin/bash
 set -euo pipefail
 
+# ─── Load local config (gitignored) ──────────────────────────────
+# Create scripts/.local-config with your Developer ID, e.g.:
+#   export CODESIGN_IDENTITY="Developer ID Application: Your Name (TEAMID)"
+#   export TEAM_ID="TEAMID"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+if [ -f "$SCRIPT_DIR/.local-config" ]; then
+    source "$SCRIPT_DIR/.local-config"
+fi
+
 # ─── Configuration ───────────────────────────────────────────────
 # These can be overridden via environment variables for self-hosted builds.
 APP_NAME="${APP_NAME:-Stubble}"
@@ -38,7 +47,8 @@ SPARKLE_FEED_URL="${SPARKLE_FEED_URL:-https://github.com/stubbleapp/stubble-rele
 SPARKLE_ED_KEY="${SPARKLE_ED_KEY:-u/MzNL3+cpvrO3tQNKRcCbc7Fh0sOLdAOCgKupEdM/o=}"
 
 # Code signing identity — Developer ID for stable TCC permissions across rebuilds.
-# Set to empty string or "-" for ad-hoc signing (self-hosted builds).
+# Set to "-" for ad-hoc signing (self-hosted builds).
+# Configure in scripts/.local-config (gitignored) for local development.
 CODESIGN_IDENTITY="${CODESIGN_IDENTITY:-}"
 
 # Team ID for code signing. Set to empty string for self-hosted builds.
