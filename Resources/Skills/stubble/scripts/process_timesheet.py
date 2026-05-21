@@ -1,17 +1,20 @@
 #!/usr/bin/env python3
 """
-Process Stubble activity log data into timesheet buckets for visualization.
+Process Stubble data and generate a complete HTML timesheet visualization.
 
 Usage:
-    python3 process_timesheet.py <activity_log_path> [tasks_path] [--date YYYY-MM-DD] [--interval 10] [--timezone-offset 1]
+    python3 process_timesheet.py --activities <activity_log.json> --tasks <tasks.json> [--date YYYY-MM-DD] [--timezone-offset 1] [--output /path/to/output.html]
+
+    --activities: Raw activity log for timeline visualization (from get_activity_log)
+    --tasks: AI-generated task summaries for "What You Worked On" section (from query_tasks)
 
 Output:
-    Writes /home/claude/timesheet_data.json with processed buckets.
+    Writes a self-contained HTML file with the timesheet visualization.
 """
 
 import json
-import sys
 import argparse
+import html
 from datetime import datetime, timedelta, timezone
 from collections import defaultdict
 from pathlib import Path
@@ -20,15 +23,15 @@ from pathlib import Path
 # ── Category classification ──────────────────────────────────────────────────
 
 CATEGORIES = {
-    "deep_work":      {"label": "Deep Work",      "color": "#6366f1", "priority": 1},
-    "research":       {"label": "Research",        "color": "#14b8a6", "priority": 2},
-    "communication":  {"label": "Communication",   "color": "#f59e0b", "priority": 3},
-    "social_media":   {"label": "Social Media",    "color": "#f43f5e", "priority": 4},
-    "entertainment":  {"label": "Entertainment",   "color": "#8b5cf6", "priority": 5},
-    "personal":       {"label": "Personal",        "color": "#10b981", "priority": 6},
-    "meetings":       {"label": "Meetings",        "color": "#0ea5e9", "priority": 7},
-    "idle":           {"label": "Idle",            "color": "#94a3b8", "priority": 8},
-    "other":          {"label": "Other",           "color": "#78716c", "priority": 9},
+    "deep_work":      {"label": "Deep Work",      "color": "#2563eb", "priority": 1},
+    "research":       {"label": "Research",       "color": "#0d9488", "priority": 2},
+    "communication":  {"label": "Communication",  "color": "#ea580c", "priority": 3},
+    "social_media":   {"label": "Social Media",   "color": "#f43f5e", "priority": 4},
+    "entertainment":  {"label": "Entertainment",  "color": "#7c3aed", "priority": 5},
+    "personal":       {"label": "Personal",       "color": "#16a34a", "priority": 6},
+    "meetings":       {"label": "Meetings",       "color": "#0284c7", "priority": 7},
+    "idle":           {"label": "Idle",           "color": "#e5e7eb", "priority": 8},
+    "other":          {"label": "Other",          "color": "#9ca3af", "priority": 9},
 }
 
 
@@ -37,51 +40,39 @@ def classify_activity(app_name: str, window_title: str, duration: int) -> str:
     app = app_name.replace("\u200e", "").strip().lower()
     title = window_title.lower() if window_title else ""
 
-    # Idle
     if app == "idle" and duration > 120:
         return "idle"
 
-    # Deep work: Terminal with Claude Code, IDEs
+    # Deep work: IDEs, terminals, Claude
     if app in ("terminal",):
-        if "claude" in title or "tmpdir" in title:
-            return "deep_work"
         return "deep_work"
     if app in ("code", "visual studio code", "cursor", "xcode", "intellij", "pycharm", "webstorm", "neovim", "vim"):
         return "deep_work"
     if app == "claude":
         return "deep_work"
 
-    # Communication apps
+    # Communication
     if app in ("mail", "gmail", "outlook"):
         return "communication"
     if "whatsapp" in app:
         return "communication"
     if app in ("slack", "telegram", "messages", "signal"):
         return "communication"
-    if app in ("discord",) and "discord" in title:
-        return "communication"
 
     # Meetings
-    if app in ("zoom", "zoom.us") and ("meeting" in title or "zoom meeting" in title):
+    if app in ("zoom", "zoom.us") and "meeting" in title:
         return "meetings"
     if "google meet" in title or "meet.google.com" in title:
-        return "meetings"
-    if app in ("microsoft teams", "teams") and "meeting" in title:
         return "meetings"
     if app in ("granola",):
         return "meetings"
 
-    # Browser-based classification
+    # Browser
     if app in ("google chrome", "safari", "firefox", "arc", "brave", "edge"):
         return classify_browser(title)
 
-    # Stubble app
     if app == "stubble":
         return "deep_work"
-
-    # Auth prompts
-    if app in ("coreautha", "coreauth"):
-        return "other"
 
     return "other"
 
@@ -90,126 +81,64 @@ def classify_browser(title: str) -> str:
     """Classify browser window titles."""
     t = title.lower()
 
-    # Entertainment
-    if "chess.com" in t:
-        return "entertainment"
-    if "netflix" in t or "disney+" in t or "twitch" in t:
+    if any(s in t for s in ["chess.com", "netflix", "disney+", "twitch", "spotify"]):
         return "entertainment"
     if "youtube" in t:
-        # Tech/tutorial YouTube → research; otherwise entertainment
-        tech_signals = ["tutorial", "talk", "conference", "explained", "how to", "course", "lecture", "code", "programming", "claude", "ai ", "llm", "ml ", "deploy"]
-        if any(s in t for s in tech_signals):
+        if any(s in t for s in ["tutorial", "talk", "conference", "code", "programming", "claude", "ai "]):
             return "research"
-        return "entertainment"
-    if "spotify" in t:
         return "entertainment"
 
-    # Social media
-    if "home / x" in t or "search / x" in t or "/ x -" in t or "x - google" in t:
-        # Check if it's research-adjacent
-        research_signals = ["chronicle", "codex", "karpathy", "anthropic", "openai", "ai ", "llm", "startup"]
-        if any(s in t for s in research_signals):
-            return "research"
+    if any(s in t for s in ["home / x", "search / x", "/ x -", "reddit.com", "instagram", "facebook.com"]):
         return "social_media"
     if "linkedin" in t:
         if "feed" in t or "notification" in t:
             return "social_media"
-        if "sales navigator" in t:
-            return "deep_work"  # prospecting is work
-        return "social_media"
-    if "reddit.com" in t:
-        return "social_media"
-    if "instagram" in t or "facebook.com" in t:
-        return "social_media"
+        return "research"
 
-    # Communication
-    if "slack" in t:
-        return "communication"
-    if "gmail" in t or "mail.google" in t:
-        return "communication"
-    if "discord" in t:
+    if any(s in t for s in ["slack", "gmail", "mail.google", "discord"]):
         return "communication"
 
-    # Deep work
-    if "github.com" in t and ("pull" in t or "issues" in t or "code" in t or "commit" in t):
+    if "github.com" in t:
         return "deep_work"
-    if "claude.ai" in t or "chatgpt" in t:
-        return "deep_work"
-    if "vercel" in t or "netlify" in t or "render" in t:
-        return "deep_work"
-    if "google docs" in t or "notion" in t or "figma" in t:
+    if any(s in t for s in ["claude.ai", "chatgpt", "vercel", "netlify", "notion", "figma", "linear"]):
         return "deep_work"
 
-    # Research
-    if "hacker news" in t or "ycombinator" in t:
-        return "research"
-    if "arxiv" in t or "scholar.google" in t or "wikipedia" in t:
-        return "research"
-    if "blog" in t or "article" in t or "documentation" in t or "docs." in t:
-        return "research"
-    if "quora" in t:
-        return "research"
-    if "stubble" in t:
-        return "research"
-    if any(s in t for s in ["chronicle", "codex", "airjelly", "brie.io", "openchronicle"]):
+    if any(s in t for s in ["hacker news", "ycombinator", "arxiv", "wikipedia", "blog", "docs.", "documentation"]):
         return "research"
 
-    # Property / personal
-    if any(s in t for s in ["grant mills", "commercial prop", "rightmove", "zoopla", "openrent", "case studies", "ministry of sound", "basis.london", "sony unit", "prowse place", "carlisle lane"]):
-        return "personal"
-    if any(s in t for s in ["amazon", "ebay", "bank", "hsbc", "barclays", "monzo", "nutmeg", "jpmorgan"]):
+    if any(s in t for s in ["amazon", "ebay", "bank", "rightmove", "zoopla"]):
         return "personal"
 
-    # Meetings
     if "meet.google" in t or "zoom" in t:
         return "meetings"
-
-    # Prospect research (Torq, specific companies)
-    if "torq software" in t:
-        return "deep_work"
 
     return "other"
 
 
-# ── Data processing ──────────────────────────────────────────────────────────
+# ── Data loading ─────────────────────────────────────────────────────────────
 
-def load_activity_log(path: str) -> list:
-    """Load and extract activities from the Stubble tool result file."""
+def load_json_data(path: str, key: str) -> list:
+    """Load data from a Stubble tool result file."""
     with open(path) as f:
         raw = json.load(f)
 
-    # Handle different formats: direct list, or tool result wrapper
+    # Handle MCP tool result wrapper format
     if isinstance(raw, list) and len(raw) > 0 and "text" in raw[0]:
         data = json.loads(raw[0]["text"])
-        return data.get("activities", [])
-    elif isinstance(raw, dict) and "activities" in raw:
-        return raw["activities"]
+        return data.get(key, [])
+    elif isinstance(raw, dict) and key in raw:
+        return raw[key]
     elif isinstance(raw, list):
         return raw
     else:
-        raise ValueError(f"Unrecognized activity log format in {path}")
-
-
-def load_tasks(path: str) -> list:
-    """Load tasks from query_tasks result."""
-    if not path or not Path(path).exists():
         return []
-    with open(path) as f:
-        raw = json.load(f)
-    if isinstance(raw, list) and len(raw) > 0 and "text" in raw[0]:
-        data = json.loads(raw[0]["text"])
-        return data.get("tasks", [])
-    elif isinstance(raw, dict) and "tasks" in raw:
-        return raw["tasks"]
-    return []
 
 
-def process_buckets(activities: list, interval_minutes: int, tz_offset_hours: int) -> dict:
-    """Process raw activities into time buckets."""
+def process_timeline(activities: list, interval_minutes: int, tz_offset_hours: int) -> dict:
+    """Process raw activities into timeline buckets."""
     tz = timezone(timedelta(hours=tz_offset_hours))
-    buckets = {}
 
-    # Find the range of activity (skip overnight idle)
+    # Find activity range (skip long idle periods)
     timestamps = []
     for a in activities:
         ts = datetime.fromisoformat(a["timestamp"].replace("Z", "+00:00"))
@@ -220,7 +149,7 @@ def process_buckets(activities: list, interval_minutes: int, tz_offset_hours: in
         timestamps.append(ts)
 
     if not timestamps:
-        return {"buckets": [], "summary": {}}
+        return {"buckets": [], "summary": [], "meta": {}}
 
     first_ts = min(timestamps)
     last_ts = max(timestamps)
@@ -243,13 +172,10 @@ def process_buckets(activities: list, interval_minutes: int, tz_offset_hours: in
 
     while current < bucket_end:
         next_bucket = current + timedelta(minutes=interval_minutes)
-
-        # Convert to UTC for comparison
         current_utc = current.astimezone(timezone.utc)
         next_utc = next_bucket.astimezone(timezone.utc)
 
         category_seconds = defaultdict(float)
-        window_details = []  # for tooltips
 
         for a in activities:
             ts = datetime.fromisoformat(a["timestamp"].replace("Z", "+00:00"))
@@ -265,55 +191,25 @@ def process_buckets(activities: list, interval_minutes: int, tz_offset_hours: in
             app = a.get("app_name", "").replace("\u200e", "")
             title = a.get("window_title", "")
             cat = classify_activity(app, title, dur)
-
             category_seconds[cat] += overlap_secs
 
-            # Collect window details for tooltips (deduplicate)
-            if title and overlap_secs >= 2:
-                # Clean up title for display
-                clean_title = title.split(" - Google Chrome")[0].split(" – Sam")[0].strip()
-                if clean_title and len(clean_title) > 3:
-                    window_details.append({
-                        "title": clean_title[:80],
-                        "app": app,
-                        "seconds": round(overlap_secs),
-                        "category": cat,
-                    })
-
-        # Determine dominant category
         total_active = sum(v for k, v in category_seconds.items() if k != "idle")
-        total_idle = category_seconds.get("idle", 0)
+        dominant = max(category_seconds, key=lambda k: category_seconds[k]) if category_seconds else "idle"
 
-        if total_active == 0 and total_idle == 0:
-            dominant = "idle"
-        else:
-            dominant = max(category_seconds, key=lambda k: category_seconds[k])
-
-        # Deduplicate and sort window details
-        seen_titles = set()
-        unique_details = []
-        for d in sorted(window_details, key=lambda x: -x["seconds"]):
-            short = d["title"][:50]
-            if short not in seen_titles:
-                seen_titles.add(short)
-                unique_details.append(d)
-            if len(unique_details) >= 4:
-                break
+        time_str = current.strftime("%H:%M")
+        show_label = current.minute == 0
 
         bucket_list.append({
-            "time_start": current.strftime("%H:%M"),
-            "time_end": next_bucket.strftime("%H:%M"),
-            "timestamp_utc": current_utc.isoformat(),
-            "categories": {k: round(v, 1) for k, v in sorted(category_seconds.items(), key=lambda x: -x[1])},
+            "time": time_str,
+            "show_label": show_label,
+            "categories": dict(category_seconds),
             "dominant": dominant,
             "active_seconds": round(total_active),
-            "active_minutes": round(total_active / 60, 1),
-            "details": unique_details,
         })
 
         current = next_bucket
 
-    # Summary
+    # Summary by category
     total_by_cat = defaultdict(float)
     for b in bucket_list:
         for cat, secs in b["categories"].items():
@@ -322,15 +218,14 @@ def process_buckets(activities: list, interval_minutes: int, tz_offset_hours: in
     grand_total = sum(total_by_cat.values())
     summary_list = []
     for cat_id, secs in sorted(total_by_cat.items(), key=lambda x: -x[1]):
-        if cat_id in CATEGORIES:
+        if cat_id in CATEGORIES and secs >= 60:
             info = CATEGORIES[cat_id]
             summary_list.append({
                 "id": cat_id,
                 "label": info["label"],
                 "color": info["color"],
-                "seconds": round(secs),
-                "minutes": round(secs / 60, 1),
-                "percent": round((secs / grand_total) * 100, 1) if grand_total > 0 else 0,
+                "minutes": round(secs / 60),
+                "percent": round((secs / grand_total) * 100) if grand_total > 0 else 0,
             })
 
     first_active = next((b for b in bucket_list if b["active_seconds"] > 0), None)
@@ -338,73 +233,384 @@ def process_buckets(activities: list, interval_minutes: int, tz_offset_hours: in
 
     return {
         "buckets": bucket_list,
-        "categories": CATEGORIES,
         "summary": summary_list,
         "meta": {
             "total_active_minutes": round(sum(b["active_seconds"] for b in bucket_list) / 60),
-            "total_buckets": len(bucket_list),
-            "interval_minutes": interval_minutes,
-            "first_activity": first_active["time_start"] if first_active else None,
-            "last_activity": last_active["time_end"] if last_active else None,
-            "timezone_label": f"UTC+{tz_offset_hours}" if tz_offset_hours >= 0 else f"UTC{tz_offset_hours}",
+            "first_activity": first_active["time"] if first_active else None,
+            "last_activity": last_active["time"] if last_active else None,
         },
     }
+
+
+def process_tasks(tasks: list, tz_offset_hours: int) -> list:
+    """Process AI-generated tasks for display."""
+    tz = timezone(timedelta(hours=tz_offset_hours))
+    processed = []
+
+    for task in tasks:
+        # Parse times
+        start_str = task.get("start_time", "")
+        end_str = task.get("end_time", "")
+
+        try:
+            start_ts = datetime.fromisoformat(start_str.replace("Z", "+00:00"))
+            start_local = start_ts.astimezone(tz).strftime("%H:%M")
+        except:
+            start_local = "—"
+
+        try:
+            end_ts = datetime.fromisoformat(end_str.replace("Z", "+00:00"))
+            end_local = end_ts.astimezone(tz).strftime("%H:%M")
+        except:
+            end_local = "—"
+
+        duration = task.get("duration_minutes", 0)
+        if duration < 2:  # Skip very short tasks
+            continue
+
+        processed.append({
+            "title": task.get("title", "Untitled"),
+            "description": task.get("description", ""),
+            "start_time": start_local,
+            "end_time": end_local,
+            "duration_minutes": duration,
+            "apps": task.get("apps", []),
+        })
+
+    # Sort by start time
+    processed.sort(key=lambda x: x["start_time"])
+    return processed
+
+
+# ── HTML Template ────────────────────────────────────────────────────────────
+
+def format_duration(minutes: int) -> str:
+    """Format minutes as 'Xh Ym' or 'Ym'."""
+    if minutes >= 60:
+        h = minutes // 60
+        m = minutes % 60
+        return f"{h}h {m}m" if m > 0 else f"{h}h"
+    return f"{minutes}m"
+
+
+def generate_html(timeline_data: dict, tasks: list, date_str: str) -> str:
+    """Generate the complete HTML visualization."""
+
+    meta = timeline_data["meta"]
+    summary = timeline_data["summary"]
+    buckets = timeline_data["buckets"]
+
+    # Parse date for display
+    try:
+        date_obj = datetime.strptime(date_str, "%Y-%m-%d")
+        date_display = date_obj.strftime("%A, %B %-d")
+    except:
+        date_display = date_str
+
+    total_time = format_duration(meta.get("total_active_minutes", 0))
+    time_range = f"{meta.get('first_activity', '—')} – {meta.get('last_activity', '—')}"
+
+    # Generate timeline segments
+    timeline_html = ""
+    for bucket in buckets:
+        dominant = bucket["dominant"]
+        color = CATEGORIES.get(dominant, {}).get("color", "#e5e7eb")
+        active = bucket["active_seconds"]
+        height = min(48, max(4, int(active / 600 * 48))) if active > 0 else 4
+        opacity = "1" if active > 30 else "0.3"
+
+        label_html = f'<span class="timeline-label">{bucket["time"]}</span>' if bucket["show_label"] else ''
+
+        timeline_html += f'''<div class="timeline-slot">
+            <div class="timeline-bar" style="height: {height}px; background: {color}; opacity: {opacity};" title="{bucket['time']}"></div>
+            {label_html}
+        </div>'''
+
+    # Generate category pills
+    pills_html = ""
+    for cat in summary:
+        if cat["id"] == "idle":
+            continue
+        pills_html += f'''
+        <div class="category-pill">
+            <span class="pill-dot" style="background: {cat['color']};"></span>
+            <span class="pill-label">{cat['label']}</span>
+            <span class="pill-time">{format_duration(cat['minutes'])}</span>
+        </div>'''
+
+    # Generate task cards - this is the key part showing WHAT was done
+    tasks_html = ""
+    if tasks:
+        for task in tasks:
+            title = html.escape(task["title"])
+            description = html.escape(task["description"])
+            time_str = f"{task['start_time']} – {task['end_time']}"
+            duration = format_duration(task["duration_minutes"])
+            apps = ", ".join(task["apps"][:3]) if task["apps"] else ""
+
+            tasks_html += f'''
+            <div class="task-card">
+                <div class="task-header">
+                    <span class="task-time">{time_str}</span>
+                    <span class="task-duration">{duration}</span>
+                </div>
+                <div class="task-title">{title}</div>
+                <div class="task-description">{description}</div>
+                {f'<div class="task-apps">{apps}</div>' if apps else ''}
+            </div>'''
+    else:
+        tasks_html = '<div class="no-tasks">No task summaries available. Run Stubble to generate AI task descriptions.</div>'
+
+    return f'''<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Timesheet – {date_str}</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <style>
+        * {{ margin: 0; padding: 0; box-sizing: border-box; }}
+        body {{
+            font-family: 'Inter', -apple-system, sans-serif;
+            background: #ffffff;
+            color: #111827;
+            line-height: 1.5;
+            padding: 32px;
+            max-width: 960px;
+            margin: 0 auto;
+        }}
+
+        /* Header */
+        .header {{
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            margin-bottom: 32px;
+            padding-bottom: 24px;
+            border-bottom: 1px solid #e5e7eb;
+        }}
+        .date {{ font-size: 24px; font-weight: 600; color: #111827; }}
+        .meta {{ text-align: right; }}
+        .meta-primary {{ font-size: 20px; font-weight: 600; color: #111827; }}
+        .meta-secondary {{ font-size: 13px; color: #6b7280; font-family: 'JetBrains Mono', monospace; }}
+
+        /* Timeline */
+        .timeline-section {{ margin-bottom: 32px; }}
+        .section-label {{
+            font-size: 11px;
+            font-weight: 600;
+            color: #9ca3af;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+            margin-bottom: 12px;
+        }}
+        .timeline {{
+            display: flex;
+            align-items: flex-end;
+            gap: 1px;
+            padding: 16px 0 24px 0;
+            overflow-x: auto;
+        }}
+        .timeline-slot {{
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            flex-shrink: 0;
+            position: relative;
+        }}
+        .timeline-bar {{
+            width: 8px;
+            border-radius: 2px;
+            transition: transform 0.15s;
+            cursor: pointer;
+        }}
+        .timeline-slot:hover .timeline-bar {{
+            transform: scaleY(1.15);
+            opacity: 1 !important;
+        }}
+        .timeline-label {{
+            font-size: 10px;
+            color: #6b7280;
+            font-family: 'JetBrains Mono', monospace;
+            position: absolute;
+            bottom: -18px;
+            white-space: nowrap;
+        }}
+
+        /* Category Pills */
+        .pills {{
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            margin-bottom: 32px;
+        }}
+        .category-pill {{
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 8px 14px;
+            background: #f9fafb;
+            border: 1px solid #e5e7eb;
+            border-radius: 20px;
+        }}
+        .pill-dot {{
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            flex-shrink: 0;
+        }}
+        .pill-label {{
+            font-size: 13px;
+            font-weight: 500;
+            color: #374151;
+        }}
+        .pill-time {{
+            font-size: 13px;
+            font-weight: 600;
+            color: #111827;
+            font-family: 'JetBrains Mono', monospace;
+        }}
+
+        /* Task Cards */
+        .tasks-section {{
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+        }}
+        .task-card {{
+            padding: 16px 20px;
+            background: #fafafa;
+            border: 1px solid #e5e7eb;
+            border-radius: 12px;
+            transition: border-color 0.15s, box-shadow 0.15s;
+        }}
+        .task-card:hover {{
+            border-color: #d1d5db;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.04);
+        }}
+        .task-header {{
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 8px;
+        }}
+        .task-time {{
+            font-size: 12px;
+            font-family: 'JetBrains Mono', monospace;
+            color: #6b7280;
+        }}
+        .task-duration {{
+            font-size: 12px;
+            font-family: 'JetBrains Mono', monospace;
+            color: #9ca3af;
+            background: #f3f4f6;
+            padding: 2px 8px;
+            border-radius: 4px;
+        }}
+        .task-title {{
+            font-size: 15px;
+            font-weight: 600;
+            color: #111827;
+            margin-bottom: 6px;
+        }}
+        .task-description {{
+            font-size: 14px;
+            color: #4b5563;
+            line-height: 1.6;
+        }}
+        .task-apps {{
+            font-size: 12px;
+            color: #9ca3af;
+            margin-top: 10px;
+            padding-top: 10px;
+            border-top: 1px solid #e5e7eb;
+        }}
+        .no-tasks {{
+            padding: 24px;
+            text-align: center;
+            color: #9ca3af;
+            font-size: 14px;
+            background: #f9fafb;
+            border-radius: 12px;
+        }}
+
+        /* Footer */
+        .footer {{
+            margin-top: 40px;
+            padding-top: 16px;
+            border-top: 1px solid #e5e7eb;
+            font-size: 11px;
+            color: #9ca3af;
+            text-align: center;
+        }}
+    </style>
+</head>
+<body>
+    <div class="header">
+        <div class="date">{date_display}</div>
+        <div class="meta">
+            <div class="meta-primary">{total_time} active</div>
+            <div class="meta-secondary">{time_range}</div>
+        </div>
+    </div>
+
+    <div class="timeline-section">
+        <div class="section-label">Timeline</div>
+        <div class="timeline">{timeline_html}</div>
+    </div>
+
+    <div class="section-label">Breakdown</div>
+    <div class="pills">{pills_html}</div>
+
+    <div class="section-label">What You Worked On</div>
+    <div class="tasks-section">{tasks_html}</div>
+
+    <div class="footer">Generated by Stubble</div>
+</body>
+</html>'''
 
 
 # ── Main ─────────────────────────────────────────────────────────────────────
 
 def main():
-    parser = argparse.ArgumentParser(description="Process Stubble activity log into timesheet data")
-    parser.add_argument("activity_log", help="Path to activity log JSON")
-    parser.add_argument("tasks", nargs="?", default=None, help="Path to tasks JSON (optional)")
+    parser = argparse.ArgumentParser(description="Generate Stubble timesheet visualization")
+    parser.add_argument("--activities", required=True, help="Path to activity log JSON (from get_activity_log)")
+    parser.add_argument("--tasks", required=True, help="Path to tasks JSON (from query_tasks)")
     parser.add_argument("--date", default=None, help="Date label (YYYY-MM-DD)")
-    parser.add_argument("--interval", type=int, default=10, help="Bucket interval in minutes")
     parser.add_argument("--timezone-offset", type=int, default=1, help="Hours offset from UTC")
+    parser.add_argument("--output", default="/home/claude/timesheet.html", help="Output HTML path")
 
     args = parser.parse_args()
 
     # Load data
-    activities = load_activity_log(args.activity_log)
-    tasks = load_tasks(args.tasks) if args.tasks else []
+    activities = load_json_data(args.activities, "activities")
+    tasks = load_json_data(args.tasks, "tasks")
 
     # Process
-    result = process_buckets(activities, args.interval, args.timezone_offset)
+    timeline_data = process_timeline(activities, interval_minutes=10, tz_offset_hours=args.timezone_offset)
+    processed_tasks = process_tasks(tasks, args.timezone_offset)
 
-    # Add date and tasks
+    # Determine date
     if args.date:
-        result["meta"]["date"] = args.date
+        date_str = args.date
+    elif activities:
+        date_str = activities[0].get("timestamp", "")[:10]
     else:
-        # Infer from first activity
-        if activities:
-            first_ts = activities[0].get("timestamp", "")
-            if first_ts:
-                result["meta"]["date"] = first_ts[:10]
+        date_str = datetime.now().strftime("%Y-%m-%d")
 
-    if tasks:
-        result["tasks"] = [{
-            "title": t.get("title", ""),
-            "description": t.get("description", ""),
-            "duration_minutes": t.get("duration_minutes", 0),
-            "apps": t.get("apps", []),
-            "start_time": t.get("start_time", ""),
-            "end_time": t.get("end_time", ""),
-        } for t in tasks]
+    # Generate HTML
+    html_content = generate_html(timeline_data, processed_tasks, date_str)
 
     # Write output
-    output_path = "/home/claude/timesheet_data.json"
-    with open(output_path, "w") as f:
-        json.dump(result, f, indent=2)
-
-    print(f"Wrote {len(result['buckets'])} buckets to {output_path}")
-    print(f"Date: {result['meta'].get('date', 'unknown')}")
-    print(f"Active: {result['meta']['total_active_minutes']}m")
-    print(f"Range: {result['meta']['first_activity']} – {result['meta']['last_activity']} {result['meta']['timezone_label']}")
+    output_path = Path(args.output)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    output_path.write_text(html_content)
 
     # Print summary
-    print("\nBreakdown:")
-    for s in result["summary"]:
-        bar = "█" * max(1, int(s["percent"] / 5))
-        print(f"  {s['label']:<16} {s['minutes']:>5.0f}m  {s['percent']:>5.1f}%  {bar}")
+    print(f"Wrote timesheet to {output_path}")
+    print(f"Date: {date_str}")
+    print(f"Tasks: {len(processed_tasks)}")
+    print(f"Active: {timeline_data['meta'].get('total_active_minutes', 0)}m")
 
 
 if __name__ == "__main__":

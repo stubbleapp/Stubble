@@ -132,7 +132,7 @@ public final class GeminiClient: Sendable {
 
         let generationConfig: [String: Any] = [
             "temperature": 0.5,
-            "maxOutputTokens": 4096,
+            "maxOutputTokens": 8192,
             "responseMimeType": "text/plain",
             "thinkingConfig": ["thinkingBudget": 1024]
         ]
@@ -176,7 +176,7 @@ public final class GeminiClient: Sendable {
                     }
                     body["generationConfig"] = [
                         "temperature": 0.5,
-                        "maxOutputTokens": 4096,
+                        "maxOutputTokens": 8192,
                         "responseMimeType": "text/plain",
                         "thinkingConfig": ["thinkingBudget": 1024]
                     ] as [String: Any]

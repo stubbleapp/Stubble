@@ -337,33 +337,50 @@ extension DashboardViewModel {
         dbReader: DatabaseReader,
         memoryContext: String?
     ) async throws -> String {
-        let toolsBridge = StubbleToolsBridge(dbReader: dbReader, memoryStore: memoryStore)
+        let toolsBridge = StubbleToolsBridge(
+            dbReader: dbReader,
+            memoryStore: memoryStore,
+            defaultQueryDate: selectedDate
+        )
 
         let systemInstruction = """
         You are an AI assistant embedded in Stubble, a desktop activity tracker. \
-        You have access to tools that retrieve the user's activity data. \
+        You MUST call tools to retrieve data before answering — never guess numbers or tasks. \
         \
-        IMPORTANT: Always use the appropriate tool to get data before answering. \
-        - For "show time by app" or "how much time" questions → use get_time_by_app \
-        - For "what did I work on" or task questions → use query_tasks \
-        - For project questions → use get_projects \
-        - For timeline or schedule questions → use get_timeline \
-        - For day summary questions → use get_day_summary \
-        - For search questions → use search_activities \
+        Tool choice: \
+        - Broad day questions ("describe my day", "what did I do today", "recap", "how was my day") → \
+          call at least TWO of: get_timeline, query_tasks, get_projects, get_time_by_app, get_day_summary. \
+          get_day_summary alone is not enough for a narrative — combine it with timeline and/or tasks. \
+        - "Show time by app" / "how much time in X" → get_time_by_app \
+        - "What did I work on" / tasks → query_tasks (use limit 40 if the day was busy) \
+        - Projects → get_projects \
+        - Schedule / order of the day → get_timeline \
+        - Quick stats + optional narrative text from Stubs → get_day_summary \
+        - Keyword search → search_activities \
         \
-        After retrieving data, format your response clearly: \
-        - Use markdown formatting (bold for app names, bullet lists for breakdowns) \
-        - Format durations as hours and minutes (e.g. "2h 15m") \
-        - Be concise and direct \
-        - Never fabricate data not present in tool results \
-        \(memoryContext.map { "\nUser context: \($0)" } ?? "")
+        Answer quality: \
+        - Use markdown with clear sections (e.g. ## Overview, ## Flow of the day, ## Apps & tools, ## Work themes / projects). \
+        - Write enough detail to be useful: aim for roughly 180–400 words when the tool data is rich. \
+        - Weave in specific task titles, times, and apps from tool results — not just totals. \
+        - Format durations as hours and minutes (e.g. "2h 15m"). \
+        - Never fabricate facts not present in tool results. \
+        \(memoryContext.map { "\nUser context (personalize tone, not facts): \($0)" } ?? "")
         """
 
+        let contextualPrompt = """
+        The user has **\(selectedDateString)** selected in Stubble (calendar in the app). \
+        Pass this exact string as the `date` parameter on every date-based tool unless they clearly ask about a different calendar day.
+
+        User message: \(query)
+        """
+
+        let history = buildConversationHistory()
+
         let result = try await client.generateWithFunctions(
-            prompt: query,
+            prompt: contextualPrompt,
             systemInstruction: systemInstruction,
             functions: toolsBridge.geminiFunctionDeclarations,
-            conversationHistory: nil
+            conversationHistory: history
         ) { functionCall in
             try await toolsBridge.execute(functionCall: functionCall)
         }
@@ -647,9 +664,12 @@ extension DashboardViewModel {
         Your role: Answer questions about the user's tracked activity using the provided data. \
         \
         Style guidelines: \
-        - Be direct, professional, and factual. \
-        - Keep responses concise unless detail is requested. \
-        - Use markdown formatting (bold, lists) when it aids clarity. \
+        - Be warm, clear, and factual. \
+        - For broad questions about the whole day (e.g. "describe my day", "what did I do"), write structured markdown \
+          with sections (## Overview, ## Timeline highlights, ## Apps & focus, ## Notable work). Aim for enough detail \
+          to be genuinely useful — typically several short paragraphs when the data is rich, not a one-line summary. \
+        - For narrow factual questions, stay focused but still cite concrete times and titles from the data. \
+        - Use markdown (bold, lists) when it helps scanning. \
         - Cite specific times and durations from the activity data. \
         - Format durations as hours and minutes (e.g. "2h 15m"). \
         - Never fabricate tasks, projects, or times not present in the context. \

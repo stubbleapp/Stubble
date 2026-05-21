@@ -177,6 +177,7 @@ struct SettingsView: View {
         .onChange(of: granularity) {
             guard !isLoading else { return }
             SettingsManager.shared.granularity = granularity
+            Logger.info("Granularity changed to: \(granularity.rawValue)")
         }
         .onChange(of: minAwayMinutes) {
             guard !isLoading else { return }

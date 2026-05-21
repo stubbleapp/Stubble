@@ -31,6 +31,10 @@ public enum ChatIntentClassifier {
             "when did i",
             "summarize my",
             "describe my day",
+            "describe my",
+            "my day",
+            "how was my day",
+            "tell me about my day",
             "what was i",
             "show me my",
             "list my",
@@ -43,7 +47,9 @@ public enum ChatIntentClassifier {
             "time spent on",
             "time on",
             "what tasks",
-            "my activity"
+            "my activity",
+            "walk me through my day",
+            "overview of my day"
         ]
 
         for pattern in activityPatterns {

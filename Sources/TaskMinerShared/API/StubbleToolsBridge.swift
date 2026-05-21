@@ -6,10 +6,13 @@ public final class StubbleToolsBridge: @unchecked Sendable {
 
     private let dbReader: DatabaseReader
     private let memoryStore: UserMemoryStore
+    /// When the model omits `date`, use this day (e.g. the calendar day selected in the dashboard).
+    private let defaultQueryDate: Date
 
-    public init(dbReader: DatabaseReader, memoryStore: UserMemoryStore) {
+    public init(dbReader: DatabaseReader, memoryStore: UserMemoryStore, defaultQueryDate: Date = Date()) {
         self.dbReader = dbReader
         self.memoryStore = memoryStore
+        self.defaultQueryDate = defaultQueryDate
     }
 
     // MARK: - Gemini Function Declarations
@@ -25,7 +28,7 @@ public final class StubbleToolsBridge: @unchecked Sendable {
                     "properties": [
                         "date": [
                             "type": "string",
-                            "description": "Date to query (YYYY-MM-DD). Defaults to today."
+                            "description": "Date to query (YYYY-MM-DD). If omitted, use the day the user is viewing in Stubble."
                         ]
                     ]
                 ]
@@ -38,11 +41,11 @@ public final class StubbleToolsBridge: @unchecked Sendable {
                     "properties": [
                         "date": [
                             "type": "string",
-                            "description": "Date to query (YYYY-MM-DD). Defaults to today."
+                            "description": "Date to query (YYYY-MM-DD). If omitted, use the day the user is viewing in Stubble."
                         ],
                         "limit": [
                             "type": "integer",
-                            "description": "Maximum number of tasks to return. Defaults to 20."
+                            "description": "Maximum number of tasks to return. Defaults to 40 for busy days."
                         ]
                     ]
                 ]
@@ -55,7 +58,7 @@ public final class StubbleToolsBridge: @unchecked Sendable {
                     "properties": [
                         "date": [
                             "type": "string",
-                            "description": "Date to query (YYYY-MM-DD). Defaults to today."
+                            "description": "Date to query (YYYY-MM-DD). If omitted, use the day the user is viewing in Stubble."
                         ]
                     ]
                 ]
@@ -68,20 +71,20 @@ public final class StubbleToolsBridge: @unchecked Sendable {
                     "properties": [
                         "date": [
                             "type": "string",
-                            "description": "Date to query (YYYY-MM-DD). Defaults to today."
+                            "description": "Date to query (YYYY-MM-DD). If omitted, use the day the user is viewing in Stubble."
                         ]
                     ]
                 ]
             ],
             [
                 "name": "get_day_summary",
-                "description": "Get a high-level summary of the user's day including total focus time and an AI-generated narrative. Use this for quick overviews like 'how was my day?' or 'summarize today'.",
+                "description": "Get aggregate stats for a day (focus time, task count) plus optional AI day narrative, top apps, projects, and task titles. Pair with get_timeline and query_tasks for full 'describe my day' answers.",
                 "parameters": [
                     "type": "object",
                     "properties": [
                         "date": [
                             "type": "string",
-                            "description": "Date to query (YYYY-MM-DD). Defaults to today."
+                            "description": "Date to query (YYYY-MM-DD). If omitted, use the day the user is viewing in Stubble."
                         ]
                     ]
                 ]
@@ -121,14 +124,14 @@ public final class StubbleToolsBridge: @unchecked Sendable {
     public func execute(functionCall: GeminiClient.FunctionCall) async throws -> String {
         let args = functionCall.arguments
         let dateString = args["date"] as? String
-        let date = parseDate(dateString) ?? Date()
+        let date = parseDate(dateString) ?? defaultQueryDate
 
         switch functionCall.name {
         case "get_time_by_app":
             return await getTimeByApp(date: date)
 
         case "query_tasks":
-            let limit = args["limit"] as? Int ?? 20
+            let limit = args["limit"] as? Int ?? 40
             return await queryTasks(date: date, limit: limit)
 
         case "get_projects":
@@ -292,6 +295,7 @@ public final class StubbleToolsBridge: @unchecked Sendable {
         let stubsContent = await MainActor.run { dbReader.stubsContent(for: date) }
         let tasks = await MainActor.run { dbReader.tasks(for: date) }
         let activities = await MainActor.run { dbReader.activities(for: date) }
+        let projects = await MainActor.run { dbReader.projectActivities(for: date) }
 
         // Calculate focus time (non-idle activity)
         let focusSeconds = activities
@@ -300,12 +304,50 @@ public final class StubbleToolsBridge: @unchecked Sendable {
 
         let totalTaskMinutes = tasks.reduce(0) { $0 + Int($1.duration / 60) }
 
+        // Top apps by non-idle duration (same semantics as get_time_by_app)
+        var appDurations: [String: TimeInterval] = [:]
+        for activity in activities where !activity.isIdle {
+            let duration = activity.duration ?? 0
+            appDurations[activity.appName, default: 0] += duration
+        }
+        let topApps = appDurations
+            .sorted { $0.value > $1.value }
+            .prefix(10)
+            .map { name, dur -> [String: Any] in
+                let mins = Int(dur / 60)
+                return [
+                    "app": name,
+                    "minutes": mins,
+                    "formatted": formatDuration(mins)
+                ]
+            }
+
+        let taskPreview: [[String: Any]] = tasks.prefix(15).map { task in
+            [
+                "title": DataSanitizer.sanitize(task.title),
+                "duration_minutes": Int(task.duration / 60),
+                "start": SharedFormatters.timeFormatter.string(from: task.startTime),
+                "end": SharedFormatters.timeFormatter.string(from: task.endTime)
+            ]
+        }
+
+        let projectPreview: [[String: Any]] = projects.prefix(8).map { project in
+            [
+                "name": project.name,
+                "duration_minutes": Int(project.totalDuration / 60),
+                "summary": DataSanitizer.sanitize(project.summary)
+            ]
+        }
+
         var result: [String: Any] = [
             "date": SharedFormatters.dayFormatter.string(from: date),
             "focus_time_minutes": Int(focusSeconds / 60),
             "focus_time_formatted": formatDuration(Int(focusSeconds / 60)),
             "task_count": tasks.count,
-            "total_task_minutes": totalTaskMinutes
+            "total_task_minutes": totalTaskMinutes,
+            "top_apps": topApps,
+            "tasks_preview": taskPreview,
+            "projects_preview": projectPreview
         ]
 
         if let summary = stubsContent?.daySummary, !summary.isEmpty {

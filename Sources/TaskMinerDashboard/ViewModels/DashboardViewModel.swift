@@ -454,12 +454,14 @@ final class DashboardViewModel {
         summaryTask?.cancel()
         summaryTask = Task {
             do {
+                let currentGranularity = SettingsManager.shared.granularity
+                Logger.info("Generating summary with granularity: \(currentGranularity.rawValue)")
                 let result = try await summarizer.summarize(
                     activities: activityData,
                     date: date,
                     customPrompt: SettingsManager.shared.customPrompt,
                     memoryContext: memoryContext,
-                    granularity: SettingsManager.shared.granularity,
+                    granularity: currentGranularity,
                     significantBreaks: significantBreaks,
                     recentProjectNames: recentProjectNames,
                     exclusions: SettingsManager.shared.exclusions,

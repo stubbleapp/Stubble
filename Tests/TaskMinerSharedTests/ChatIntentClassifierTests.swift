@@ -18,6 +18,9 @@ final class ChatIntentClassifierTests: XCTestCase {
         // Summarization requests
         XCTAssertEqual(ChatIntentClassifier.classify("Summarize my day"), .activityQuery)
         XCTAssertEqual(ChatIntentClassifier.classify("Describe my day"), .activityQuery)
+        XCTAssertEqual(ChatIntentClassifier.classify("How was my day?"), .activityQuery)
+        XCTAssertEqual(ChatIntentClassifier.classify("Tell me about my day"), .activityQuery)
+        XCTAssertEqual(ChatIntentClassifier.classify("Walk me through my day"), .activityQuery)
         XCTAssertEqual(ChatIntentClassifier.classify("Recap my morning"), .activityQuery)
         XCTAssertEqual(ChatIntentClassifier.classify("Review my activity"), .activityQuery)
 

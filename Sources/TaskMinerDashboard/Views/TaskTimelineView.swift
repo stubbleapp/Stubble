@@ -111,29 +111,26 @@ struct TaskTimelineView: View {
 
                     Button(action: { viewModel.exportTasksCSV() }) {
                         Image(systemName: "square.and.arrow.up")
-                            .font(.system(size: 14, weight: .medium))
-                            .foregroundStyle(Theme.accent)
-                            .frame(width: 32, height: 32)
-                            .background(Theme.accent.opacity(0.08))
-                            .clipShape(Circle())
+                            .font(.system(size: 13, weight: .regular))
+                            .foregroundStyle(Theme.textMuted)
+                            .frame(width: 28, height: 28)
                     }
                     .buttonStyle(.plain)
                     .disabled(viewModel.tasks.isEmpty)
-                    .opacity(viewModel.tasks.isEmpty ? 0.4 : 1)
+                    .opacity(viewModel.tasks.isEmpty ? 0.3 : 0.6)
                     .help("Export tasks as CSV")
 
                     if viewModel.isViewingToday || viewModel.isDebugMode {
                         Button(action: { viewModel.generateSummary() }) {
                             Image(systemName: "arrow.clockwise")
-                                .font(.system(size: 14, weight: .medium))
-                                .foregroundStyle(Theme.accent)
+                                .font(.system(size: 13, weight: .regular))
+                                .foregroundStyle(Theme.textMuted)
                                 .symbolEffect(.bounce, value: viewModel.isGeneratingSummary)
-                                .frame(width: 32, height: 32)
-                                .background(Theme.accent.opacity(0.08))
-                                .clipShape(Circle())
+                                .frame(width: 28, height: 28)
                         }
                         .buttonStyle(.plain)
                         .disabled(viewModel.isGeneratingSummary)
+                        .opacity(viewModel.isGeneratingSummary ? 0.3 : 0.6)
                         .help(viewModel.isViewingToday ? "Regenerate tasks" : "Regenerate tasks (debug)")
                     }
                 }
