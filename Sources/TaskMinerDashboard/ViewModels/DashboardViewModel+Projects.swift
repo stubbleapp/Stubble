@@ -131,7 +131,7 @@ extension DashboardViewModel {
 
         isGeneratingProjectAnalysis = true
 
-        let generator = ProjectRecommendationGenerator(geminiClient: client)
+        let generator = ProjectAnalysisGenerator(geminiClient: client)
         let memoryContext = memoryStore.contextString()
 
         do {

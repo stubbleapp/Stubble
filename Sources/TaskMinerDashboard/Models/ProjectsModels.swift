@@ -110,34 +110,6 @@ extension AggregatedProject: Hashable {
 struct ProjectAnalysis: Codable {
     let projectName: String
     let generatedAt: Date
-    let insights: String                        // 2-3 sentences
-    let recommendations: [ProjectRecommendation]
+    let insights: String                        // 2-4 sentences
     let nextSteps: [String]                     // 2-3 actionable items
-}
-
-/// A single recommendation for a project.
-struct ProjectRecommendation: Codable, Identifiable {
-    let id: UUID
-    let category: String                        // article, tool, best_practice, etc.
-    let title: String
-    let description: String
-    let reason: String
-    let actionURL: String?
-    let iconName: String
-
-    /// SF Symbol icon for the category.
-    var icon: String {
-        iconName.isEmpty ? defaultIcon : iconName
-    }
-
-    private var defaultIcon: String {
-        switch category {
-        case "article": return "doc.text"
-        case "tool": return "wrench.and.screwdriver"
-        case "best_practice": return "lightbulb"
-        case "workflow": return "arrow.triangle.branch"
-        case "learning": return "book"
-        default: return "star"
-        }
-    }
 }

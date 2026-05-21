@@ -1,7 +1,7 @@
 import SwiftUI
 import TaskMinerShared
 
-/// Detail sheet for a project showing work patterns and AI-generated recommendations.
+/// Detail sheet for a project showing work patterns and optional AI insights.
 struct ProjectDetailSheet: View {
     let project: AggregatedProject
     @Environment(DashboardViewModel.self) var viewModel
@@ -18,7 +18,6 @@ struct ProjectDetailSheet: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            // Header
             header
                 .padding(.horizontal, 20)
                 .padding(.top, 16)
@@ -26,24 +25,19 @@ struct ProjectDetailSheet: View {
 
             ScrollView {
                 VStack(alignment: .leading, spacing: 20) {
-                    // Summary
                     if !summary.isEmpty {
                         summarySection
                     }
 
-                    // Time metrics
                     metricsSection
 
-                    // Work patterns
                     workPatternsSection
 
-                    // Apps used
                     if !project.appNames.isEmpty {
                         appsSection
                     }
 
-                    // AI Recommendations
-                    recommendationsSection
+                    insightsSection
 
                     Spacer().frame(height: 40)
                 }
@@ -163,13 +157,8 @@ struct ProjectDetailSheet: View {
                 .font(.system(size: 12, weight: .semibold))
                 .foregroundStyle(Theme.textMuted)
 
-            // Weekday distribution
             weekdayChart
-
-            // Hourly distribution
             hourlyChart
-
-            // Daily sparkline
             dailySparkline
         }
         .padding(14)
@@ -292,12 +281,12 @@ struct ProjectDetailSheet: View {
         )
     }
 
-    // MARK: - Recommendations Section
+    // MARK: - AI Insights
 
-    private var recommendationsSection: some View {
+    private var insightsSection: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack {
-                Text("Recommendations")
+                Text("Insights")
                     .font(.system(size: 12, weight: .semibold))
                     .foregroundStyle(Theme.textMuted)
 
@@ -310,27 +299,19 @@ struct ProjectDetailSheet: View {
             }
 
             if let analysis = analysis {
-                // Insights
                 if !analysis.insights.isEmpty {
                     Text(analysis.insights)
                         .font(.system(size: 12))
                         .foregroundStyle(Theme.textSecondary)
                         .lineSpacing(2)
-                        .padding(.bottom, 4)
                 }
 
-                // Recommendations
-                ForEach(analysis.recommendations) { rec in
-                    ProjectRecommendationRow(recommendation: rec)
-                }
-
-                // Next Steps
                 if !analysis.nextSteps.isEmpty {
                     VStack(alignment: .leading, spacing: 6) {
-                        Text("Next Steps")
+                        Text("Next steps")
                             .font(.system(size: 11, weight: .semibold))
                             .foregroundStyle(Theme.textMuted)
-                            .padding(.top, 6)
+                            .padding(.top, analysis.insights.isEmpty ? 0 : 6)
 
                         ForEach(analysis.nextSteps, id: \.self) { step in
                             HStack(alignment: .top, spacing: 8) {
@@ -342,20 +323,19 @@ struct ProjectDetailSheet: View {
                                 Text(step)
                                     .font(.system(size: 12))
                                     .foregroundStyle(Theme.textSecondary)
-                                    .lineLimit(3)
+                                    .lineLimit(4)
                             }
                         }
                     }
                 }
             } else if !isLoadingAnalysis && !viewModel.isGeneratingProjectAnalysis {
-                // Not loaded yet and not loading
                 Button {
                     Task { await loadAnalysisIfNeeded() }
                 } label: {
                     HStack(spacing: 6) {
                         Image(systemName: "sparkles")
                             .font(.system(size: 11, weight: .medium))
-                        Text("Generate recommendations")
+                        Text("Generate insights")
                             .font(.system(size: 12, weight: .medium))
                     }
                     .foregroundStyle(Theme.accent)
@@ -427,53 +407,3 @@ private struct MetricCard: View {
         .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
     }
 }
-
-// MARK: - Project Recommendation Row
-
-private struct ProjectRecommendationRow: View {
-    let recommendation: ProjectRecommendation
-
-    var body: some View {
-        HStack(alignment: .top, spacing: 10) {
-            Image(systemName: recommendation.icon)
-                .font(.system(size: 11, weight: .medium))
-                .foregroundStyle(Theme.accent)
-                .frame(width: 20, height: 20)
-                .background(Theme.accent.opacity(0.1))
-                .clipShape(Circle())
-
-            VStack(alignment: .leading, spacing: 3) {
-                Text(recommendation.title)
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundStyle(Theme.textPrimary)
-                    .lineLimit(2)
-
-                Text(recommendation.description)
-                    .font(.system(size: 11))
-                    .foregroundStyle(Theme.textSecondary)
-                    .lineLimit(3)
-                    .lineSpacing(1)
-
-                if let urlStr = recommendation.actionURL, let url = URL(string: urlStr) {
-                    Button {
-                        NSWorkspace.shared.open(url)
-                    } label: {
-                        HStack(spacing: 3) {
-                            Text("Learn more")
-                                .font(.system(size: 10, weight: .medium))
-                            Image(systemName: "arrow.up.right")
-                                .font(.system(size: 8, weight: .semibold))
-                        }
-                        .foregroundStyle(Theme.accent)
-                    }
-                    .buttonStyle(.plain)
-                    .padding(.top, 2)
-                }
-            }
-        }
-        .padding(10)
-        .background(Theme.surfaceElevated)
-        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
-    }
-}
-
