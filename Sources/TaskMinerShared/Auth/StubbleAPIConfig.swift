@@ -13,20 +13,29 @@ import Foundation
 public enum StubbleAPIConfig {
     /// Supabase project URL.
     /// Set via `STUBBLE_SUPABASE_URL` environment variable, or replace the placeholder.
-    public static let supabaseURL = ProcessInfo.processInfo.environment["STUBBLE_SUPABASE_URL"]
-        ?? "https://YOUR_PROJECT.supabase.co"
+    /// Read from Info.plist (injected at build time) or environment variable.
+    public static let supabaseURL: String = {
+        if let url = Bundle.main.object(forInfoDictionaryKey: "STUBBLE_SUPABASE_URL") as? String, !url.isEmpty {
+            return url
+        }
+        return ProcessInfo.processInfo.environment["STUBBLE_SUPABASE_URL"] ?? "https://YOUR_PROJECT.supabase.co"
+    }()
 
-    /// Supabase public anon key.
-    /// Set via `STUBBLE_SUPABASE_ANON_KEY` environment variable, or replace the placeholder.
-    /// Safe to embed — it's a public key that only grants access to Auth endpoints.
-    public static let supabaseAnonKey = ProcessInfo.processInfo.environment["STUBBLE_SUPABASE_ANON_KEY"]
-        ?? "YOUR_SUPABASE_ANON_KEY"
+    /// Supabase public anon key. Read from Info.plist or environment variable.
+    public static let supabaseAnonKey: String = {
+        if let key = Bundle.main.object(forInfoDictionaryKey: "STUBBLE_SUPABASE_ANON_KEY") as? String, !key.isEmpty {
+            return key
+        }
+        return ProcessInfo.processInfo.environment["STUBBLE_SUPABASE_ANON_KEY"] ?? "YOUR_SUPABASE_ANON_KEY"
+    }()
 
-    /// Cloudflare Worker proxy URL. All proxy-mode AI requests go through this.
-    /// Set via `STUBBLE_PROXY_URL` environment variable, or replace the placeholder.
-    /// Not required if using direct API mode (GEMINI_API_KEY set).
-    public static let proxyBaseURL = ProcessInfo.processInfo.environment["STUBBLE_PROXY_URL"]
-        ?? "https://YOUR_WORKER.workers.dev"
+    /// Proxy URL for AI requests. Read from Info.plist or environment variable.
+    public static let proxyBaseURL: String = {
+        if let url = Bundle.main.object(forInfoDictionaryKey: "STUBBLE_PROXY_URL") as? String, !url.isEmpty {
+            return url
+        }
+        return ProcessInfo.processInfo.environment["STUBBLE_PROXY_URL"] ?? "https://YOUR_WORKER.workers.dev"
+    }()
 
     /// Custom URL scheme for OAuth callbacks.
     public static let callbackScheme = "com.stubble"

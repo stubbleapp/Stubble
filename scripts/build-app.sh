@@ -13,7 +13,7 @@ fi
 # ─── Configuration ───────────────────────────────────────────────
 # These can be overridden via environment variables for self-hosted builds.
 APP_NAME="${APP_NAME:-Stubble}"
-BUNDLE_ID="${BUNDLE_ID:-com.stubble.app}"
+BUNDLE_ID="${BUNDLE_ID:-com.stubbleapp.desktop}"
 GITHUB_REPO="${GITHUB_REPO:-stubbleapp/stubble-releases}"
 
 # ─── Version: explicit arg, or auto-increment from latest release ─
@@ -215,6 +215,23 @@ if [ -n "$TELEMETRY_DECK_APP_ID" ]; then
     <string>$TELEMETRY_DECK_APP_ID</string>"
 fi
 
+# Build Supabase/API credentials plist entries (from .local-config)
+API_PLIST_ENTRIES=""
+if [ -n "$STUBBLE_SUPABASE_URL" ]; then
+    API_PLIST_ENTRIES="    <key>STUBBLE_SUPABASE_URL</key>
+    <string>$STUBBLE_SUPABASE_URL</string>"
+fi
+if [ -n "$STUBBLE_SUPABASE_ANON_KEY" ]; then
+    API_PLIST_ENTRIES="$API_PLIST_ENTRIES
+    <key>STUBBLE_SUPABASE_ANON_KEY</key>
+    <string>$STUBBLE_SUPABASE_ANON_KEY</string>"
+fi
+if [ -n "$STUBBLE_PROXY_URL" ]; then
+    API_PLIST_ENTRIES="$API_PLIST_ENTRIES
+    <key>STUBBLE_PROXY_URL</key>
+    <string>$STUBBLE_PROXY_URL</string>"
+fi
+
 cat > "$APP_BUNDLE/Contents/Info.plist" << PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -256,6 +273,7 @@ cat > "$APP_BUNDLE/Contents/Info.plist" << PLIST
     <string>Fonts</string>
 $SPARKLE_PLIST_ENTRIES
 $TELEMETRY_PLIST_ENTRY
+$API_PLIST_ENTRIES
     <key>CFBundleURLTypes</key>
     <array>
         <dict>

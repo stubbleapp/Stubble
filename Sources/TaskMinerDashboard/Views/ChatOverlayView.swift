@@ -309,7 +309,7 @@ struct ChatOverlayView: View {
                 .padding(.horizontal, 12)
 
             // Messages
-            if viewModel.chatMessages.isEmpty && !viewModel.isChatLoading {
+            if viewModel.chatMessages.isEmpty && !viewModel.isChatLoading && viewModel.chatError == nil {
                 Spacer(minLength: 0)
             } else {
                 messagesScrollView
