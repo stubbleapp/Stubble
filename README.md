@@ -9,7 +9,11 @@
 Stubble captures what you're working on and makes that context available to AI tools like Claude Code, Cursor, and other MCP-compatible agents. We focus on doing one thing extremely well: understanding your work and exposing it efficiently to AI.
 
 <p align="center">
-  <img src="Resources/screenshot.png" alt="Stubble Screenshot" width="600">
+  <img src="Resources/Screenshots/Stubble_Day_Tab.png" alt="Stubble Day View" width="700">
+</p>
+
+<p align="center">
+  <img src="Resources/Screenshots/Stubble_Connect_Tab.png" alt="Stubble Connect Tab" width="700">
 </p>
 
 ## Philosophy
