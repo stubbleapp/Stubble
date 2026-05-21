@@ -21,6 +21,8 @@ Stubble captures what you're working on and makes that context available to AI t
   <img src="Resources/Screenshots/Stubble_Connect_Tab.png" alt="Stubble Connect Tab" width="49%">
 </p>
 
+https://github.com/stubbleapp/stubble/raw/refs/heads/main/Resources/Screenshots/Stubble_Claude_Video.mp4
+
 ## Philosophy
 
 We are **not** a do-everything AI app. We don't compete with Claude or ChatGPT — we make them smarter.
