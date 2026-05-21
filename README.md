@@ -1,19 +1,24 @@
-# Stubble
+<p align="center">
+  <img src="Resources/logo.png" alt="Stubble Logo" width="120">
+</p>
 
-[![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
-[![macOS](https://img.shields.io/badge/macOS-14.0+-000000?logo=apple)](https://www.apple.com/macos/)
-[![Swift](https://img.shields.io/badge/Swift-5.9+-FA7343?logo=swift)](https://swift.org)
-
-**Context infrastructure for AI agents.**
-
-Stubble captures what you're working on and makes that context available to AI tools like Claude Code, Cursor, and other MCP-compatible agents. We focus on doing one thing extremely well: understanding your work and exposing it efficiently to AI.
+<h1 align="center">Stubble</h1>
 
 <p align="center">
-  <img src="Resources/Screenshots/Stubble_Day_Tab.png" alt="Stubble Day View" width="700">
+  <a href="LICENSE"><img src="https://img.shields.io/badge/License-Apache%202.0-blue.svg" alt="License"></a>
+  <a href="https://www.apple.com/macos/"><img src="https://img.shields.io/badge/macOS-14.0+-000000?logo=apple" alt="macOS"></a>
+  <a href="https://swift.org"><img src="https://img.shields.io/badge/Swift-5.9+-FA7343?logo=swift" alt="Swift"></a>
+</p>
+
+<p align="center"><strong>Context infrastructure for AI agents.</strong></p>
+
+<p align="center">
+Stubble captures what you're working on and makes that context available to AI tools like Claude Code, Cursor, and other MCP-compatible agents. We focus on doing one thing extremely well: understanding your work and exposing it efficiently to AI.
 </p>
 
 <p align="center">
-  <img src="Resources/Screenshots/Stubble_Connect_Tab.png" alt="Stubble Connect Tab" width="700">
+  <img src="Resources/Screenshots/Stubble_Day_Tab.png" alt="Stubble Day View" width="49%">
+  <img src="Resources/Screenshots/Stubble_Connect_Tab.png" alt="Stubble Connect Tab" width="49%">
 </p>
 
 ## Philosophy
