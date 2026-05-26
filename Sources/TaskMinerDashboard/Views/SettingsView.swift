@@ -7,7 +7,7 @@ import TaskMinerShared
 private enum SettingsCategory: String, CaseIterable, Identifiable {
     case account
     case general
-    case exclusions
+    case promptRules
     case personalisation
     case data
     case about
@@ -18,7 +18,7 @@ private enum SettingsCategory: String, CaseIterable, Identifiable {
         switch self {
         case .account: return "Account"
         case .general: return "General"
-        case .exclusions: return "Exclusions"
+        case .promptRules: return "Prompt Rules"
         case .personalisation: return "Personalisation"
         case .data: return "Data"
         case .about: return "About"
@@ -29,7 +29,7 @@ private enum SettingsCategory: String, CaseIterable, Identifiable {
         switch self {
         case .account: return "person.crop.circle"
         case .general: return "gearshape"
-        case .exclusions: return "eye.slash"
+        case .promptRules: return "text.badge.plus"
         case .personalisation: return "person"
         case .data: return "externaldrive"
         case .about: return "info.circle"
@@ -128,8 +128,8 @@ struct SettingsView: View {
                         accountPane
                     case .general:
                         generalPane
-                    case .exclusions:
-                        exclusionsPane
+                    case .promptRules:
+                        promptRulesPane
                     case .personalisation:
                         personalisationPane
                     case .data:
@@ -316,27 +316,6 @@ struct SettingsView: View {
                     .font(.caption2)
                     .foregroundStyle(Theme.textMuted)
             }
-
-            // Custom Instructions
-            VStack(alignment: .leading, spacing: 8) {
-                Text("Custom Instructions")
-                    .font(.subheadline.weight(.medium))
-                    .foregroundStyle(Theme.textPrimary)
-
-                TextEditor(text: $customPrompt)
-                    .font(.system(size: 12))
-                    .scrollContentBackground(.hidden)
-                    .frame(minHeight: 60, maxHeight: 100)
-                    .padding(8)
-                    .background(Theme.surfaceElevated)
-                    .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
-
-                Text("e.g. Ignore all YouTube and social media activity. Focus only on coding and design work.")
-                    .font(.caption2)
-                    .foregroundStyle(Theme.textMuted)
-                    .italic()
-            }
-
         }
     }
 
@@ -652,76 +631,121 @@ struct SettingsView: View {
         }
     }
 
-    // MARK: - Exclusions Pane
+    // MARK: - Prompt Rules Pane
 
-    private var exclusionsPane: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            Text("Content Exclusions")
-                .font(.subheadline.weight(.medium))
-                .foregroundStyle(Theme.textPrimary)
+    private var promptRulesPane: some View {
+        VStack(alignment: .leading, spacing: 24) {
+            // Header
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Prompt Rules")
+                    .font(.subheadline.weight(.medium))
+                    .foregroundStyle(Theme.textPrimary)
 
-            Text("Activity matching these rules will be silently excluded from tasks and summaries.")
-                .font(.caption)
-                .foregroundStyle(Theme.textSecondary)
-
-            // Current exclusion rules
-            VStack(spacing: 6) {
-                ForEach(Array(exclusions.enumerated()), id: \.offset) { index, rule in
-                    HStack(spacing: 8) {
-                        Image(systemName: "eye.slash")
-                            .font(.system(size: 10))
-                            .foregroundStyle(Theme.textMuted)
-                            .frame(width: 20)
-
-                        Text(rule)
-                            .font(.system(size: 12))
-                            .foregroundStyle(Theme.textPrimary)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-
-                        Button {
-                            withAnimation(.easeInOut(duration: 0.15)) {
-                                _ = exclusions.remove(at: index)
-                            }
-                            SettingsManager.shared.exclusions = exclusions
-                        } label: {
-                            Image(systemName: "xmark")
-                                .font(.system(size: 9, weight: .bold))
-                                .foregroundStyle(Theme.textMuted)
-                                .frame(width: 20, height: 20)
-                                .background(Theme.surfaceElevated)
-                                .clipShape(Circle())
-                        }
-                        .buttonStyle(.plain)
-                    }
-                    .padding(.vertical, 8)
-                    .padding(.horizontal, 10)
-                    .background(Theme.surfaceElevated)
-                    .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
-                }
+                Text("Custom instructions and exclusions that shape how AI interprets your activity.")
+                    .font(.caption)
+                    .foregroundStyle(Theme.textSecondary)
             }
 
-            // Add new exclusion
-            HStack(spacing: 8) {
-                TextField("e.g. Exclude social media browsing", text: $newExclusion)
-                    .textFieldStyle(.plain)
+            // Custom Instructions (free-form)
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(spacing: 6) {
+                    Image(systemName: "text.quote")
+                        .font(.system(size: 10))
+                        .foregroundStyle(Theme.accent)
+                    Text("Custom Instructions")
+                        .font(.caption.weight(.medium))
+                        .foregroundStyle(Theme.textSecondary)
+                }
+
+                TextEditor(text: $customPrompt)
                     .font(.system(size: 12))
+                    .scrollContentBackground(.hidden)
+                    .frame(minHeight: 60, maxHeight: 100)
                     .padding(8)
                     .background(Theme.surfaceElevated)
                     .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
-                    .onSubmit { addExclusion() }
 
-                Button {
-                    addExclusion()
-                } label: {
-                    Image(systemName: "plus")
-                        .font(.system(size: 10, weight: .bold))
-                        .foregroundStyle(Theme.accent)
-                        .frame(width: 28, height: 28)
-                        .background(Theme.surfaceElevated)
-                        .clipShape(Circle())
+                Text("Free-form instructions added to every AI prompt. e.g. \"Focus on coding and design work. Summarize meetings briefly.\"")
+                    .font(.caption2)
+                    .foregroundStyle(Theme.textMuted)
+            }
+
+            Divider()
+
+            // Content Exclusions (list)
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(spacing: 6) {
+                    Image(systemName: "eye.slash")
+                        .font(.system(size: 10))
+                        .foregroundStyle(Theme.statusError.opacity(0.8))
+                    Text("Content Exclusions")
+                        .font(.caption.weight(.medium))
+                        .foregroundStyle(Theme.textSecondary)
                 }
-                .buttonStyle(.plain)
-                .disabled(newExclusion.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+
+                Text("Activity matching these rules is silently excluded from tasks and summaries.")
+                    .font(.caption2)
+                    .foregroundStyle(Theme.textMuted)
+
+                // Current exclusion rules
+                VStack(spacing: 6) {
+                    ForEach(Array(exclusions.enumerated()), id: \.offset) { index, rule in
+                        HStack(spacing: 8) {
+                            Image(systemName: "minus.circle.fill")
+                                .font(.system(size: 10))
+                                .foregroundStyle(Theme.statusError.opacity(0.6))
+                                .frame(width: 20)
+
+                            Text(rule)
+                                .font(.system(size: 12))
+                                .foregroundStyle(Theme.textPrimary)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+
+                            Button {
+                                withAnimation(.easeInOut(duration: 0.15)) {
+                                    _ = exclusions.remove(at: index)
+                                }
+                                SettingsManager.shared.exclusions = exclusions
+                            } label: {
+                                Image(systemName: "xmark")
+                                    .font(.system(size: 9, weight: .bold))
+                                    .foregroundStyle(Theme.textMuted)
+                                    .frame(width: 20, height: 20)
+                                    .background(Theme.surfaceElevated)
+                                    .clipShape(Circle())
+                            }
+                            .buttonStyle(.plain)
+                        }
+                        .padding(.vertical, 8)
+                        .padding(.horizontal, 10)
+                        .background(Theme.surfaceElevated)
+                        .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+                    }
+                }
+
+                // Add new exclusion
+                HStack(spacing: 8) {
+                    TextField("e.g. Ignore YouTube and social media", text: $newExclusion)
+                        .textFieldStyle(.plain)
+                        .font(.system(size: 12))
+                        .padding(8)
+                        .background(Theme.surfaceElevated)
+                        .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+                        .onSubmit { addExclusion() }
+
+                    Button {
+                        addExclusion()
+                    } label: {
+                        Image(systemName: "plus")
+                            .font(.system(size: 10, weight: .bold))
+                            .foregroundStyle(Theme.accent)
+                            .frame(width: 28, height: 28)
+                            .background(Theme.surfaceElevated)
+                            .clipShape(Circle())
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(newExclusion.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                }
             }
         }
     }
