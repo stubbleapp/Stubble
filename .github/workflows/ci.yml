@@ -47,6 +47,10 @@ jobs:
           SPARKLE_FEED_URL: ""
           SPARKLE_ED_KEY: ""
           TELEMETRY_DECK_APP_ID: ""
+          # API credentials from GitHub secrets (fallback to placeholder for forks/PRs)
+          STUBBLE_SUPABASE_URL: ${{ secrets.STUBBLE_SUPABASE_URL || 'https://placeholder.supabase.co' }}
+          STUBBLE_SUPABASE_ANON_KEY: ${{ secrets.STUBBLE_SUPABASE_ANON_KEY || 'placeholder' }}
+          STUBBLE_PROXY_URL: ${{ secrets.STUBBLE_PROXY_URL || 'https://placeholder.workers.dev' }}
         run: |
           bash scripts/build-app.sh 0.0.0-ci
 
