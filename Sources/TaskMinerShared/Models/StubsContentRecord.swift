@@ -1,7 +1,6 @@
 import Foundation
 
-/// Persistence record for AI-generated stubs page content.
-/// Stores one record per date — today gets forward-looking stubs, past days get retrospective summaries.
+/// Legacy persistence shape (historical "Stubs" feature). Prefer `day_wrap` for new writes.
 public struct StubsContentRecord: Sendable {
     public let id: Int64?
     public let date: String                 // "yyyy-MM-dd"

@@ -451,26 +451,26 @@ public final class MCPTools: @unchecked Sendable {
     private func getDaySummary(params: GetDaySummaryInput) async throws -> MCPToolResult {
         let date = try parseDate(params.date) ?? Date()
 
-        let stubsContent = await MainActor.run { dbReader.stubsContent(for: date) }
+        let dayWrap = await MainActor.run { dbReader.timelineDayWrap(for: date) }
 
         var output: [String: Any] = [
             "date": SharedFormatters.dayFormatter.string(from: date)
         ]
 
-        if let stubs = stubsContent {
-            if let summary = stubs.daySummary {
+        if let wrap = dayWrap {
+            if let summary = wrap.summary {
                 output["summary"] = DataSanitizer.sanitize(summary)
             }
-            if let focusTime = stubs.focusTimeSeconds {
+            if let focusTime = wrap.focusTimeSeconds {
                 output["focus_time_minutes"] = focusTime / 60
             }
-            if let meetingTime = stubs.meetingTimeSeconds {
+            if let meetingTime = wrap.meetingTimeSeconds {
                 output["meeting_time_minutes"] = meetingTime / 60
             }
-            if let projectCount = stubs.projectCount {
+            if let projectCount = wrap.projectCount {
                 output["project_count"] = projectCount
             }
-            output["generated_at"] = SharedFormatters.iso8601.string(from: stubs.generatedAt)
+            output["generated_at"] = SharedFormatters.iso8601.string(from: wrap.updatedAt)
         } else {
             output["summary"] = nil
             output["message"] = "No summary available for this date"

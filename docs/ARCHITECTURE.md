@@ -130,7 +130,8 @@ SQLite database at `~/Library/Application Support/Stubble/stubble.db`:
 | `granola_meetings` | Granola meeting data | 90 days |
 | `chat_threads` | Chat conversations | Indefinite |
 | `chat_messages` | Individual messages | Indefinite |
-| `stubs_content` | Persisted day summaries | Indefinite |
+| `day_wrap` | AI day narrative + frozen wrap metrics | Indefinite |
+| `stubs_content` | Legacy (pre–day wrap); migrated into `day_wrap` | Indefinite |
 | `ocr_digests` | Daily OCR digests | Indefinite |
 
 ## Module Structure

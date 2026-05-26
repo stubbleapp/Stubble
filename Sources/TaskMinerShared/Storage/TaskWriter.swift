@@ -460,6 +460,88 @@ public class TaskWriter {
         }
     }
 
+    // MARK: - Day Wrap
+
+    @discardableResult
+    public func insertOrReplaceDayWrap(_ record: DayWrapRecord) throws -> Int64 {
+        let sql = """
+        INSERT OR REPLACE INTO day_wrap
+        (date, summary, focus_time_seconds, meeting_time_seconds, project_count, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?)
+        """
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
+            throw DatabaseError.executionFailed(lastError)
+        }
+        defer { sqlite3_finalize(stmt) }
+
+        sqliteBindText(stmt, 1, record.date)
+        if let summary = record.summary {
+            sqliteBindText(stmt, 2, summary)
+        } else {
+            sqlite3_bind_null(stmt, 2)
+        }
+        if let v = record.focusTimeSeconds {
+            sqlite3_bind_int(stmt, 3, Int32(v))
+        } else {
+            sqlite3_bind_null(stmt, 3)
+        }
+        if let v = record.meetingTimeSeconds {
+            sqlite3_bind_int(stmt, 4, Int32(v))
+        } else {
+            sqlite3_bind_null(stmt, 4)
+        }
+        if let v = record.projectCount {
+            sqlite3_bind_int(stmt, 5, Int32(v))
+        } else {
+            sqlite3_bind_null(stmt, 5)
+        }
+        sqliteBindText(stmt, 6, SharedFormatters.iso8601.string(from: record.updatedAt))
+
+        guard sqlite3_step(stmt) == SQLITE_DONE else {
+            throw DatabaseError.executionFailed(lastError)
+        }
+        return sqlite3_last_insert_rowid(db)
+    }
+
+    // MARK: - Window Snapshots
+
+    /// Insert a window geometry snapshot.
+    @discardableResult
+    public func insertWindowSnapshot(_ snapshot: WindowSnapshot, activityId: Int64?) throws -> Int64 {
+        // Serialize window info to JSON
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = .sortedKeys
+        guard let layoutData = try? encoder.encode(snapshot.windows),
+              let layoutJson = String(data: layoutData, encoding: .utf8) else {
+            throw DatabaseError.executionFailed("Failed to encode window snapshot layout")
+        }
+
+        let sql = """
+        INSERT INTO window_snapshots (timestamp, activity_id, display_width, display_height, window_count, layout_json)
+        VALUES (?, ?, ?, ?, ?, ?)
+        """
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
+            throw DatabaseError.executionFailed(lastError)
+        }
+        defer { sqlite3_finalize(stmt) }
+
+        let ts = SharedFormatters.iso8601.string(from: snapshot.timestamp)
+        sqliteBindText(stmt, 1, ts)
+        if let aid = activityId { sqlite3_bind_int64(stmt, 2, aid) } else { sqlite3_bind_null(stmt, 2) }
+        sqlite3_bind_int(stmt, 3, Int32(snapshot.displayWidth))
+        sqlite3_bind_int(stmt, 4, Int32(snapshot.displayHeight))
+        sqlite3_bind_int(stmt, 5, Int32(snapshot.windows.count))
+        sqliteBindText(stmt, 6, layoutJson)
+
+        guard sqlite3_step(stmt) == SQLITE_DONE else {
+            throw DatabaseError.executionFailed(lastError)
+        }
+
+        return sqlite3_last_insert_rowid(db)
+    }
+
     // MARK: - Screenshot Deletion
 
     /// Delete screenshot records by their IDs (single or bulk).

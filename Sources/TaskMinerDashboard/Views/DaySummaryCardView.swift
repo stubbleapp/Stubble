@@ -33,7 +33,6 @@ private struct DaySummaryProjectRow: View {
 struct DaySummaryCardView: View {
     let tasks: [TaskRecord]
     let aiSummary: String?
-    var daySummaryContent: String? = nil
     var projectActivities: [ProjectActivity] = []
 
     @Environment(DashboardViewModel.self) var viewModel

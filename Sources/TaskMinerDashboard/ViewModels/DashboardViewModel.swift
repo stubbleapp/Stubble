@@ -52,7 +52,7 @@ final class DashboardViewModel {
     /// Whether AI features are available (user is signed in with valid subscription).
     var hasAIAccess: Bool
 
-    // AI day summary (generated alongside tasks)
+    // AI day summary (generated alongside tasks; persisted in `day_wrap` for reloads)
     var daySummaryText: String?
 
     // Project activities (AI-clustered from tasks)
@@ -70,125 +70,13 @@ final class DashboardViewModel {
     /// Cached color assignments for all aggregated projects (collision-resolved)
     private var _resolvedAggregatedColors: [UUID: Color] = [:]
 
-    // Stubs page (AI-generated, persisted per day)
-    var greetingContext: String?
-    var daySummaryContent: String?
-    var suggestedQuestions: [String] = []
-    /// Tracks whether we've already attempted to auto-generate stubs for this date,
-    /// so we don't re-trigger on every tab switch.
-    var hasAttemptedStubsGeneration = false
-
-    /// Fingerprint of the task data when stubs were last generated.
-    /// Format: "count|latestEndTimeISO" — detects when new daemon data warrants a refresh.
-    var lastStubsTaskFingerprint: String = ""
-
-    /// Timestamp of last stubs generation (or load from DB). Enforces minimum interval.
-    var lastStubsGenerationTime: Date = .distantPast
-
-    /// Minimum interval between automatic stubs refreshes (30 minutes).
-    static let minStubsRefreshInterval: TimeInterval = 1800
-
-    /// Maximum age before stubs are refreshed even if data hasn't changed (1 hour).
-    /// Maximum age before stubs are refreshed even if data hasn't changed (1 hour).
-    static let maxStubsAge: TimeInterval = 3600
-
-    /// Lightweight fingerprint of the current task data.
-    /// Changes when tasks are added, removed, or their time ranges shift.
-    /// Also includes meeting and memory counts to detect new context signals.
-    var currentStubsFingerprint: String {
-        let taskPart: String
-        if tasks.isEmpty {
-            taskPart = "0|"
-        } else {
-            let latestEnd = tasks.map(\.endTime).max() ?? Date.distantPast
-            taskPart = "\(tasks.count)|\(SharedFormatters.iso8601.string(from: latestEnd))"
-        }
-        let meetingCount = granolaMeetings.count
-        let memoryCount = memoryStore.load().count
-        return "\(taskPart)|\(meetingCount)|\(memoryCount)"
-    }
-
-    /// Whether the user is viewing today's date (forward-looking stubs) or a past day (retrospective summary).
+    /// Whether the user is viewing today's date or a past day (affects Day Wrap timing).
     var isViewingToday: Bool {
         Calendar.current.isDateInToday(selectedDate)
     }
 
     /// Whether debug mode is active (Option key held). Set by ContentView.
     var isDebugMode: Bool = false
-
-    // MARK: - Day Wrap Metrics
-
-    /// Whether to show the Day Wrap card instead of the regular summary.
-    /// True for past days, or today after the configured wrap hour (default 6pm).
-    var shouldShowDayWrap: Bool {
-        if !isViewingToday { return true }
-        let hour = Calendar.current.component(.hour, from: Date())
-        return hour >= SettingsManager.shared.dayWrapHour
-    }
-
-    /// Total work time (sum of all task durations, excludes idle/away periods).
-    var totalFocusTime: TimeInterval {
-        tasks.reduce(0) { $0 + $1.duration }
-    }
-
-    /// Total meeting time from Granola meetings for the selected date.
-    var totalMeetingTime: TimeInterval {
-        granolaMeetings.reduce(0) { $0 + $1.duration }
-    }
-
-    /// Top apps by duration for the selected date.
-    /// Uses activity-level data for accurate per-app time attribution.
-    var topAppsByDuration: [(app: String, duration: TimeInterval, bundleId: String?)] {
-        // Use activity-level data when available (more accurate than task-level)
-        if let db = dbReader {
-            let appDurations = db.appDurationsForDate(selectedDate)
-            return appDurations
-                .map { (app: $0.key, duration: $0.value, bundleId: appNameBundleMap[$0.key]) }
-                .sorted { $0.duration > $1.duration }
-        }
-
-        // Fallback: use task data (less accurate but works for historical data)
-        var appDurations: [String: TimeInterval] = [:]
-        for task in tasks {
-            // Give each app full task duration (they overlap in time, so this is "time touching app")
-            for appName in task.appNamesList {
-                appDurations[appName, default: 0] += task.duration
-            }
-        }
-
-        return appDurations
-            .map { (app: $0.key, duration: $0.value, bundleId: appNameBundleMap[$0.key]) }
-            .sorted { $0.duration > $1.duration }
-    }
-
-    // MARK: - Persisted Day Wrap Metrics
-
-    /// Persisted focus time from database (for past days).
-    var persistedFocusTime: TimeInterval?
-
-    /// Persisted meeting time from database (for past days).
-    var persistedMeetingTime: TimeInterval?
-
-    /// Persisted project count from database (for past days).
-    var persistedProjectCount: Int?
-
-    /// Display focus time: live for today, persisted for past days.
-    var displayFocusTime: TimeInterval {
-        if isViewingToday { return totalFocusTime }
-        return persistedFocusTime ?? totalFocusTime
-    }
-
-    /// Display meeting time: live for today, persisted for past days.
-    var displayMeetingTime: TimeInterval {
-        if isViewingToday { return totalMeetingTime }
-        return persistedMeetingTime ?? totalMeetingTime
-    }
-
-    /// Display project count: live for today, persisted for past days.
-    var displayProjectCount: Int {
-        if isViewingToday { return projectActivities.count }
-        return persistedProjectCount ?? projectActivities.count
-    }
 
     // Expand state — only one item expanded at a time across the whole screen.
     // Setting one to a value automatically means the others are collapsed.
@@ -389,17 +277,6 @@ final class DashboardViewModel {
         // Clear stale state without triggering expensive recomputations
         daySummaryText = nil
         clearAppDurationCache()
-        // Reset stubs state for the new date (but NOT suggestedQuestions — chat is date-agnostic)
-        greetingContext = nil
-        daySummaryContent = nil
-        // suggestedQuestions intentionally NOT cleared — chat overlay is constant across all dates
-        hasAttemptedStubsGeneration = false
-        lastStubsTaskFingerprint = ""
-        lastStubsGenerationTime = .distantPast
-        // Reset persisted day wrap metrics
-        persistedFocusTime = nil
-        persistedMeetingTime = nil
-        persistedProjectCount = nil
 
         // Clear timeline immediately for snappier feel (will be rebuilt after load)
         tasks = []
@@ -477,9 +354,18 @@ final class DashboardViewModel {
                     self.persistProjectActivities(activities, dateStr: dateStr)
                 } else {
                     // Fallback: AI didn't return projects — use one-per-task
-                    let fallback = ProjectActivityGenerator.fallbackActivities(from: result.tasks)
-                    self.persistProjectActivities(fallback, dateStr: dateStr)
+                    self.persistProjectActivities(ProjectActivityGenerator.fallbackActivities(from: result.tasks), dateStr: dateStr)
                 }
+
+                // Persist day narrative so it survives date switches / app restarts.
+                try writer.insertOrReplaceDayWrap(DayWrapRecord(
+                    date: dateStr,
+                    summary: result.daySummary,
+                    focusTimeSeconds: nil,
+                    meetingTimeSeconds: nil,
+                    projectCount: nil,
+                    updatedAt: Date()
+                ))
 
                 // Merge new structured memory entries and re-synthesize profile
                 if !result.newMemoryEntries.isEmpty {
@@ -915,8 +801,8 @@ final class DashboardViewModel {
         // Resolve colors for all project activities (collision-free)
         resolveAllProjectColors()
 
-        // Load persisted stubs content (if previously generated for this date)
-        loadPersistedStubs(from: db)
+        // Load persisted day wrap narrative + metrics (from `day_wrap`, with legacy stubs fallback)
+        loadPersistedDayWrap(from: db)
 
         // Rebuild cached timeline items
         rebuildTimelineItems()
@@ -971,38 +857,16 @@ final class DashboardViewModel {
         }
     }
 
-    /// Attempt to load stubs content from the database for the selected date.
-    /// If found, populates greetingContext and daySummaryContent.
-    /// Note: suggestedQuestions are only loaded for today — chat overlay is date-agnostic.
-    private func loadPersistedStubs(from db: DatabaseReader) {
+    /// Load the persisted day narrative so it survives date switches and app restarts.
+    private func loadPersistedDayWrap(from db: DatabaseReader) {
         let dateStr = SharedFormatters.dayFormatter.string(from: selectedDate)
-        guard let record = db.stubsContent(for: selectedDate) else {
-            Logger.info("loadPersistedStubs: no record for \(dateStr)")
+        guard let wrap = db.timelineDayWrap(for: selectedDate) else {
+            Logger.info("loadPersistedDayWrap: no record for \(dateStr)")
             return
         }
-
-        Logger.info("loadPersistedStubs: found record for \(dateStr), daySummary=\(record.daySummary != nil ? "present" : "nil")")
-        greetingContext = record.greetingContext.isEmpty ? nil : record.greetingContext
-        daySummaryContent = record.daySummary
-
-        // Only load suggested questions for today — chat overlay should always reflect current context
-        if isViewingToday {
-            if let data = record.questionsJson.data(using: .utf8),
-               let questions = try? JSONSerialization.jsonObject(with: data) as? [String] {
-                suggestedQuestions = questions
-            }
-        }
-
-        // Load persisted day wrap metrics
-        persistedFocusTime = record.focusTimeSeconds.map { TimeInterval($0) }
-        persistedMeetingTime = record.meetingTimeSeconds.map { TimeInterval($0) }
-        persistedProjectCount = record.projectCount
-
-        // Mark as already loaded so auto-generate doesn't fire
-        if daySummaryContent != nil {
-            hasAttemptedStubsGeneration = true
-            lastStubsTaskFingerprint = currentStubsFingerprint
-            lastStubsGenerationTime = record.generatedAt
+        Logger.info("loadPersistedDayWrap: found record for \(dateStr), summary=\(wrap.summary != nil ? "present" : "nil")")
+        if let s = wrap.summary?.trimmingCharacters(in: .whitespacesAndNewlines), !s.isEmpty {
+            daySummaryText = s
         }
     }
 
@@ -1056,9 +920,6 @@ final class DashboardViewModel {
         granolaMeetings = []
         projectActivities = []
         timelineItems = []
-        greetingContext = nil
-        daySummaryContent = nil
-        suggestedQuestions = []
         chatThreads = []
         activeThreadId = nil
         chatMessages = []

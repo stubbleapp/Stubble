@@ -42,7 +42,7 @@ public class DatabaseReader: @preconcurrency KnowledgeGraphStore {
     }
 
     /// Current schema version. Bump this when adding new migrations.
-    private static let schemaVersion = 16
+    private static let schemaVersion = 18
 
     /// Apply schema migrations so the dashboard works even if the CLI hasn't run yet.
     /// Uses PRAGMA user_version to track which migrations have already run.
@@ -458,6 +458,65 @@ public class DatabaseReader: @preconcurrency KnowledgeGraphStore {
             }
             sqlite3_exec(db, "CREATE INDEX IF NOT EXISTS idx_knowledge_edges_source ON knowledge_edges(source_id)", nil, nil, nil)
             sqlite3_exec(db, "CREATE INDEX IF NOT EXISTS idx_knowledge_edges_target ON knowledge_edges(target_id)", nil, nil, nil)
+        }
+
+        if currentVersion < 17 {
+            // Day wrap + narrative: dedicated table (Stubs UI removed; stubs_content kept for legacy MCP/backfill).
+            let dayWrapSql = """
+            CREATE TABLE IF NOT EXISTS day_wrap (
+                date                   TEXT PRIMARY KEY,
+                summary                TEXT,
+                focus_time_seconds     INTEGER,
+                meeting_time_seconds   INTEGER,
+                project_count          INTEGER,
+                updated_at             TEXT NOT NULL
+            )
+            """
+            guard execMigration(dayWrapSql, label: "17a: create day_wrap table") else {
+                Logger.error("Migration 17a failed — stopping migrations")
+                return
+            }
+
+            let backfillSql = """
+            INSERT OR REPLACE INTO day_wrap (date, summary, focus_time_seconds, meeting_time_seconds, project_count, updated_at)
+            SELECT date,
+                   NULLIF(trim(day_summary), ''),
+                   focus_time_seconds,
+                   meeting_time_seconds,
+                   project_count,
+                   generated_at
+            FROM stubs_content
+            WHERE (day_summary IS NOT NULL AND length(trim(day_summary)) > 0)
+               OR focus_time_seconds IS NOT NULL
+               OR meeting_time_seconds IS NOT NULL
+               OR project_count IS NOT NULL
+            """
+            guard execMigration(backfillSql, label: "17b: backfill day_wrap from stubs_content") else {
+                Logger.error("Migration 17b failed — stopping migrations")
+                return
+            }
+        }
+
+        if currentVersion < 18 {
+            // Window geometry snapshots — captures z-order, position, and size of visible windows
+            let windowSnapshotsSql = """
+            CREATE TABLE IF NOT EXISTS window_snapshots (
+                id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                timestamp       TEXT NOT NULL,
+                activity_id     INTEGER,
+                display_width   INTEGER NOT NULL,
+                display_height  INTEGER NOT NULL,
+                window_count    INTEGER NOT NULL,
+                layout_json     TEXT NOT NULL,
+                FOREIGN KEY (activity_id) REFERENCES activities(id)
+            )
+            """
+            guard execMigration(windowSnapshotsSql, label: "18a: create window_snapshots table") else {
+                Logger.error("Migration 18a failed — stopping migrations")
+                return
+            }
+            sqlite3_exec(db, "CREATE INDEX IF NOT EXISTS idx_window_snapshots_timestamp ON window_snapshots(timestamp)", nil, nil, nil)
+            sqlite3_exec(db, "CREATE INDEX IF NOT EXISTS idx_window_snapshots_activity ON window_snapshots(activity_id)", nil, nil, nil)
         }
 
         // All migrations succeeded — bump the version
@@ -1095,6 +1154,142 @@ public class DatabaseReader: @preconcurrency KnowledgeGraphStore {
         )
     }
 
+    // MARK: - Day Wrap (timeline narrative + metrics)
+
+    /// Row from `day_wrap` only.
+    public func dayWrap(for date: Date) -> DayWrapRecord? {
+        let dateStr = SharedFormatters.dayFormatter.string(from: date)
+        let sql = """
+        SELECT date, summary, focus_time_seconds, meeting_time_seconds, project_count, updated_at
+        FROM day_wrap
+        WHERE date = ?
+        LIMIT 1
+        """
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return nil }
+        defer { sqlite3_finalize(stmt) }
+        sqliteBindText(stmt, 1, dateStr)
+        guard sqlite3_step(stmt) == SQLITE_ROW else { return nil }
+
+        let summaryRaw = sqlite3_column_text(stmt, 1).map { String(cString: $0) }
+        let summaryTrimmed = summaryRaw?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let summary: String? = (summaryTrimmed?.isEmpty == false) ? summaryTrimmed : nil
+
+        return DayWrapRecord(
+            date: sqlite3_column_text(stmt, 0).map({ String(cString: $0) }) ?? dateStr,
+            summary: summary,
+            focusTimeSeconds: sqlite3_column_type(stmt, 2) != SQLITE_NULL ? Int(sqlite3_column_int(stmt, 2)) : nil,
+            meetingTimeSeconds: sqlite3_column_type(stmt, 3) != SQLITE_NULL ? Int(sqlite3_column_int(stmt, 3)) : nil,
+            projectCount: sqlite3_column_type(stmt, 4) != SQLITE_NULL ? Int(sqlite3_column_int(stmt, 4)) : nil,
+            updatedAt: sqlite3_column_text(stmt, 5).flatMap({ SharedFormatters.iso8601.date(from: String(cString: $0)) }) ?? Date()
+        )
+    }
+
+    /// Prefer `day_wrap`; fall back to legacy `stubs_content` for older databases.
+    public func timelineDayWrap(for date: Date) -> DayWrapRecord? {
+        if let row = dayWrap(for: date) {
+            let hasSummary = row.summary.map { !$0.isEmpty } ?? false
+            let hasMetrics = row.focusTimeSeconds != nil || row.meetingTimeSeconds != nil || row.projectCount != nil
+            if hasSummary || hasMetrics { return row }
+        }
+        guard let stubs = stubsContent(for: date) else { return nil }
+        let s = stubs.daySummary?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let summary: String? = (s?.isEmpty == false) ? s : nil
+        let legacy = DayWrapRecord(
+            date: stubs.date,
+            summary: summary,
+            focusTimeSeconds: stubs.focusTimeSeconds,
+            meetingTimeSeconds: stubs.meetingTimeSeconds,
+            projectCount: stubs.projectCount,
+            updatedAt: stubs.generatedAt
+        )
+        let hasLegacySummary = legacy.summary.map { !$0.isEmpty } ?? false
+        let hasLegacyMetrics = legacy.focusTimeSeconds != nil || legacy.meetingTimeSeconds != nil || legacy.projectCount != nil
+        if hasLegacySummary || hasLegacyMetrics { return legacy }
+        return nil
+    }
+
+    // MARK: - Window Snapshots
+
+    /// Fetch window snapshots for a date range.
+    public func windowSnapshots(from start: Date, to end: Date, limit: Int = 100) -> [WindowSnapshot] {
+        let startStr = SharedFormatters.iso8601.string(from: start)
+        let endStr = SharedFormatters.iso8601.string(from: end)
+        let sql = """
+        SELECT timestamp, display_width, display_height, layout_json
+        FROM window_snapshots
+        WHERE timestamp >= ? AND timestamp < ?
+        ORDER BY timestamp ASC
+        LIMIT ?
+        """
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return [] }
+        defer { sqlite3_finalize(stmt) }
+
+        sqliteBindText(stmt, 1, startStr)
+        sqliteBindText(stmt, 2, endStr)
+        sqlite3_bind_int(stmt, 3, Int32(limit))
+
+        var results: [WindowSnapshot] = []
+        let decoder = JSONDecoder()
+
+        while sqlite3_step(stmt) == SQLITE_ROW {
+            guard let ts = sqlite3_column_text(stmt, 0).flatMap({ SharedFormatters.iso8601.date(from: String(cString: $0)) }),
+                  let layoutJson = sqlite3_column_text(stmt, 3).map({ String(cString: $0) }),
+                  let layoutData = layoutJson.data(using: .utf8),
+                  let windows = try? decoder.decode([WindowInfo].self, from: layoutData) else {
+                continue
+            }
+
+            let displayWidth = Int(sqlite3_column_int(stmt, 1))
+            let displayHeight = Int(sqlite3_column_int(stmt, 2))
+
+            results.append(WindowSnapshot(
+                timestamp: ts,
+                windows: windows,
+                displayWidth: displayWidth,
+                displayHeight: displayHeight
+            ))
+        }
+        return results
+    }
+
+    /// Fetch window layout summaries for a date (lightweight, for prompt context).
+    public func windowLayoutSummaries(for date: Date) -> [WindowLayoutSummary] {
+        let range = dateRange(for: date)
+        guard let start = SharedFormatters.iso8601.date(from: range.start),
+              let end = SharedFormatters.iso8601.date(from: range.end) else { return [] }
+        return windowSnapshots(from: start, to: end).map { WindowLayoutSummary(from: $0) }
+    }
+
+    /// Get the most recent window snapshot (useful for current context).
+    public func latestWindowSnapshot() -> WindowSnapshot? {
+        let sql = """
+        SELECT timestamp, display_width, display_height, layout_json
+        FROM window_snapshots
+        ORDER BY timestamp DESC
+        LIMIT 1
+        """
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return nil }
+        defer { sqlite3_finalize(stmt) }
+
+        guard sqlite3_step(stmt) == SQLITE_ROW,
+              let ts = sqlite3_column_text(stmt, 0).flatMap({ SharedFormatters.iso8601.date(from: String(cString: $0)) }),
+              let layoutJson = sqlite3_column_text(stmt, 3).map({ String(cString: $0) }),
+              let layoutData = layoutJson.data(using: .utf8),
+              let windows = try? JSONDecoder().decode([WindowInfo].self, from: layoutData) else {
+            return nil
+        }
+
+        return WindowSnapshot(
+            timestamp: ts,
+            windows: windows,
+            displayWidth: Int(sqlite3_column_int(stmt, 1)),
+            displayHeight: Int(sqlite3_column_int(stmt, 2))
+        )
+    }
+
     // MARK: - App Name → Bundle ID Mapping
 
     /// Returns a dictionary mapping app display names to bundle identifiers.
@@ -1214,6 +1409,7 @@ public class DatabaseReader: @preconcurrency KnowledgeGraphStore {
         sqlite3_exec(db, "DELETE FROM chat_messages", nil, nil, nil)
         sqlite3_exec(db, "DELETE FROM chat_threads", nil, nil, nil)
         sqlite3_exec(db, "DELETE FROM stubs_content", nil, nil, nil)
+        sqlite3_exec(db, "DELETE FROM day_wrap", nil, nil, nil)
         sqlite3_exec(db, "DELETE FROM ocr_digests", nil, nil, nil)
         sqlite3_exec(db, "DELETE FROM file_events", nil, nil, nil)
         sqlite3_exec(db, "DELETE FROM habits_analysis", nil, nil, nil)
@@ -1221,7 +1417,7 @@ public class DatabaseReader: @preconcurrency KnowledgeGraphStore {
         sqlite3_exec(db, "DELETE FROM knowledge_nodes", nil, nil, nil)
         sqlite3_exec(db, "DELETE FROM knowledge_edges", nil, nil, nil)
 
-        Logger.info("Cleared all data from 14 tables (\(paths.count) screenshot files)")
+        Logger.info("Cleared all data from core tables (\(paths.count) screenshot files)")
         return paths
     }
 

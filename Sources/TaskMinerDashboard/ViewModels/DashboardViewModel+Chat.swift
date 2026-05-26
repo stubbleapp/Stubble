@@ -355,7 +355,7 @@ extension DashboardViewModel {
         - "What did I work on" / tasks → query_tasks (use limit 40 if the day was busy) \
         - Projects → get_projects \
         - Schedule / order of the day → get_timeline \
-        - Quick stats + optional narrative text from Stubs → get_day_summary \
+        - Quick stats + optional persisted day narrative → get_day_summary \
         - Keyword search → search_activities \
         \
         Answer quality: \
@@ -541,8 +541,9 @@ extension DashboardViewModel {
             lines.append("### \(dateLabel)")
 
             // Load persisted day summary if available
-            if let stubsContent = db.stubsContent(for: date),
-               let daySummary = stubsContent.daySummary, !daySummary.isEmpty {
+            if let wrap = db.timelineDayWrap(for: date),
+               let daySummary = wrap.summary?.trimmingCharacters(in: .whitespacesAndNewlines),
+               !daySummary.isEmpty {
                 lines.append("Summary: \(daySummary)")
             }
 

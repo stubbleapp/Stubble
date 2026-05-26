@@ -86,7 +86,7 @@ class DatabaseManager: KnowledgeGraphStore {
     }
 
     /// Current schema version — kept in sync with DatabaseReader's migrations.
-    private static let schemaVersion = 16
+    private static let schemaVersion = 18
 
     private func runMigrations() {
         let currentVersion = getUserVersion()
@@ -471,6 +471,65 @@ class DatabaseManager: KnowledgeGraphStore {
             sqlite3_exec(db, "CREATE INDEX IF NOT EXISTS idx_knowledge_edges_target ON knowledge_edges(target_id)", nil, nil, nil)
         }
 
+        if currentVersion < 17 {
+            let dayWrapSql = """
+            CREATE TABLE IF NOT EXISTS day_wrap (
+                date                   TEXT PRIMARY KEY,
+                summary                TEXT,
+                focus_time_seconds     INTEGER,
+                meeting_time_seconds   INTEGER,
+                project_count          INTEGER,
+                updated_at             TEXT NOT NULL
+            )
+            """
+            if !execMigration(dayWrapSql, label: "17a: create day_wrap table") {
+                migrationFailed = true
+            }
+
+            let backfillSql = """
+            INSERT OR REPLACE INTO day_wrap (date, summary, focus_time_seconds, meeting_time_seconds, project_count, updated_at)
+            SELECT date,
+                   NULLIF(trim(day_summary), ''),
+                   focus_time_seconds,
+                   meeting_time_seconds,
+                   project_count,
+                   generated_at
+            FROM stubs_content
+            WHERE (day_summary IS NOT NULL AND length(trim(day_summary)) > 0)
+               OR focus_time_seconds IS NOT NULL
+               OR meeting_time_seconds IS NOT NULL
+               OR project_count IS NOT NULL
+            """
+            if !execMigration(backfillSql, label: "17b: backfill day_wrap from stubs_content") {
+                migrationFailed = true
+            }
+        }
+
+        if currentVersion < 18 {
+            // Window geometry snapshots — captures z-order, position, and size of visible windows
+            let windowSnapshotsSql = """
+            CREATE TABLE IF NOT EXISTS window_snapshots (
+                id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                timestamp       TEXT NOT NULL,
+                activity_id     INTEGER,
+                display_width   INTEGER NOT NULL,
+                display_height  INTEGER NOT NULL,
+                window_count    INTEGER NOT NULL,
+                layout_json     TEXT NOT NULL,
+                FOREIGN KEY (activity_id) REFERENCES activities(id)
+            )
+            """
+            if !execMigration(windowSnapshotsSql, label: "18a: create window_snapshots table") {
+                migrationFailed = true
+            }
+            if sqlite3_exec(db, "CREATE INDEX IF NOT EXISTS idx_window_snapshots_timestamp ON window_snapshots(timestamp)", nil, nil, nil) != SQLITE_OK {
+                Logger.warning("Failed to create idx_window_snapshots_timestamp index")
+            }
+            if sqlite3_exec(db, "CREATE INDEX IF NOT EXISTS idx_window_snapshots_activity ON window_snapshots(activity_id)", nil, nil, nil) != SQLITE_OK {
+                Logger.warning("Failed to create idx_window_snapshots_activity index")
+            }
+        }
+
         // Only bump the version if all migrations succeeded — failed migrations
         // will be retried on the next launch.
         if migrationFailed {
@@ -651,6 +710,65 @@ class DatabaseManager: KnowledgeGraphStore {
         if sqlite3_step(stmt) == SQLITE_DONE {
             let deleted = sqlite3_changes(db)
             if deleted > 0 { Logger.info("Deleted \(deleted) file event(s) older than \(days) days") }
+        }
+    }
+
+    // MARK: - Window Snapshots
+
+    /// Insert a window geometry snapshot.
+    @discardableResult
+    func insertWindowSnapshot(_ snapshot: WindowSnapshot, activityId: Int64?) -> Int64? {
+        guard db != nil else { return nil }
+
+        // Serialize window info to JSON
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = .sortedKeys
+        guard let layoutData = try? encoder.encode(snapshot.windows),
+              let layoutJson = String(data: layoutData, encoding: .utf8) else {
+            Logger.warning("Failed to encode window snapshot layout")
+            return nil
+        }
+
+        let sql = """
+        INSERT INTO window_snapshots (timestamp, activity_id, display_width, display_height, window_count, layout_json)
+        VALUES (?, ?, ?, ?, ?, ?)
+        """
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
+            Logger.warning("Failed to prepare window snapshot insert: \(lastError)")
+            return nil
+        }
+        defer { sqlite3_finalize(stmt) }
+
+        let ts = SharedFormatters.iso8601.string(from: snapshot.timestamp)
+        sqliteBindText(stmt, 1, ts)
+        if let aid = activityId { sqlite3_bind_int64(stmt, 2, aid) } else { sqlite3_bind_null(stmt, 2) }
+        sqlite3_bind_int(stmt, 3, Int32(snapshot.displayWidth))
+        sqlite3_bind_int(stmt, 4, Int32(snapshot.displayHeight))
+        sqlite3_bind_int(stmt, 5, Int32(snapshot.windows.count))
+        sqliteBindText(stmt, 6, layoutJson)
+
+        guard sqlite3_step(stmt) == SQLITE_DONE else {
+            Logger.warning("Failed to insert window snapshot: \(lastError)")
+            return nil
+        }
+
+        return sqlite3_last_insert_rowid(db)
+    }
+
+    /// Prune window snapshots older than the given number of days.
+    func deleteWindowSnapshotsOlderThan(days: Int) {
+        guard db != nil else { return }
+        guard let cutoff = Calendar.current.date(byAdding: .day, value: -days, to: Date()) else { return }
+        let cutoffStr = SharedFormatters.iso8601.string(from: cutoff)
+        let sql = "DELETE FROM window_snapshots WHERE timestamp < ?"
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return }
+        defer { sqlite3_finalize(stmt) }
+        sqliteBindText(stmt, 1, cutoffStr)
+        if sqlite3_step(stmt) == SQLITE_DONE {
+            let deleted = sqlite3_changes(db)
+            if deleted > 0 { Logger.info("Deleted \(deleted) window snapshot(s) older than \(days) days") }
         }
     }
 

@@ -73,12 +73,6 @@ final class SettingsManager {
         set { store?.wizardPage = newValue }
     }
 
-    /// Hour (0-23) at which the current day switches to "Day Wrap" view.
-    var dayWrapHour: Int {
-        get { store?.dayWrapHour ?? 18 }
-        set { store?.dayWrapHour = newValue }
-    }
-
     // MARK: - MCP Settings
 
     var mcpEnabled: Bool {

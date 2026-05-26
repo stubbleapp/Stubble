@@ -8,12 +8,8 @@ struct ChatOverlayView: View {
     @State private var inputText = ""
     @State private var isExpanded = false
 
-    /// AI-generated suggestions preferred, with static fallback.
     private var activeSuggestions: [String] {
-        if !viewModel.suggestedQuestions.isEmpty {
-            return viewModel.suggestedQuestions
-        }
-        return [
+        [
             "Describe my day",
             "What did I work on?",
             "Summarize my projects",

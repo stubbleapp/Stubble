@@ -189,47 +189,25 @@ struct TaskTimelineView: View {
                 } else {
                 // Task list — keep visible during regeneration
                 ScrollView {
-                    // Day wrapped (past days or today after wrap hour)
-                    if viewModel.shouldShowDayWrap {
-                        DayWrapCard(
-                            focusTime: viewModel.displayFocusTime,
-                            projectCount: viewModel.displayProjectCount,
-                            meetingTime: viewModel.displayMeetingTime,
-                            summaryText: viewModel.daySummaryContent ?? viewModel.daySummaryText,
-                            topApps: viewModel.topAppsByDuration,
-                            projectActivities: viewModel.projectActivities
-                        )
-                        .redacted(reason: viewModel.isGeneratingSummary ? .placeholder : [])
-                        .shimmer(active: viewModel.isGeneratingSummary)
-                        .padding(.horizontal, 24)
-                        .padding(.bottom, 16)
-                    } else if !viewModel.projectActivities.isEmpty {
-                        // Today before wrap hour - simple project list
+                    if !viewModel.projectActivities.isEmpty {
                         DaySummaryCardView(
                             tasks: viewModel.tasks,
                             aiSummary: viewModel.daySummaryText,
-                            daySummaryContent: viewModel.daySummaryContent,
                             projectActivities: viewModel.projectActivities
                         )
                         .redacted(reason: viewModel.isGeneratingSummary ? .placeholder : [])
                         .shimmer(active: viewModel.isGeneratingSummary)
                         .padding(.horizontal, 24)
                         .padding(.bottom, 16)
-                    }
-
-                    // Activity legend (only show when there's no summary card above)
-                    // Skip if DayWrapCard or DaySummaryCardView is shown — they already display project activities
-                    if !viewModel.shouldShowDayWrap && viewModel.projectActivities.isEmpty && !viewModel.top3Activities.isEmpty {
+                    } else if !viewModel.top3Activities.isEmpty {
                         ActivityLegendView(activities: viewModel.top3Activities)
                             .padding(.horizontal, 24)
                             .padding(.bottom, 8)
                     }
 
-                    // Timeline - collapsed when day is wrapped, expanded otherwise
                     TimelineSection(
                         items: viewModel.timelineItems,
-                        viewModel: viewModel,
-                        isCollapsedByDefault: viewModel.shouldShowDayWrap
+                        viewModel: viewModel
                     )
                     .redacted(reason: viewModel.isGeneratingSummary ? .placeholder : [])
                     .shimmer(active: viewModel.isGeneratingSummary)
@@ -248,78 +226,28 @@ struct TaskTimelineView: View {
     }
 }
 
-/// Collapsible timeline section - collapsed by default for past days.
+/// Timeline section — always expanded.
 struct TimelineSection: View {
     let items: [TimelineItem]
     let viewModel: DashboardViewModel
-    let isCollapsedByDefault: Bool
-
-    @State private var isExpanded: Bool = true
 
     var body: some View {
-        VStack(spacing: 0) {
-            // Collapse/expand header for past days
-            if isCollapsedByDefault {
-                Button {
-                    withAnimation(.easeInOut(duration: 0.2)) {
-                        isExpanded.toggle()
-                    }
-                } label: {
-                    HStack(spacing: 6) {
-                        Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
-                            .font(.system(size: 10, weight: .semibold))
-                            .foregroundStyle(Theme.textMuted)
-
-                        Text("Timeline")
-                            .font(.system(size: 12, weight: .medium))
-                            .foregroundStyle(Theme.textSecondary)
-
-                        Text("(\(items.count) items)")
-                            .font(.system(size: 11))
-                            .foregroundStyle(Theme.textMuted)
-
-                        Spacer()
-                    }
-                    .padding(.vertical, 8)
-                    .contentShape(Rectangle())
+        LazyVStack(spacing: 0) {
+            ForEach(Array(items.enumerated()), id: \.element.id) { index, item in
+                switch item {
+                case .task(let task, _, _):
+                    TaskCardView(
+                        task: task,
+                        activityColumns: items.activityColumns(at: index, viewModel: viewModel)
+                    )
+                case .gap(_, let startTime, let endTime, let duration):
+                    IdleGapView(
+                        startTime: startTime,
+                        endTime: endTime,
+                        duration: duration,
+                        gapColumns: items.gapColumns(at: index, viewModel: viewModel)
+                    )
                 }
-                .buttonStyle(.plain)
-            }
-
-            // Timeline items
-            if isExpanded || !isCollapsedByDefault {
-                LazyVStack(spacing: 0) {
-                    ForEach(Array(items.enumerated()), id: \.element.id) { index, item in
-                        switch item {
-                        case .task(let task, _, _):
-                            TaskCardView(
-                                task: task,
-                                activityColumns: items.activityColumns(at: index, viewModel: viewModel)
-                            )
-                        case .gap(_, let startTime, let endTime, let duration):
-                            IdleGapView(
-                                startTime: startTime,
-                                endTime: endTime,
-                                duration: duration,
-                                gapColumns: items.gapColumns(at: index, viewModel: viewModel)
-                            )
-                        }
-                    }
-                }
-            }
-        }
-        .onAppear {
-            // Start collapsed for past days
-            if isCollapsedByDefault {
-                isExpanded = false
-            }
-        }
-        .onChange(of: isCollapsedByDefault) { _, newValue in
-            // Reset collapse state when switching between today and past days
-            if newValue {
-                isExpanded = false
-            } else {
-                isExpanded = true
             }
         }
     }

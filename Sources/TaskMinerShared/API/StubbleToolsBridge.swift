@@ -292,7 +292,7 @@ public final class StubbleToolsBridge: @unchecked Sendable {
     }
 
     private func getDaySummary(date: Date) async -> String {
-        let stubsContent = await MainActor.run { dbReader.stubsContent(for: date) }
+        let dayWrap = await MainActor.run { dbReader.timelineDayWrap(for: date) }
         let tasks = await MainActor.run { dbReader.tasks(for: date) }
         let activities = await MainActor.run { dbReader.activities(for: date) }
         let projects = await MainActor.run { dbReader.projectActivities(for: date) }
@@ -350,7 +350,7 @@ public final class StubbleToolsBridge: @unchecked Sendable {
             "projects_preview": projectPreview
         ]
 
-        if let summary = stubsContent?.daySummary, !summary.isEmpty {
+        if let summary = dayWrap?.summary?.trimmingCharacters(in: .whitespacesAndNewlines), !summary.isEmpty {
             result["summary"] = summary
         }
 

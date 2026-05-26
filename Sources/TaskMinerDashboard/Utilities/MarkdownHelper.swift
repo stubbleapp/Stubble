@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// Shared markdown rendering utilities for day summaries and stubs content.
+/// Shared markdown rendering utilities for day summaries and timeline narrative text.
 enum MarkdownHelper {
 
     // Precompiled regex patterns (avoid recompilation on every render)

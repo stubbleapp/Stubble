@@ -339,7 +339,7 @@ final class MenuBarDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(NSMenuItem.separator())
 
         // Suggested chats (top 3 questions)
-        let questions = loadSuggestedQuestions()
+        let questions = Self.defaultMenuBarChatQuestions
         if !questions.isEmpty {
             // Header (disabled, as a label)
             let headerItem = NSMenuItem(title: "Ask Stubble", action: nil, keyEquivalent: "")
@@ -460,25 +460,13 @@ final class MenuBarDelegate: NSObject, NSApplicationDelegate {
         openApp()
     }
 
-    /// Load suggested questions from today's stubs content in the database.
-    private func loadSuggestedQuestions() -> [String] {
-        guard let config = try? SharedConfiguration(),
-              let dbReader = try? DatabaseReader(path: config.databasePath) else {
-            return []
-        }
-
-        guard let record = dbReader.stubsContent(for: Date()) else {
-            return []
-        }
-
-        // Parse JSON array of questions
-        guard let data = record.questionsJson.data(using: String.Encoding.utf8),
-              let questions = try? JSONDecoder().decode([String].self, from: data) else {
-            return []
-        }
-
-        return questions
-    }
+    private static let defaultMenuBarChatQuestions: [String] = [
+        "Describe my day",
+        "What did I work on?",
+        "Summarize my projects",
+        "Show time by app",
+        "Any tips for tomorrow?"
+    ]
 }
 
 // MARK: - Notifications

@@ -15,6 +15,7 @@ class AppDelegate {
     private let fileActivityMonitor: FileActivityMonitor
     private let calendarMonitor: CalendarMonitor
     private let granolaMeetingMonitor: GranolaMeetingMonitor
+    private let windowGeometryCapture: WindowGeometryCapture
     private var mediaActivityDetector: MediaActivityDetector?
     /// Lazy-initialized so the daemon defers AI setup until first summarization.
     /// Requires signed-in user with valid subscription for proxy mode.
@@ -61,6 +62,7 @@ class AppDelegate {
         self.fileActivityMonitor = FileActivityMonitor()
         self.calendarMonitor = CalendarMonitor()
         self.granolaMeetingMonitor = GranolaMeetingMonitor()
+        self.windowGeometryCapture = WindowGeometryCapture()
     }
 
     func start() {
@@ -579,6 +581,11 @@ class AppDelegate {
         }
 
         let capturedActivityId = currentActivityId
+
+        // Capture window geometry alongside screenshot (synchronous, fast)
+        if let snapshot = windowGeometryCapture.captureSnapshot() {
+            db.insertWindowSnapshot(snapshot, activityId: capturedActivityId)
+        }
 
         // Update timestamp synchronously to prevent duplicate captures while
         // the background queue is still processing OCR + JPEG save.

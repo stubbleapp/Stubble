@@ -727,4 +727,103 @@ final class DatabaseRoundTripTests: XCTestCase {
         let loaded = reader.stubsContent(for: date)
         XCTAssertNil(loaded)
     }
+
+    // MARK: - Day Wrap
+
+    @MainActor
+    func testDayWrapWriteAndRead() throws {
+        let reader = try createSchema()
+        let writer = try TaskWriter(path: dbPath)
+
+        let updated = Date()
+        let record = DayWrapRecord(
+            date: "2025-03-15",
+            summary: "Shipped the timeline fix.",
+            focusTimeSeconds: 42,
+            meetingTimeSeconds: 1800,
+            projectCount: 3,
+            updatedAt: updated
+        )
+        try writer.insertOrReplaceDayWrap(record)
+
+        let df = DateFormatter()
+        df.dateFormat = "yyyy-MM-dd"
+        df.locale = Locale(identifier: "en_US_POSIX")
+        let date = df.date(from: "2025-03-15")!
+
+        let loaded = reader.dayWrap(for: date)
+        XCTAssertNotNil(loaded)
+        XCTAssertEqual(loaded?.summary, "Shipped the timeline fix.")
+        XCTAssertEqual(loaded?.focusTimeSeconds, 42)
+        XCTAssertEqual(loaded?.meetingTimeSeconds, 1800)
+        XCTAssertEqual(loaded?.projectCount, 3)
+
+        let viaTimeline = reader.timelineDayWrap(for: date)
+        XCTAssertEqual(viaTimeline?.summary, "Shipped the timeline fix.")
+    }
+
+    // MARK: - Window Snapshots
+
+    @MainActor
+    func testWindowSnapshotWriteAndRead() throws {
+        let reader = try createSchema()
+        let writer = try TaskWriter(path: dbPath)
+
+        let now = Date()
+        let windows = [
+            WindowInfo(
+                windowId: 1,
+                appName: "Xcode",
+                bundleId: "com.apple.dt.Xcode",
+                pid: 12345,
+                title: "MyProject.swift",
+                layer: 0,
+                x: 0,
+                y: 0,
+                width: 960,  // Half screen (side-by-side)
+                height: 1080,
+                isOnScreen: true,
+                alpha: 1.0
+            ),
+            WindowInfo(
+                windowId: 2,
+                appName: "Safari",
+                bundleId: "com.apple.Safari",
+                pid: 12346,
+                title: "Apple Developer",
+                layer: 0,
+                x: 960,
+                y: 0,
+                width: 960,  // Half screen (side-by-side)
+                height: 1080,
+                isOnScreen: true,
+                alpha: 1.0
+            )
+        ]
+
+        let snapshot = WindowSnapshot(
+            timestamp: now,
+            windows: windows,
+            displayWidth: 1920,
+            displayHeight: 1080
+        )
+
+        try writer.insertWindowSnapshot(snapshot, activityId: nil)
+
+        // Query back
+        let start = now.addingTimeInterval(-60)
+        let end = now.addingTimeInterval(60)
+        let loaded = reader.windowSnapshots(from: start, to: end)
+
+        XCTAssertEqual(loaded.count, 1)
+        XCTAssertEqual(loaded.first?.windows.count, 2)
+        XCTAssertEqual(loaded.first?.displayWidth, 1920)
+        XCTAssertEqual(loaded.first?.windows.first?.appName, "Xcode")
+
+        // Test layout summary
+        let summary = WindowLayoutSummary(from: loaded.first!)
+        XCTAssertEqual(summary.activeApp, "Xcode")
+        XCTAssertEqual(summary.visibleWindowCount, 2)
+        XCTAssertTrue(summary.hasSideBySide)
+    }
 }
